@@ -9,6 +9,7 @@
   --app-pad: clamp(6px, 0.9vh, 10px);
   --card-pad: clamp(7px, 0.95vh, 12px);
   --compact-control: clamp(30px, 4.2vh, 38px);
+  --desktop-sidebar-width: clamp(188px, 18vw, 214px);
 }
 
 .app-frame {
@@ -24,12 +25,13 @@
 
 .topbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 0 10px;
   border-bottom: 1px solid #d7dbd2;
   background: #fbfcf7;
+  min-width: 0;
 }
 
 .brand,
@@ -48,7 +50,8 @@
 
 .brand {
   gap: 8px;
-  min-width: 200px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .brand__mark,
@@ -67,6 +70,15 @@
   align-items: flex-start;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
+}
+
+.brand strong,
+.brand small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .brand strong,
@@ -91,6 +103,8 @@
 .quick-actions {
   justify-content: center;
   gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .quick-action,
@@ -127,6 +141,8 @@
 .topbar-actions {
   justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .topbar-action {
@@ -141,6 +157,13 @@
   background: #ffffff;
   color: #263438;
   font-weight: 700;
+  max-width: 100%;
+}
+
+.topbar-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-action--icon {
@@ -166,7 +189,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: 214px minmax(0, 1fr);
+  grid-template-columns: var(--desktop-sidebar-width) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -362,6 +385,16 @@
   justify-content: space-between;
   gap: 10px;
   min-height: 36px;
+  flex-wrap: wrap;
+}
+
+.content__top > :first-child {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.content__top > :not(:first-child) {
+  flex: 0 1 auto;
 }
 
 .content__top h1 {
@@ -435,7 +468,7 @@
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: calc(var(--app-gap) - 2px);
 }
 
@@ -464,15 +497,22 @@
 }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
+.toolbar > * {
+  min-width: 0;
+}
+
 .segmented {
   display: flex;
+  flex: 0 1 auto;
   height: 32px;
+  max-width: 100%;
   padding: 2px;
   border: 1px solid #d3d9d0;
   border-radius: 6px;
@@ -497,9 +537,11 @@
   border-color: #d3d9d0;
   background: #ffffff;
   color: #59686b;
+  flex: 1 1 220px;
 }
 
 .toolbar-actions {
+  flex: 1 1 240px;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -518,7 +560,7 @@
 
 .operations-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 228px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.34fr);
   gap: var(--app-gap);
   min-height: 0;
   overflow: hidden;
@@ -602,7 +644,7 @@
 
 .menu-manager__toolbar {
   display: grid;
-  grid-template-columns: 230px minmax(260px, 1fr) 160px 188px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   align-items: center;
 }
@@ -1271,7 +1313,7 @@
 .module-grid--service,
 .module-grid--marketing,
 .module-grid--finance {
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
 }
 
 .module-card {
@@ -1939,7 +1981,7 @@
   --pos-border-strong: #bdd0de;
   --pos-text: #17303b;
   --pos-text-muted: #5d7380;
-  width: min(1160px, 100%);
+  width: min(1080px, 100%);
   max-height: calc(100dvh - 28px);
   min-width: 0;
   min-height: 0;
@@ -1948,10 +1990,10 @@
 
 .pos-shell__form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 388px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.42fr);
   gap: 8px;
   width: 100%;
-  height: min(700px, calc(100dvh - 28px));
+  height: min(680px, calc(100dvh - 28px));
   min-height: 0;
 }
 
@@ -3377,7 +3419,7 @@
 .modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(560px, calc(100vw - 24px));
+  width: min(540px, calc(100vw - 20px));
   max-height: calc(100dvh - 28px);
   border: 1px solid #d5dbd1;
   border-radius: 8px;
@@ -3387,7 +3429,7 @@
 }
 
 .modal:has(.osm-map) {
-  width: min(900px, calc(100vw - 24px));
+  width: min(840px, calc(100vw - 20px));
 }
 
 .modal__header {
@@ -3412,9 +3454,14 @@
 
 .modal__footer {
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid #e3e6df;
+}
+
+.modal__footer .btn {
+  flex: 1 1 140px;
 }
 
 .form-grid {
@@ -4496,24 +4543,80 @@
 }
 
 @media (max-width: 920px) {
+  .app-frame {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .topbar {
-    grid-template-columns: auto minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
   }
 
   .quick-actions {
+    order: 2;
+    margin-left: auto;
     justify-content: flex-end;
   }
 
   .topbar-actions {
-    display: none;
+    order: 3;
+    display: flex;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .topbar-action {
+    flex: 1 1 132px;
+    justify-content: center;
   }
 
   .workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
-    display: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      'profile store cash'
+      'nav nav nav'
+      'upgrade upgrade upgrade';
+    border-right: 0;
+    border-bottom: 1px solid #233941;
+    overflow: visible;
+  }
+
+  .store-profile { grid-area: profile; }
+
+  .store-card { grid-area: store; }
+
+  .cash-card { grid-area: cash; }
+
+  .sidebar-nav {
+    grid-area: nav;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+  }
+
+  .sidebar-nav__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: max-content;
+    min-height: 36px;
+    white-space: nowrap;
+  }
+
+  .upgrade-card {
+    grid-area: upgrade;
   }
 
   .content {
@@ -4571,9 +4674,7 @@
 }
 
 @media (max-width: 760px) {
-  .app-frame {
-    grid-template-rows: 50px minmax(0, 1fr);
-  }
+  .app-frame { grid-template-rows: auto minmax(0, 1fr); }
 
   .brand {
     min-width: 0;
@@ -4582,6 +4683,38 @@
   .brand small,
   .quick-actions {
     display: none;
+  }
+
+  .topbar {
+    padding: 8px;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .topbar-action {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+
+  .sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      'profile profile'
+      'store cash'
+      'nav nav'
+      'upgrade upgrade';
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .store-profile,
+  .store-card,
+  .cash-card,
+  .upgrade-card {
+    min-height: 44px;
   }
 
   .content {
@@ -4613,7 +4746,7 @@
   }
 
   .metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 6px;
   }
 
@@ -4623,7 +4756,7 @@
   }
 
   .metric-card:nth-child(n + 4) {
-    display: none;
+    display: grid;
   }
 
   .segmented {
@@ -4637,11 +4770,12 @@
 
   .toolbar-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 6px;
   }
 
   .toolbar-actions .btn {
+    width: 100%;
     min-width: 0;
     padding: 0 6px;
     font-size: 12px;
@@ -4672,9 +4806,12 @@
     padding: 8px;
   }
 
-  .order-card__meta,
+  .order-card__meta {
+    display: flex;
+  }
+
   .order-card p {
-    display: none;
+    display: block;
   }
 
   .form-grid {
