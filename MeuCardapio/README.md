@@ -1,16 +1,60 @@
-# React + Vite
+# MeuCardapio Ops
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Painel front-end para operacao local de pedidos, cardapio, entregas, loja, usuarios e configuracoes. Nesta etapa os dados ficam no navegador via `localStorage`.
 
-Currently, two official plugins are available:
+## Rodar Local
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+No primeiro acesso, o app abre o onboarding da loja para cadastrar:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- perfil comercial e fiscal
+- endereco operacional
+- parametros iniciais de atendimento
+- usuario dono da operacao
 
-## Expanding the ESLint configuration
+Depois disso, o login passa a usar o usuario criado no onboarding.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Build
+
+```bash
+npm run build
+npm run preview
+```
+
+O Vite esta configurado com `base: './'`, entao o `dist/` funciona em subpastas como GitHub Pages.
+
+## Deploy Manual No GitHub Pages
+
+1. Rode `npm run deploy`.
+2. O pacote `gh-pages` publica o conteudo de `dist/` na branch `gh-pages`.
+3. No GitHub, abra `Settings > Pages`.
+4. Selecione `Deploy from a branch`.
+5. Escolha a branch `gh-pages` e a pasta `/root`.
+
+Nao ha GitHub Actions neste fluxo. O arquivo `public/.nojekyll` e copiado para o build para evitar processamento do Pages.
+
+## Estrutura
+
+```text
+src/
+  modules/
+    store/
+      StoreAccess.jsx
+      StoreAccess.module.css
+      StoreDeletePrompt.jsx
+      StoreDeletePrompt.module.css
+      StoreProfileForm.jsx
+      StoreProfileForm.module.css
+      storeAuth.js
+      storeProfile.js
+    storage/
+      browserStorage.js
+  App.jsx
+  App.css
+```
+
+O dominio de loja/autenticacao foi separado em `src/modules/store`. O `App.jsx` ainda concentra a aplicacao legada e os proximos recortes naturais continuam sendo `orders`, `delivery`, `menu`, `settings` e `reports`.

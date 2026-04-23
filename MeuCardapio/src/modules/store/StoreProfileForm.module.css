@@ -1,0 +1,215 @@
+.stack {
+  display: grid;
+  gap: 18px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid #d7dee2;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(213, 231, 227, 0.9), transparent 36%),
+    linear-gradient(135deg, #f9fbf7, #eef3ef);
+}
+
+.hero p,
+.sectionHeader p,
+.field span,
+.field small {
+  color: #708086;
+}
+
+.hero p,
+.sectionHeader p {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hero h2,
+.sectionHeader h3 {
+  margin: 0;
+  color: #1f3137;
+}
+
+.hero h2 {
+  font-size: 24px;
+  line-height: 1.02;
+}
+
+.hero strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #16343b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.section {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border: 1px solid #e0e6e2;
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.sectionHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.sectionHeader h3 {
+  font-size: 18px;
+}
+
+.sectionHeader span {
+  color: #5f7076;
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.field small {
+  font-size: 12px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid #d2dce0;
+  border-radius: 12px;
+  background: #fbfcfa;
+  color: #24363c;
+  font: inherit;
+}
+
+.field textarea {
+  min-height: 94px;
+  padding-block: 11px;
+  resize: vertical;
+}
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.modeCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid #d7e0dd;
+  border-radius: 14px;
+  background: #f8fbf8;
+  color: #20343a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modeCard input {
+  width: 18px;
+  height: 18px;
+}
+
+.mapActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mapActions button {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #d0d8de;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #254148;
+  font: inherit;
+  font-weight: 800;
+}
+
+.mapActions .mapActionActive {
+  border-color: #0b84e3;
+  background: #edf6ff;
+  color: #0b68b2;
+}
+
+.mapStatus {
+  padding: 12px 14px;
+  border: 1px solid #d4dbe0;
+  border-radius: 14px;
+  background: #f7faf8;
+  color: #5b6d74;
+  font-size: 13px;
+}
+
+.mapStatusIdle {
+  border-color: #d4dbe0;
+  background: #f7faf8;
+  color: #5b6d74;
+}
+
+.mapStatusLoading {
+  border-color: #eed49a;
+  background: #fff7df;
+  color: #86621a;
+}
+
+.mapStatusSuccess {
+  border-color: #b9dccf;
+  background: #eef8f3;
+  color: #207354;
+}
+
+.mapStatusDanger {
+  border-color: #efcbc4;
+  background: #fff3f0;
+  color: #aa453a;
+}
+
+@media (max-width: 760px) {
+  .hero {
+    flex-direction: column;
+  }
+
+  .grid,
+  .modeGrid {
+    grid-template-columns: 1fr;
+  }
+}

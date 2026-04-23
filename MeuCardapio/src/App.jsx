@@ -1,7 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { StoreAccess } from './modules/store/StoreAccess'
+import { StoreDeletePrompt } from './modules/store/StoreDeletePrompt'
+import { StoreProfileForm } from './modules/store/StoreProfileForm'
+import { STORAGE_KEY } from './modules/storage/browserStorage'
+import {
+  authenticateStoreUser,
+  buildStoreSession,
+  createStoreUser as createStoreUserRecord,
+  normalizeStoreUser,
+} from './modules/store/storeAuth'
+import {
+  buildStoreAddressForGeocoding,
+  createEmptyStoreProfile,
+  isStoreConfigured,
+  normalizeStoreProfile,
+} from './modules/store/storeProfile'
 import './App.css'
 
-const STORAGE_KEY = 'meucardapio-ops-front-v3'
+const NOMINATIM_MIN_INTERVAL_MS = 1100
+const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
+const OSM_TILE_SIZE = 256
+const DELIVERY_ZONE_COLORS = ['#248a72', '#d94f3d', '#0b84e3', '#c28a20', '#7c5cc4', '#4f7d8a']
 
 const stages = [
   { id: 'analysis', title: 'Entrada', action: 'Aceitar', next: 'production', tone: 'coral' },
@@ -15,6 +34,7 @@ const initialOrders = [
     customer: 'Digo',
     phone: '(47) 9 643-0904',
     channel: 'pickup',
+    source: 'Balcao',
     status: 'ready',
     total: 84.99,
     payment: 'Cartao',
@@ -28,9 +48,10 @@ const initialOrders = [
     customer: 'Ana Paula',
     phone: '(47) 9 8811-2400',
     channel: 'delivery',
+    source: 'WhatsApp',
     status: 'production',
     total: 62.8,
-    payment: 'Pix',
+    payment: 'Cartao',
     time: '18:51',
     address: 'Rua das Flores, 120',
     note: 'Sem cebola.',
@@ -41,6 +62,7 @@ const initialOrders = [
     customer: 'Carlos Lima',
     phone: '(47) 9 7701-2010',
     channel: 'pickup',
+    source: 'Instagram',
     status: 'analysis',
     total: 39.9,
     payment: 'Dinheiro',
@@ -77,12 +99,120 @@ const shortcutItems = [
 const blankOrder = {
   customer: '',
   phone: '',
+  address: '',
+  addressId: '',
+  addressLat: '',
+  addressLng: '',
+  deliveryZoneId: '',
+  deliveryZoneName: '',
+  document: '',
   channel: 'pickup',
+  fulfillment: 'pickup',
+  subtotal: '',
+  deliveryFee: '0,00',
   total: '',
-  payment: 'Pix',
-  items: '1 Pizza media',
+  payment: 'Cartao',
+  discountType: 'fixed',
+  discountValue: '',
+  surchargeType: 'fixed',
+  surchargeValue: '',
+  items: '',
   note: '',
 }
+
+const ORDER_PAYMENT_OPTIONS = [
+  { id: 'Cartao', hotkey: 'C', label: 'Cartao', description: 'debito ou credito na maquininha', icon: 'card' },
+  { id: 'Dinheiro', hotkey: 'D', label: 'Dinheiro', description: 'pagamento em especie no balcao', icon: 'cash' },
+  { id: 'Dividir', hotkey: 'R', label: 'Dividir', description: 'combinar formas de pagamento', icon: 'card' },
+]
+
+const ORDER_FULFILLMENT_OPTIONS = [
+  { id: 'delivery', hotkey: 'E', label: 'Entrega (delivery)' },
+  { id: 'pickup', hotkey: 'R', label: 'Retirar no local' },
+  { id: 'dinein', hotkey: 'C', label: 'Consumir no local' },
+]
+
+const blankDeliveryAddress = {
+  cep: '',
+  street: '',
+  number: '',
+  complement: '',
+  district: '',
+  city: '',
+  lat: '',
+  lng: '',
+  mapLabel: '',
+  deliveryZoneId: '',
+  deliveryZoneName: '',
+  deliveryFee: '0,00',
+  deliveryAvailable: false,
+  verifiedAt: '',
+}
+
+const initialOrderAddresses = []
+
+const initialDeliveryZones = [
+  {
+    id: 'zone-centro',
+    name: 'Centro / Praia Alegre',
+    fee: '5,00',
+    active: true,
+    color: '#248a72',
+    polygon: [
+      [-48.6578, -26.7806],
+      [-48.6358, -26.7812],
+      [-48.6349, -26.7664],
+      [-48.6587, -26.7648],
+      [-48.6578, -26.7806],
+    ],
+  },
+  {
+    id: 'zone-armacao',
+    name: 'Armacao / Beto Carrero',
+    fee: '8,00',
+    active: true,
+    color: '#d94f3d',
+    polygon: [
+      [-48.6466, -26.8068],
+      [-48.6206, -26.8075],
+      [-48.6199, -26.7835],
+      [-48.6475, -26.7828],
+      [-48.6466, -26.8068],
+    ],
+  },
+  {
+    id: 'zone-gravata',
+    name: 'Gravata / Santa Lidia',
+    fee: '12,00',
+    active: true,
+    color: '#0b84e3',
+    polygon: [
+      [-48.6768, -26.7577],
+      [-48.6387, -26.7592],
+      [-48.6374, -26.7352],
+      [-48.6759, -26.7318],
+      [-48.6768, -26.7577],
+    ],
+  },
+]
+
+const blankDeliveryZone = {
+  name: '',
+  fee: '0,00',
+  active: 'yes',
+  color: '#248a72',
+  coordinates: '',
+}
+
+const WEEK_DAY_OPTIONS = [
+  { id: 'mon', label: 'Seg' },
+  { id: 'tue', label: 'Ter' },
+  { id: 'wed', label: 'Qua' },
+  { id: 'thu', label: 'Qui' },
+  { id: 'fri', label: 'Sex' },
+  { id: 'sat', label: 'Sab' },
+  { id: 'sun', label: 'Dom' },
+]
 
 const initialCategories = [
   { id: 'cat-pizzas', name: 'Pizzas', active: true },
@@ -92,8 +222,8 @@ const initialCategories = [
 ]
 
 const initialProducts = [
-  { id: 'prod-1', name: 'Pizza grande', category: 'Pizzas', price: 54.9, active: true, stock: 18 },
-  { id: 'prod-2', name: 'Calzone', category: 'Pizzas', price: 38.9, active: true, stock: 11 },
+  { id: 'prod-1', name: 'Pizza grande', category: 'Pizzas', price: 54.9, active: true, stock: 18, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Pizza grande' }) },
+  { id: 'prod-2', name: 'Calzone', category: 'Pizzas', price: 38.9, active: true, stock: 11, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Calzone' }) },
   { id: 'prod-3', name: 'Combo familia', category: 'Combos', price: 89.9, active: true, stock: 7 },
   { id: 'prod-4', name: 'Refrigerante 2L', category: 'Bebidas', price: 13.9, active: true, stock: 24 },
   { id: 'prod-5', name: 'Brownie', category: 'Sobremesas', price: 15.9, active: false, stock: 5 },
@@ -166,7 +296,7 @@ const initialIntegrations = [
   { id: 'ifood', name: 'iFood', active: true, status: 'Sincronizado' },
   { id: 'rappi', name: 'Rappi', active: false, status: 'Desconectado' },
   { id: 'meta', name: 'Meta Ads / Pixel', active: true, status: 'Eventos ativos' },
-  { id: 'payments', name: 'Pagamento online', active: true, status: 'Pix e credito' },
+  { id: 'payments', name: 'Pagamento online', active: true, status: 'cartao e credito' },
 ]
 
 const initialQrCodes = [
@@ -180,11 +310,29 @@ const blankProduct = {
   price: '',
   stock: '10',
   active: true,
+  maxFlavors: '2',
+  availableFrom: '18:00',
+  availableTo: '23:30',
+  availableDays: WEEK_DAY_OPTIONS.map((day) => day.id),
+}
+
+const blankFlavor = {
+  name: '',
+  price: '0,00',
+  active: true,
 }
 
 const blankCategory = {
   name: '',
   active: true,
+}
+
+const blankCartItemForm = {
+  lineId: '',
+  productId: '',
+  qty: '1',
+  flavorIds: [],
+  addonSelections: {},
 }
 
 const blankTable = {
@@ -229,19 +377,7 @@ const initialSettings = {
   lowStockAlert: true,
 }
 
-const initialStoreProfile = {
-  name: 'Tbt Pizzas Penha',
-  owner: 'Deivid Laufer',
-  phone: '(47) 9 9643-0904',
-  email: 'operacao@tbtpizzas.local',
-  taxId: '47.123.456/0001-99',
-  address: 'Rua Principal, 180',
-  city: 'Penha - SC',
-  serviceFee: '0',
-  deliveryRadius: '6',
-  schedule: '18:00 - 23:30',
-  note: 'Retirada e delivery ativos.',
-}
+const initialStoreProfile = createEmptyStoreProfile()
 
 const initialPrinterConfig = {
   connected: true,
@@ -262,6 +398,8 @@ const initialSecurity = {
   lockOnIdle: true,
   lastChange: '16/04/2026 20:40',
 }
+
+const initialStoreUsers = []
 
 const initialBotConfig = {
   welcome: 'Oi, eu sou o atendimento automatico. Posso montar seu pedido pelo cardapio digital.',
@@ -313,15 +451,767 @@ const blankPassword = {
   lockOnIdle: 'yes',
 }
 
-function orderToForm(order) {
+function normalizeOrderPayment(payment) {
+  if (payment === 'Pix') {
+    return 'Cartao'
+  }
+
+  return ORDER_PAYMENT_OPTIONS.some((option) => option.id === payment) || payment === 'Mesa'
+    ? payment
+    : 'Cartao'
+}
+
+function inferOrderFulfillment(order = {}) {
+  if (ORDER_FULFILLMENT_OPTIONS.some((option) => option.id === order.fulfillment)) {
+    return order.fulfillment
+  }
+
+  if (order.channel === 'delivery') {
+    return 'delivery'
+  }
+
+  if (
+    order.payment === 'Mesa'
+    || /^mesa/i.test(order.address || '')
+    || /consumir no local/i.test(order.address || '')
+    || order.source === 'Mesa'
+    || order.source === 'Salao'
+  ) {
+    return 'dinein'
+  }
+
+  return 'pickup'
+}
+
+function resolveOrderSourceForFulfillment(fulfillment, currentSource = '') {
+  if (fulfillment === 'delivery') {
+    return ['WhatsApp', 'Instagram', 'iFood', 'Cardapio Digital'].includes(currentSource) ? currentSource : 'WhatsApp'
+  }
+
+  if (fulfillment === 'dinein') {
+    return currentSource === 'Mesa' ? 'Mesa' : 'Salao'
+  }
+
+  return 'Balcao'
+}
+
+function normalizePostalCode(value) {
+  return String(value ?? '').replace(/\D/g, '').slice(0, 8)
+}
+
+function formatCepInput(value) {
+  const digits = normalizePostalCode(value)
+
+  if (digits.length <= 5) {
+    return digits
+  }
+
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`
+}
+
+function splitCityAndState(value = '') {
+  const [city = '', state = ''] = String(value)
+    .split(/\s*-\s*/)
+    .map((part) => part.trim())
+
+  return { city, state }
+}
+
+function normalizeCoordinate(value) {
+  const parsed = Number(String(value ?? '').replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatCoordinate(value) {
+  const parsed = normalizeCoordinate(value)
+  return parsed === null ? '' : parsed.toFixed(6)
+}
+
+function normalizeSearchText(value = '') {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function getAddressCoordinates(address = {}) {
+  const lat = normalizeCoordinate(address.lat ?? address.addressLat)
+  const lng = normalizeCoordinate(address.lng ?? address.addressLng)
+
+  if (lat === null || lng === null) {
+    return null
+  }
+
+  return { lat, lng }
+}
+
+function resetDeliveryAddressVerification(address = {}) {
   return {
-    customer: order.customer,
-    phone: order.phone,
-    channel: order.channel,
-    total: String(order.total).replace('.', ','),
-    payment: order.payment,
-    items: order.items.join(', '),
-    note: order.note,
+    ...address,
+    lat: '',
+    lng: '',
+    mapLabel: '',
+    deliveryZoneId: '',
+    deliveryZoneName: '',
+    deliveryFee: '0,00',
+    deliveryAvailable: false,
+    verifiedAt: '',
+  }
+}
+
+function createOrderAddress(address = {}) {
+  return {
+    id: address.id || `addr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    cep: address.cep || '',
+    street: address.street || '',
+    number: address.number || '',
+    complement: address.complement || '',
+    district: address.district || '',
+    city: address.city || '',
+    lat: address.lat || '',
+    lng: address.lng || '',
+    mapLabel: address.mapLabel || '',
+    deliveryZoneId: address.deliveryZoneId || '',
+    deliveryZoneName: address.deliveryZoneName || '',
+    deliveryFee: address.deliveryFee || '0,00',
+    deliveryAvailable: address.deliveryAvailable === true,
+    verifiedAt: address.verifiedAt || '',
+  }
+}
+
+function normalizeOrderAddress(address, index = 0) {
+  return createOrderAddress({
+    ...address,
+    id: address?.id || `addr-${Date.now()}-${index}`,
+  })
+}
+
+function formatMapCoordinateLabel(lat, lng) {
+  const parsedLat = formatCoordinate(lat)
+  const parsedLng = formatCoordinate(lng)
+
+  if (!parsedLat || !parsedLng) {
+    return 'Ponto no mapa'
+  }
+
+  return `Ponto no mapa (${parsedLat}, ${parsedLng})`
+}
+
+function formatOrderAddress(address) {
+  if (!address) {
+    return ''
+  }
+
+  const mainLine = [address.street, address.number].filter(Boolean).join(', ')
+  const formatted = [
+    mainLine,
+    address.complement,
+    address.district,
+    address.city,
+    address.cep,
+  ].filter(Boolean).join(' - ')
+
+  if (formatted) {
+    return formatted
+  }
+
+  if (address.mapLabel) {
+    return address.mapLabel
+  }
+
+  const coordinates = getAddressCoordinates(address)
+  return coordinates ? formatMapCoordinateLabel(coordinates.lat, coordinates.lng) : ''
+}
+
+function parseCurrencyInput(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(',', '.')
+
+  return Number(normalized) || 0
+}
+
+function formatCurrencyInput(value) {
+  return formatNumber(Number(value) || 0)
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toFixed(2).replace('.', ',')
+}
+
+function closeDeliveryPolygon(polygon = []) {
+  const normalized = polygon
+    .map((point) => {
+      if (!Array.isArray(point) || point.length < 2) {
+        return null
+      }
+
+      const lng = normalizeCoordinate(point[0])
+      const lat = normalizeCoordinate(point[1])
+      return lng === null || lat === null ? null : [lng, lat]
+    })
+    .filter(Boolean)
+
+  if (normalized.length === 0) {
+    return []
+  }
+
+  const first = normalized[0]
+  const last = normalized[normalized.length - 1]
+
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    normalized.push([...first])
+  }
+
+  return normalized
+}
+
+function getDeliveryPolygonVertices(polygon = []) {
+  const normalized = polygon
+    .map((point) => {
+      if (!Array.isArray(point) || point.length < 2) {
+        return null
+      }
+
+      const lng = normalizeCoordinate(point[0])
+      const lat = normalizeCoordinate(point[1])
+      return lng === null || lat === null ? null : [lng, lat]
+    })
+    .filter(Boolean)
+
+  if (normalized.length < 2) {
+    return normalized
+  }
+
+  const first = normalized[0]
+  const last = normalized[normalized.length - 1]
+
+  if (first[0] === last[0] && first[1] === last[1]) {
+    return normalized.slice(0, -1)
+  }
+
+  return normalized
+}
+
+function normalizeDeliveryZone(zone = {}, index = 0) {
+  return {
+    id: zone.id || `zone-${Date.now()}-${index}`,
+    name: zone.name || `Zona ${index + 1}`,
+    fee: formatCurrencyInput(parseCurrencyInput(zone.fee)),
+    active: zone.active !== false,
+    color: zone.color || DELIVERY_ZONE_COLORS[index % DELIVERY_ZONE_COLORS.length],
+    polygon: closeDeliveryPolygon(zone.polygon),
+  }
+}
+
+function deliveryZoneToForm(zone = {}) {
+  return {
+    name: zone.name || '',
+    fee: zone.fee || '0,00',
+    active: zone.active === false ? 'no' : 'yes',
+    color: zone.color || DELIVERY_ZONE_COLORS[0],
+    coordinates: formatDeliveryZoneCoordinates(zone.polygon),
+  }
+}
+
+function formatDeliveryZoneCoordinates(polygon = []) {
+  return getDeliveryPolygonVertices(polygon)
+    .map(([lng, lat]) => `${formatCoordinate(lat)}, ${formatCoordinate(lng)}`)
+    .join('\n')
+}
+
+function parseDeliveryZoneCoordinates(value = '') {
+  const polygon = String(value)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [latValue, lngValue] = line.split(/[,;]/).map((part) => part.trim())
+      const lat = normalizeCoordinate(latValue)
+      const lng = normalizeCoordinate(lngValue)
+      return lat === null || lng === null ? null : [lng, lat]
+    })
+
+  if (polygon.some((point) => !point)) {
+    return null
+  }
+
+  return closeDeliveryPolygon(polygon)
+}
+
+function getDeliveryZoneDraftPolygon(editorPoints = [], coordinates = '') {
+  if (editorPoints.length >= 3) {
+    return closeDeliveryPolygon(editorPoints)
+  }
+
+  return parseDeliveryZoneCoordinates(coordinates)
+}
+
+function getDeliveryZoneEditorOutline(editorPoints = []) {
+  const vertices = getDeliveryPolygonVertices(editorPoints)
+
+  if (vertices.length >= 3) {
+    return closeDeliveryPolygon(vertices)
+  }
+
+  return vertices
+}
+
+function isPointInDeliveryPolygon(lat, lng, polygon = []) {
+  if (polygon.length < 4) {
+    return false
+  }
+
+  let inside = false
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const [xi, yi] = polygon[i]
+    const [xj, yj] = polygon[j]
+    const intersects = ((yi > lat) !== (yj > lat))
+      && (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || Number.EPSILON) + xi)
+
+    if (intersects) {
+      inside = !inside
+    }
+  }
+
+  return inside
+}
+
+function findDeliveryZoneForCoordinates(lat, lng, zones = []) {
+  return zones.find((zone) => zone.active !== false && isPointInDeliveryPolygon(lat, lng, zone.polygon))
+}
+
+function getDeliveryZoneCentroid(zone = {}) {
+  const points = getDeliveryPolygonVertices(zone.polygon)
+
+  if (points.length === 0) {
+    return null
+  }
+
+  const sum = points.reduce((acc, [lng, lat]) => ({
+    lat: acc.lat + lat,
+    lng: acc.lng + lng,
+  }), { lat: 0, lng: 0 })
+
+  return {
+    lat: sum.lat / points.length,
+    lng: sum.lng / points.length,
+  }
+}
+
+function findDeliveryZoneByDistrict(address = {}, zones = []) {
+  const district = normalizeSearchText(address.district)
+
+  if (!district) {
+    return null
+  }
+
+  return zones.find((zone) => {
+    if (zone.active === false) {
+      return false
+    }
+
+    const zoneName = normalizeSearchText(zone.name)
+    return zoneName.includes(district) || district.includes(zoneName)
+  }) || null
+}
+
+function getFallbackGeocodeForAddress(address = {}, zones = []) {
+  const zone = findDeliveryZoneByDistrict(address, zones)
+  const coordinates = zone ? getDeliveryZoneCentroid(zone) : null
+
+  if (!zone || !coordinates) {
+    return null
+  }
+
+  return {
+    lat: String(coordinates.lat),
+    lon: String(coordinates.lng),
+    display_name: `Ponto aproximado pela zona ${zone.name}`,
+    fallbackZone: zone,
+  }
+}
+
+function getDeliveryAddressSummary(address = {}) {
+  if (address.deliveryAvailable && address.deliveryZoneName) {
+    return `${address.deliveryZoneName} - taxa ${address.deliveryFee || '0,00'}`
+  }
+
+  if (address.mapLabel) {
+    return address.mapLabel
+  }
+
+  if (address.verifiedAt) {
+    return 'Fora das zonas de entrega'
+  }
+
+  return 'Endereco ainda nao verificado no mapa'
+}
+
+function getPointLabelFromCoordinates(lat, lng, prefix = 'Ponto no mapa') {
+  const parsedLat = formatCoordinate(lat)
+  const parsedLng = formatCoordinate(lng)
+
+  if (!parsedLat || !parsedLng) {
+    return prefix
+  }
+
+  return `${prefix} (${parsedLat}, ${parsedLng})`
+}
+
+function getCurrentBrowserPosition(options = {}) {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    return Promise.reject(new Error('geolocation-unavailable'))
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 60000,
+      ...options,
+    })
+  })
+}
+
+function buildOsmEmbedUrl(coordinates, zoom = 16) {
+  const lat = normalizeCoordinate(coordinates?.lat) ?? DEFAULT_MAP_COORDINATES.lat
+  const lng = normalizeCoordinate(coordinates?.lng) ?? DEFAULT_MAP_COORDINATES.lng
+  const delta = zoom >= 16 ? 0.004 : 0.02
+  const params = new URLSearchParams({
+    bbox: [
+      (lng - delta).toFixed(6),
+      (lat - delta).toFixed(6),
+      (lng + delta).toFixed(6),
+      (lat + delta).toFixed(6),
+    ].join(','),
+    layer: 'mapnik',
+    marker: `${lat.toFixed(6)},${lng.toFixed(6)}`,
+  })
+
+  return `https://www.openstreetmap.org/export/embed.html?${params.toString()}`
+}
+
+function buildOsmViewUrl(coordinates) {
+  const lat = normalizeCoordinate(coordinates?.lat) ?? DEFAULT_MAP_COORDINATES.lat
+  const lng = normalizeCoordinate(coordinates?.lng) ?? DEFAULT_MAP_COORDINATES.lng
+  const params = new URLSearchParams({
+    mlat: lat.toFixed(6),
+    mlon: lng.toFixed(6),
+    zoom: '16',
+  })
+
+  return `https://www.openstreetmap.org/?${params.toString()}`
+}
+
+function latLngToWorldPoint(lat, lng, zoom) {
+  const boundedLat = Math.max(Math.min(normalizeCoordinate(lat) ?? DEFAULT_MAP_COORDINATES.lat, 85.05112878), -85.05112878)
+  const boundedLng = normalizeCoordinate(lng) ?? DEFAULT_MAP_COORDINATES.lng
+  const scale = OSM_TILE_SIZE * (2 ** zoom)
+  const sinLat = Math.sin((boundedLat * Math.PI) / 180)
+
+  return {
+    x: ((boundedLng + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
+  }
+}
+
+function worldPointToLatLng(x, y, zoom) {
+  const scale = OSM_TILE_SIZE * (2 ** zoom)
+  const lng = (x / scale) * 360 - 180
+  const n = Math.PI - (2 * Math.PI * y) / scale
+  const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+
+  return { lat, lng }
+}
+
+function normalizeWorldX(x, zoom) {
+  const scale = OSM_TILE_SIZE * (2 ** zoom)
+  return ((x % scale) + scale) % scale
+}
+
+function clampMapCenterWorld(centerWorld, mapSize, zoom) {
+  const scale = OSM_TILE_SIZE * (2 ** zoom)
+  const halfHeight = mapSize.height / 2
+  const minY = halfHeight
+  const maxY = Math.max(halfHeight, scale - halfHeight)
+
+  return {
+    x: normalizeWorldX(centerWorld.x, zoom),
+    y: Math.min(maxY, Math.max(minY, centerWorld.y)),
+  }
+}
+
+function getPointPositionOnMap(point, topLeft, mapSize, zoom) {
+  const worldPoint = latLngToWorldPoint(point.lat, point.lng, zoom)
+
+  return {
+    x: worldPoint.x - topLeft.x,
+    y: worldPoint.y - topLeft.y,
+  }
+}
+
+function getPolygonSvgPoints(polygon = [], topLeft, mapSize, zoom) {
+  return polygon
+    .map(([lng, lat]) => getPointPositionOnMap({ lat, lng }, topLeft, mapSize, zoom))
+    .map((point) => `${point.x.toFixed(3)},${point.y.toFixed(3)}`)
+    .join(' ')
+}
+
+function getStoreCoordinates(store = {}) {
+  return getAddressCoordinates(store) || DEFAULT_MAP_COORDINATES
+}
+
+function getDeliveryMapCenter({ storeProfile, routes = [], zones = [], address = null } = {}) {
+  const addressCoordinates = address ? getAddressCoordinates(address) : null
+  const routeCoordinates = routes.map(getAddressCoordinates).find(Boolean)
+  const zoneCoordinates = getDeliveryZoneCentroid(zones.find((zone) => zone.polygon?.length >= 4) || {})
+
+  return addressCoordinates || routeCoordinates || zoneCoordinates || getStoreCoordinates(storeProfile)
+}
+
+function buildNominatimSearchUrls(address = {}) {
+  const { city, state } = splitCityAndState(address.city)
+  const postalCode = normalizePostalCode(address.cep)
+  const streetLine = [address.number, address.street].filter(Boolean).join(' ')
+  const urls = []
+  const structuredParams = new URLSearchParams({
+    format: 'jsonv2',
+    limit: '3',
+    addressdetails: '1',
+    countrycodes: 'br',
+    country: 'Brasil',
+  })
+
+  if (streetLine) {
+    structuredParams.set('street', streetLine)
+  }
+
+  if (city) {
+    structuredParams.set('city', city)
+  }
+
+  if (state) {
+    structuredParams.set('state', state)
+  }
+
+  if (postalCode.length === 8) {
+    structuredParams.set('postalcode', postalCode)
+  }
+
+  urls.push(`https://nominatim.openstreetmap.org/search?${structuredParams.toString()}`)
+
+  const queryWithDistrict = [
+    address.street,
+    address.number,
+    address.district,
+    city || address.city,
+    state,
+    postalCode,
+    'Brasil',
+  ].filter(Boolean).join(', ')
+  const queryWithoutDistrict = [
+    address.street,
+    address.number,
+    city || address.city,
+    state,
+    postalCode,
+    'Brasil',
+  ].filter(Boolean).join(', ')
+
+  ;[queryWithDistrict, queryWithoutDistrict].forEach((query) => {
+    const params = new URLSearchParams({
+      q: query,
+      format: 'jsonv2',
+      limit: '3',
+      addressdetails: '1',
+      countrycodes: 'br',
+    })
+    urls.push(`https://nominatim.openstreetmap.org/search?${params.toString()}`)
+  })
+
+  return [...new Set(urls)]
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = 5000) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeout)
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
+function normalizeOrderAdjustmentFields(orderLike = {}) {
+  const hasNewFields = ['discountType', 'discountValue', 'surchargeType', 'surchargeValue']
+    .some((key) => Object.prototype.hasOwnProperty.call(orderLike, key))
+
+  if (hasNewFields) {
+    return {
+      discountType: orderLike.discountType || 'fixed',
+      discountValue: orderLike.discountValue || '',
+      surchargeType: orderLike.surchargeType || 'fixed',
+      surchargeValue: orderLike.surchargeValue || '',
+    }
+  }
+
+  const legacyMode = orderLike.adjustmentMode || 'discount'
+  const legacyType = orderLike.adjustmentType || 'fixed'
+  const legacyValue = orderLike.adjustmentValue || ''
+
+  return {
+    discountType: legacyMode === 'discount' ? legacyType : 'fixed',
+    discountValue: legacyMode === 'discount' ? legacyValue : '',
+    surchargeType: legacyMode === 'surcharge' ? legacyType : 'fixed',
+    surchargeValue: legacyMode === 'surcharge' ? legacyValue : '',
+  }
+}
+
+function getOrderDiscountAmount(subtotal, orderLike = {}) {
+  const adjustments = normalizeOrderAdjustmentFields(orderLike)
+  const discountValue = parseCurrencyInput(adjustments.discountValue)
+
+  if (discountValue <= 0) {
+    return 0
+  }
+
+  const rawAmount = adjustments.discountType === 'percent'
+    ? subtotal * (Math.min(discountValue, 100) / 100)
+    : discountValue
+
+  return Math.min(rawAmount, subtotal)
+}
+
+function getOrderSurchargeAmount(subtotal, orderLike = {}) {
+  const adjustments = normalizeOrderAdjustmentFields(orderLike)
+  const surchargeValue = parseCurrencyInput(adjustments.surchargeValue)
+
+  if (surchargeValue <= 0) {
+    return 0
+  }
+
+  return adjustments.surchargeType === 'percent'
+    ? subtotal * (surchargeValue / 100)
+    : surchargeValue
+}
+
+function getOrderFinancialBreakdown(subtotal, orderLike = {}) {
+  const deliveryFee = inferOrderFulfillment(orderLike) === 'delivery' ? parseCurrencyInput(orderLike.deliveryFee) : 0
+  const discountAmount = getOrderDiscountAmount(subtotal, orderLike)
+  const surchargeAmount = getOrderSurchargeAmount(subtotal, orderLike)
+
+  return {
+    subtotal,
+    deliveryFee,
+    discountAmount,
+    surchargeAmount,
+    total: Math.max(0, subtotal + deliveryFee + surchargeAmount - discountAmount),
+  }
+}
+
+function normalizeOrderRecord(order = {}) {
+  const adjustments = normalizeOrderAdjustmentFields(order)
+  const fulfillment = inferOrderFulfillment(order)
+  const deliveryFee = fulfillment === 'delivery' ? formatCurrencyInput(parseCurrencyInput(order.deliveryFee)) : '0,00'
+  const parsedSubtotal = parseCurrencyInput(order.subtotal)
+  const hasStoredSubtotal = String(order.subtotal ?? '').trim() !== ''
+  const rawTotal = parseCurrencyInput(order.total)
+  const fallbackSubtotal = Math.max(rawTotal - (fulfillment === 'delivery' ? parseCurrencyInput(deliveryFee) : 0), 0)
+  const subtotal = hasStoredSubtotal && parsedSubtotal > 0 ? parsedSubtotal : fallbackSubtotal
+  const normalizedItems = Array.isArray(order.items)
+    ? order.items
+    : String(order.items || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  const financialBreakdown = getOrderFinancialBreakdown(subtotal, {
+    fulfillment,
+    deliveryFee,
+    ...adjustments,
+  })
+  const discountAmount = order.discountAmount || formatCurrencyInput(financialBreakdown.discountAmount)
+  const surchargeAmount = order.surchargeAmount || formatCurrencyInput(financialBreakdown.surchargeAmount)
+
+  return {
+    ...order,
+    channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
+    source: order.source || (order.payment === 'Mesa' ? 'Mesa' : resolveOrderSourceForFulfillment(fulfillment)),
+    total: financialBreakdown.total,
+    items: normalizedItems,
+    payment: normalizeOrderPayment(order.payment),
+    fulfillment,
+    subtotal,
+    deliveryFee,
+    addressId: order.addressId || '',
+    addressLat: order.addressLat || order.lat || '',
+    addressLng: order.addressLng || order.lng || '',
+    deliveryZoneId: order.deliveryZoneId || '',
+    deliveryZoneName: order.deliveryZoneName || '',
+    document: order.document || '',
+    discountType: adjustments.discountType,
+    discountValue: adjustments.discountValue,
+    discountAmount,
+    surchargeType: adjustments.surchargeType,
+    surchargeValue: adjustments.surchargeValue,
+    surchargeAmount,
+  }
+}
+
+function getOrderFulfillmentLabel(fulfillment) {
+  if (fulfillment === 'delivery') {
+    return 'Entrega'
+  }
+
+  if (fulfillment === 'dinein') {
+    return 'Consumir no local'
+  }
+
+  return 'Retirar no local'
+}
+
+function getOrderFulfillmentMeta(order = {}) {
+  const fulfillment = inferOrderFulfillment(order)
+
+  if (fulfillment === 'delivery') {
+    return { fulfillment, label: 'Delivery', icon: 'bike' }
+  }
+
+  if (fulfillment === 'dinein') {
+    return { fulfillment, label: 'Salao', icon: 'table' }
+  }
+
+  return { fulfillment, label: 'Balcao', icon: 'store' }
+}
+
+function orderToForm(order) {
+  const normalizedOrder = normalizeOrderRecord(order)
+
+  return {
+    customer: normalizedOrder.customer || '',
+    phone: normalizedOrder.phone || '',
+    channel: normalizedOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
+    fulfillment: normalizedOrder.fulfillment,
+    subtotal: formatCurrencyInput(normalizedOrder.subtotal),
+    total: String(normalizedOrder.total).replace('.', ','),
+    payment: normalizedOrder.payment,
+    items: normalizedOrder.items.join(', '),
+    note: normalizedOrder.note || '',
+    address: normalizedOrder.address || '',
+    deliveryFee: normalizedOrder.deliveryFee || '0,00',
+    document: normalizedOrder.document || '',
+    discountType: normalizedOrder.discountType,
+    discountValue: normalizedOrder.discountValue,
+    surchargeType: normalizedOrder.surchargeType,
+    surchargeValue: normalizedOrder.surchargeValue,
   }
 }
 
@@ -332,6 +1222,18 @@ function productToForm(product) {
     price: String(product.price).replace('.', ','),
     stock: String(product.stock),
     active: product.active,
+    maxFlavors: String(product.maxFlavors ?? 2),
+    availableFrom: product.availableFrom || '18:00',
+    availableTo: product.availableTo || '23:30',
+    availableDays: Array.isArray(product.availableDays) ? product.availableDays : WEEK_DAY_OPTIONS.map((day) => day.id),
+  }
+}
+
+function flavorToForm(flavor) {
+  return {
+    name: flavor?.name || '',
+    price: String(flavor?.price ?? 0).replace('.', ','),
+    active: flavor?.active !== false,
   }
 }
 
@@ -368,6 +1270,489 @@ function formatCurrency(value) {
   }).format(value)
 }
 
+function getAllWeekDays() {
+  return WEEK_DAY_OPTIONS.map((day) => day.id)
+}
+
+function isComboProduct(product) {
+  return `${product?.category || ''} ${product?.name || ''}`.toLowerCase().includes('combo')
+}
+
+function getFlavorEntityLabel(product, plural = false) {
+  if (isComboProduct(product)) {
+    return plural ? 'subsabores' : 'subsabor'
+  }
+
+  return plural ? 'sabores' : 'sabor'
+}
+
+function createProductFlavor(name = 'Novo sabor', price = 0, active = true, id = `flavor-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`) {
+  return {
+    id,
+    name,
+    price,
+    active,
+  }
+}
+
+function createProductAddonOption(name = 'Novo adicional', price = 0, active = true, id = `addon-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`) {
+  return {
+    id,
+    name,
+    price,
+    active,
+  }
+}
+
+function createProductAddonGroup({
+  id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  name = 'Adicionais',
+  required = false,
+  minSelect = 0,
+  maxSelect = 1,
+  options = [],
+} = {}) {
+  return {
+    id,
+    name,
+    required,
+    minSelect,
+    maxSelect,
+    options,
+  }
+}
+
+function getDefaultMaxFlavors(product) {
+  const fingerprint = `${product.category} ${product.name}`.toLowerCase()
+
+  if (fingerprint.includes('refrigerante') || fingerprint.includes('bebida') || fingerprint.includes('suco')) {
+    return 1
+  }
+
+  if (fingerprint.includes('combo')) {
+    return 2
+  }
+
+  if (fingerprint.includes('gigante') || fingerprint.includes('40')) {
+    return 3
+  }
+
+  return 2
+}
+
+function getDefaultFlavorTemplates(product) {
+  const fingerprint = `${product.category} ${product.name}`.toLowerCase()
+
+  if (fingerprint.includes('combo')) {
+    return [
+      createProductFlavor('Pizza familia', 0, true, 'flavor-combo-1'),
+      createProductFlavor('Calzone recheado', 4, true, 'flavor-combo-2'),
+      createProductFlavor('Refrigerante 2L', 0, false, 'flavor-combo-3'),
+    ]
+  }
+
+  if (fingerprint.includes('bebida') || fingerprint.includes('refrigerante') || fingerprint.includes('suco')) {
+    return [
+      createProductFlavor('Bem gelado', 0, true, 'flavor-drink-1'),
+      createProductFlavor('Sem gelo', 0, true, 'flavor-drink-2'),
+      createProductFlavor('Copo extra', 1.5, false, 'flavor-drink-3'),
+    ]
+  }
+
+  if (fingerprint.includes('doce') || fingerprint.includes('brownie') || fingerprint.includes('sobremesa')) {
+    return [
+      createProductFlavor('Brigadeiro', 0, true, 'flavor-dessert-1'),
+      createProductFlavor('Morango', 3, true, 'flavor-dessert-2'),
+      createProductFlavor('Leite ninho', 2.5, false, 'flavor-dessert-3'),
+    ]
+  }
+
+  if (fingerprint.includes('calzone')) {
+    return [
+      createProductFlavor('Frango com catupiry', 0, true, 'flavor-pizza-1'),
+      createProductFlavor('Calabresa acebolada', 0, true, 'flavor-pizza-2'),
+      createProductFlavor('Portuguesa', 2, false, 'flavor-pizza-3'),
+    ]
+  }
+
+  if (fingerprint.includes('grande')) {
+    return [
+      createProductFlavor('Mussarela especial', 0, true, 'flavor-pizza-4'),
+      createProductFlavor('Bacon crocante', 0, true, 'flavor-pizza-5'),
+      createProductFlavor('Pepperoni', 4, true, 'flavor-pizza-6'),
+    ]
+  }
+
+  return [
+    createProductFlavor('Atum', 0, true, 'flavor-default-1'),
+    createProductFlavor('Bacon', 0, true, 'flavor-default-2'),
+    createProductFlavor('Quatro queijos', 3.5, false, 'flavor-default-3'),
+  ]
+}
+
+function isPizzaStyleProduct(product) {
+  const fingerprint = `${product?.category || ''} ${product?.name || ''}`.toLowerCase()
+
+  return ['pizza', 'grande', 'familia', 'gigante', 'tradicional'].some((term) => fingerprint.includes(term))
+}
+
+function getDefaultAddonGroupTemplates(product) {
+  if (!isPizzaStyleProduct(product)) {
+    return []
+  }
+
+  return [
+    createProductAddonGroup({
+      id: 'addon-group-extras',
+      name: 'Adicionais',
+      required: false,
+      minSelect: 0,
+      maxSelect: 2,
+      options: [
+        createProductAddonOption('Cheddar', 6, true, 'addon-extra-cheddar'),
+        createProductAddonOption('Catupiry', 10, true, 'addon-extra-catupiry'),
+        createProductAddonOption('Bacon', 8, true, 'addon-extra-bacon'),
+        createProductAddonOption('Milho', 5, true, 'addon-extra-milho'),
+        createProductAddonOption('Cebola', 5, true, 'addon-extra-cebola'),
+      ],
+    }),
+    createProductAddonGroup({
+      id: 'addon-group-border',
+      name: 'Borda',
+      required: false,
+      minSelect: 0,
+      maxSelect: 1,
+      options: [
+        createProductAddonOption('Borda cheddar', 12, true, 'addon-border-cheddar'),
+        createProductAddonOption('Borda catupiry', 14, true, 'addon-border-catupiry'),
+        createProductAddonOption('Borda cream cheese', 14, true, 'addon-border-cream-cheese'),
+        createProductAddonOption('Borda chocolate', 13, true, 'addon-border-chocolate'),
+      ],
+    }),
+  ]
+}
+
+function normalizeProductFlavor(flavor, index = 0) {
+  return createProductFlavor(
+    flavor?.name || `Sabor ${index + 1}`,
+    Number(flavor?.price) || 0,
+    flavor?.active !== false,
+    flavor?.id || `flavor-${Date.now()}-${index}`,
+  )
+}
+
+function normalizeProductAddonOption(option, index = 0) {
+  return createProductAddonOption(
+    option?.name || `Adicional ${index + 1}`,
+    Number(option?.price) || 0,
+    option?.active !== false,
+    option?.id || `addon-${Date.now()}-${index}`,
+  )
+}
+
+function normalizeProductAddonGroup(group, index = 0) {
+  const normalizedOptions = Array.isArray(group?.options)
+    ? group.options.map(normalizeProductAddonOption)
+    : []
+  const required = group?.required === true
+  const minSelect = Math.max(required ? 1 : 0, Number(group?.minSelect) || 0)
+  const maxSelect = Math.max(1, Number(group?.maxSelect) || 1)
+
+  return createProductAddonGroup({
+    id: group?.id || `group-${Date.now()}-${index}`,
+    name: group?.name || `Grupo ${index + 1}`,
+    required,
+    minSelect: Math.min(minSelect, maxSelect),
+    maxSelect,
+    options: normalizedOptions,
+  })
+}
+
+function normalizeProduct(product, fallbackCategory = 'Pizzas') {
+  const defaultDays = getAllWeekDays()
+  const initialFlavors = Array.isArray(product?.flavors)
+    ? product.flavors.map(normalizeProductFlavor)
+    : getDefaultFlavorTemplates(product ?? {})
+  const initialAddonGroups = Array.isArray(product?.addonGroups)
+    ? product.addonGroups.map(normalizeProductAddonGroup)
+    : []
+
+  return {
+    id: product?.id,
+    name: product?.name || 'Produto sem nome',
+    category: product?.category || fallbackCategory,
+    price: Number(product?.price) || 0,
+    stock: Number(product?.stock) || 0,
+    active: product?.active !== false,
+    maxFlavors: Math.max(1, Number(product?.maxFlavors) || getDefaultMaxFlavors(product ?? {})),
+    availableFrom: product?.availableFrom || '18:00',
+    availableTo: product?.availableTo || '23:30',
+    availableDays: Array.isArray(product?.availableDays) && product.availableDays.length > 0
+      ? product.availableDays.filter((day) => defaultDays.includes(day))
+      : defaultDays,
+    flavors: initialFlavors,
+    addonGroups: initialAddonGroups,
+  }
+}
+
+function getActiveProductFlavors(product) {
+  return Array.isArray(product?.flavors)
+    ? product.flavors.filter((flavor) => flavor.active !== false)
+    : []
+}
+
+function getActiveProductAddonGroups(product) {
+  return Array.isArray(product?.addonGroups)
+    ? product.addonGroups
+      .map((group) => ({
+        ...group,
+        options: Array.isArray(group.options) ? group.options.filter((option) => option.active !== false) : [],
+      }))
+      .filter((group) => group.options.length > 0)
+    : []
+}
+
+function normalizeCartAddonSelections(product, addonSelections = {}) {
+  const normalizedSelections = {}
+
+  getActiveProductAddonGroups(product).forEach((group) => {
+    const selectedIds = Array.isArray(addonSelections[group.id]) ? addonSelections[group.id] : []
+    const validIds = Array.from(new Set(selectedIds.filter((optionId) => group.options.some((option) => option.id === optionId))))
+      .slice(0, Math.max(1, Number(group.maxSelect) || 1))
+
+    if (validIds.length > 0) {
+      normalizedSelections[group.id] = validIds
+    }
+  })
+
+  return normalizedSelections
+}
+
+function getSelectedCartAddonEntries(product, addonSelections = {}) {
+  const normalizedSelections = normalizeCartAddonSelections(product, addonSelections)
+
+  return getActiveProductAddonGroups(product)
+    .map((group) => {
+      const selectedIds = normalizedSelections[group.id] || []
+      const selectedOptions = group.options.filter((option) => selectedIds.includes(option.id))
+
+      if (selectedOptions.length === 0) {
+        return null
+      }
+
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        optionIds: selectedOptions.map((option) => option.id),
+        optionNames: selectedOptions.map((option) => option.name),
+        label: selectedOptions.map((option) => option.name).join(', '),
+      }
+    })
+    .filter(Boolean)
+}
+
+function getCartConfigurationSteps(product) {
+  const steps = []
+  const activeFlavors = getActiveProductFlavors(product)
+
+  if (activeFlavors.length > 0) {
+    steps.push({
+      id: 'step-flavors',
+      type: 'flavors',
+      name: getFlavorEntityLabel(product, true),
+      title: isComboProduct(product) ? 'Escolha os subsabores' : 'Escolha os sabores',
+      required: true,
+      minSelect: 1,
+      maxSelect: Math.max(1, Number(product?.maxFlavors) || 1),
+      options: activeFlavors,
+    })
+  }
+
+  getActiveProductAddonGroups(product).forEach((group) => {
+    steps.push({
+      id: group.id,
+      type: 'addons',
+      name: group.name,
+      title: group.name,
+      required: group.required === true,
+      minSelect: Math.max(group.required ? 1 : 0, Number(group.minSelect) || 0),
+      maxSelect: Math.max(1, Number(group.maxSelect) || 1),
+      options: group.options,
+    })
+  })
+
+  return steps
+}
+
+function getCartStepSelectedIds(cartForm, step) {
+  if (!step) {
+    return []
+  }
+
+  if (step.type === 'flavors') {
+    return Array.isArray(cartForm?.flavorIds) ? cartForm.flavorIds : []
+  }
+
+  return Array.isArray(cartForm?.addonSelections?.[step.id]) ? cartForm.addonSelections[step.id] : []
+}
+
+function isCartStepSelectionValid(step, cartForm) {
+  if (!step) {
+    return true
+  }
+
+  const selectedCount = getCartStepSelectedIds(cartForm, step).length
+  const minSelect = Math.max(step.required ? 1 : 0, Number(step.minSelect) || 0)
+  const maxSelect = Math.max(1, Number(step.maxSelect) || 1)
+
+  return selectedCount >= minSelect && selectedCount <= maxSelect
+}
+
+function getSelectedCartFlavorNames(product, flavorIds = []) {
+  const selectedIds = new Set(flavorIds)
+
+  return getActiveProductFlavors(product)
+    .filter((flavor) => selectedIds.has(flavor.id))
+    .map((flavor) => flavor.name)
+}
+
+function getCartItemFlavorLabel(product, flavorIds = []) {
+  return getSelectedCartFlavorNames(product, flavorIds).join(', ')
+}
+
+function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
+  const selectedIds = new Set(flavorIds)
+  const flavorExtras = getActiveProductFlavors(product)
+    .filter((flavor) => selectedIds.has(flavor.id))
+    .reduce((sum, flavor) => sum + (Number(flavor.price) || 0), 0)
+  const activeGroups = getActiveProductAddonGroups(product)
+  const addonExtras = getSelectedCartAddonEntries(product, addonSelections)
+    .reduce((sum, entry) => {
+      const group = activeGroups.find((current) => current.id === entry.groupId)
+      const groupTotal = group
+        ? group.options
+          .filter((option) => entry.optionIds.includes(option.id))
+          .reduce((groupSum, option) => groupSum + (Number(option.price) || 0), 0)
+        : 0
+
+      return sum + groupTotal
+    }, 0)
+
+  return (Number(product?.price) || 0) + flavorExtras + addonExtras
+}
+
+function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, qty = 1, flavorIds = [], addonSelections = {} } = {}) {
+  const normalizedFlavorIds = Array.from(new Set(flavorIds))
+  const flavorNames = getSelectedCartFlavorNames(product, normalizedFlavorIds)
+  const normalizedAddonSelections = normalizeCartAddonSelections(product, addonSelections)
+  const addonEntries = getSelectedCartAddonEntries(product, normalizedAddonSelections)
+
+  return {
+    id: lineId,
+    productId: product.id,
+    name: product.name,
+    category: product.category,
+    qty: Math.max(1, Number(qty) || 1),
+    basePrice: Number(product.price) || 0,
+    price: getCartItemUnitPrice(product, normalizedFlavorIds, normalizedAddonSelections),
+    flavorIds: normalizedFlavorIds,
+    flavorNames,
+    flavorLabel: flavorNames.join(', '),
+    addonSelections: normalizedAddonSelections,
+    addonEntries,
+    maxFlavors: Math.max(1, Number(product.maxFlavors) || 1),
+  }
+}
+
+function normalizeStoredOrderCartItem(item, productList = []) {
+  const lineId = item?.id || `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const productId = item?.productId || item?.id || ''
+  const product = productList.find((current) => current.id === productId)
+
+  if (product) {
+    return createOrderCartLine(product, {
+      lineId,
+      qty: Number(item?.qty) || 1,
+      flavorIds: Array.isArray(item?.flavorIds) ? item.flavorIds : [],
+      addonSelections: item?.addonSelections || {},
+    })
+  }
+
+  const flavorNames = Array.isArray(item?.flavorNames) ? item.flavorNames.filter(Boolean) : []
+  const unitPrice = Number(item?.price ?? item?.basePrice) || 0
+  const addonEntries = Array.isArray(item?.addonEntries) ? item.addonEntries.filter(Boolean) : []
+
+  return {
+    id: lineId,
+    productId,
+    name: item?.name || 'Item do pedido',
+    category: item?.category || '',
+    qty: Math.max(1, Number(item?.qty) || 1),
+    basePrice: Number(item?.basePrice ?? unitPrice) || 0,
+    price: unitPrice,
+    flavorIds: Array.isArray(item?.flavorIds) ? item.flavorIds : [],
+    flavorNames,
+    flavorLabel: item?.flavorLabel || flavorNames.join(', '),
+    addonSelections: item?.addonSelections || {},
+    addonEntries,
+    maxFlavors: Math.max(1, Number(item?.maxFlavors) || 1),
+  }
+}
+
+function orderCartItemToForm(product, item = null) {
+  return {
+    lineId: item?.id || '',
+    productId: product?.id || '',
+    qty: String(item?.qty || 1),
+    flavorIds: Array.isArray(item?.flavorIds) ? [...item.flavorIds] : [],
+    addonSelections: item?.addonSelections ? cloneData(item.addonSelections) : {},
+  }
+}
+
+function getOrderCartItemLabel(item) {
+  const detailParts = [
+    item?.flavorLabel ? `Sabores: ${item.flavorLabel}` : '',
+    ...(Array.isArray(item?.addonEntries) ? item.addonEntries.map((entry) => `${entry.groupName}: ${entry.label}`) : []),
+  ].filter(Boolean)
+
+  return detailParts.length > 0
+    ? `${item.qty}x ${item.name} (${detailParts.join(' | ')})`
+    : `${item.qty}x ${item.name}`
+}
+
+function getProductAvailabilityLabel(product) {
+  const activeDays = Array.isArray(product.availableDays) ? product.availableDays : []
+
+  if (activeDays.length === WEEK_DAY_OPTIONS.length) {
+    return `Todos os dias, ${product.availableFrom} - ${product.availableTo}`
+  }
+
+  const labels = WEEK_DAY_OPTIONS
+    .filter((day) => activeDays.includes(day.id))
+    .map((day) => day.label)
+    .join(', ')
+
+  return `${labels || 'Sem dias'} - ${product.availableFrom} - ${product.availableTo}`
+}
+
+function getMenuProductThumbClass(product) {
+  const fingerprint = `${product.category} ${product.name}`.toLowerCase()
+
+  if (fingerprint.includes('combo')) {
+    return 'product-thumb--combo'
+  }
+
+  if (fingerprint.includes('bebida') || fingerprint.includes('refrigerante') || fingerprint.includes('suco')) {
+    return 'product-thumb--drink'
+  }
+
+  if (fingerprint.includes('doce') || fingerprint.includes('brownie') || fingerprint.includes('sobremesa')) {
+    return 'product-thumb--dessert'
+  }
+
+  return 'product-thumb--pizza'
+}
+
 function cloneData(value) {
   return JSON.parse(JSON.stringify(value))
 }
@@ -391,17 +1776,20 @@ function nowDateTime() {
 
 function createDefaultAppData() {
   return cloneData({
-    orders: initialOrders,
+    orders: initialOrders.map((order) => ({
+      ...normalizeOrderRecord(order),
+    })),
     activeNav: 'orders',
+    storeOpen: true,
     cashOpen: false,
-    noticeVisible: true,
+    noticeVisible: false,
     blockedOrders: initialBlockedOrders,
     settings: initialSettings,
     chatMessages: [
       { id: 1, author: 'Sistema', text: 'Canal de atendimento simulado ativo.' },
     ],
     categories: initialCategories,
-    products: initialProducts,
+    products: initialProducts.map((product) => normalizeProduct(product, initialCategories[0]?.name || 'Pizzas')),
     tables: initialTables,
     couriers: initialCouriers,
     channels: initialChannels,
@@ -412,9 +1800,13 @@ function createDefaultAppData() {
     invoices: initialInvoices,
     integrations: initialIntegrations,
     qrCodes: initialQrCodes,
-    storeProfile: initialStoreProfile,
+    orderAddresses: initialOrderAddresses,
+    deliveryZones: initialDeliveryZones.map(normalizeDeliveryZone),
+    storeProfile: normalizeStoreProfile(initialStoreProfile),
     printerConfig: initialPrinterConfig,
     security: initialSecurity,
+    storeUsers: initialStoreUsers.map(normalizeStoreUser),
+    currentStoreUser: null,
     botConfig: initialBotConfig,
     kdsConfig: initialKdsConfig,
     orderDrafts: initialOrderDrafts,
@@ -442,12 +1834,16 @@ function loadPersistedAppData() {
     return {
       ...defaults,
       ...parsed,
-      orders: Array.isArray(parsed.orders) ? parsed.orders : defaults.orders,
+      orders: Array.isArray(parsed.orders)
+        ? parsed.orders.map((order) => normalizeOrderRecord(order))
+        : defaults.orders,
       blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
       settings: { ...defaults.settings, ...(parsed.settings ?? {}) },
       chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : defaults.chatMessages,
       categories: Array.isArray(parsed.categories) ? parsed.categories : defaults.categories,
-      products: Array.isArray(parsed.products) ? parsed.products : defaults.products,
+      products: Array.isArray(parsed.products)
+        ? parsed.products.map((product) => normalizeProduct(product, defaults.categories[0]?.name || 'Pizzas'))
+        : defaults.products,
       tables: Array.isArray(parsed.tables) ? parsed.tables : defaults.tables,
       couriers: Array.isArray(parsed.couriers) ? parsed.couriers : defaults.couriers,
       channels: Array.isArray(parsed.channels) ? parsed.channels : defaults.channels,
@@ -458,13 +1854,23 @@ function loadPersistedAppData() {
       invoices: Array.isArray(parsed.invoices) ? parsed.invoices : defaults.invoices,
       integrations: Array.isArray(parsed.integrations) ? parsed.integrations : defaults.integrations,
       qrCodes: Array.isArray(parsed.qrCodes) ? parsed.qrCodes : defaults.qrCodes,
-      storeProfile: { ...defaults.storeProfile, ...(parsed.storeProfile ?? {}) },
+      orderAddresses: Array.isArray(parsed.orderAddresses)
+        ? parsed.orderAddresses.map(normalizeOrderAddress)
+        : defaults.orderAddresses,
+      deliveryZones: Array.isArray(parsed.deliveryZones)
+        ? parsed.deliveryZones.map(normalizeDeliveryZone)
+        : defaults.deliveryZones,
+      storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(parsed.storeProfile ?? {}) }),
       printerConfig: {
         ...defaults.printerConfig,
         ...(parsed.printerConfig ?? {}),
         queue: Array.isArray(parsed.printerConfig?.queue) ? parsed.printerConfig.queue : defaults.printerConfig.queue,
       },
       security: { ...defaults.security, ...(parsed.security ?? {}) },
+      storeUsers: Array.isArray(parsed.storeUsers)
+        ? parsed.storeUsers.map(normalizeStoreUser)
+        : defaults.storeUsers,
+      currentStoreUser: parsed.currentStoreUser || defaults.currentStoreUser,
       botConfig: {
         ...defaults.botConfig,
         ...(parsed.botConfig ?? {}),
@@ -569,6 +1975,8 @@ function Icon({ name, size = 20, className = '' }) {
       return <svg {...props}><path d="M4 19V5M4 19h16" /><path d="m7 15 3-4 3 2 5-7" /></svg>
     case 'search':
       return <svg {...props}><circle cx="10.8" cy="10.8" r="6.2" /><path d="m15.4 15.4 4.1 4.1" /></svg>
+    case 'filter':
+      return <svg {...props}><path d="M4 6h16l-6.4 7.4V19l-3.2-1.7v-3.9L4 6Z" /></svg>
     case 'plus':
       return <svg {...props}><path d="M12 5v14M5 12h14" /></svg>
     case 'edit':
@@ -630,12 +2038,488 @@ function Modal({ title, subtitle, children, footer, onClose }) {
   )
 }
 
+function OrderUtilitySheet({ title, children, footer, onClose }) {
+  return (
+    <div className="pos-sheet-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="pos-sheet" role="dialog" aria-modal="true" aria-labelledby="pos-sheet-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="pos-sheet__header">
+          <h3 id="pos-sheet-title">{title}</h3>
+          <button className="icon-btn" type="button" onClick={onClose}>
+            <Icon name="x" size={19} />
+          </button>
+        </header>
+        <div className="pos-sheet__body">{children}</div>
+        {footer ? <footer className="pos-sheet__footer">{footer}</footer> : null}
+      </section>
+    </div>
+  )
+}
+
 function Field({ label, children }) {
   return (
     <label className="field">
       <span>{label}</span>
       {children}
     </label>
+  )
+}
+
+function OsmDeliveryMap({
+  title = 'Mapa',
+  center,
+  zoom = 14,
+  storeProfile,
+  zones = [],
+  routes = [],
+  address = null,
+  editorPoints = [],
+  editingZoneId = '',
+  onMapClick,
+  onMoveEditorPoint,
+  onSelectEditorPoint,
+  selectedEditorPointIndex = null,
+}) {
+  const canvasRef = useRef(null)
+  const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 520 })
+  const mapSize = canvasSize.width > 0 && canvasSize.height > 0 ? canvasSize : { width: 1000, height: 520 }
+  const initialCenter = center || DEFAULT_MAP_COORDINATES
+  const [viewCenter, setViewCenter] = useState({
+    lat: normalizeCoordinate(initialCenter.lat) ?? DEFAULT_MAP_COORDINATES.lat,
+    lng: normalizeCoordinate(initialCenter.lng) ?? DEFAULT_MAP_COORDINATES.lng,
+  })
+  const [viewZoom, setViewZoom] = useState(zoom)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isDraggingPoint, setIsDraggingPoint] = useState(false)
+  const dragRef = useRef(null)
+  const pointDragRef = useRef(null)
+  const suppressClickRef = useRef(false)
+  const centerPoint = latLngToWorldPoint(viewCenter.lat, viewCenter.lng, viewZoom)
+  const topLeft = {
+    x: centerPoint.x - mapSize.width / 2,
+    y: centerPoint.y - mapSize.height / 2,
+  }
+  const scaleTiles = 2 ** viewZoom
+  const firstTileX = Math.floor(topLeft.x / OSM_TILE_SIZE)
+  const lastTileX = Math.floor((topLeft.x + mapSize.width) / OSM_TILE_SIZE)
+  const firstTileY = Math.floor(topLeft.y / OSM_TILE_SIZE)
+  const lastTileY = Math.floor((topLeft.y + mapSize.height) / OSM_TILE_SIZE)
+  const tiles = []
+  const storeCoordinates = getStoreCoordinates(storeProfile)
+  const storePosition = getPointPositionOnMap(storeCoordinates, topLeft, mapSize, viewZoom)
+  const selectedAddressCoordinates = address ? getAddressCoordinates(address) : null
+  const selectedAddressPosition = selectedAddressCoordinates
+    ? getPointPositionOnMap(selectedAddressCoordinates, topLeft, mapSize, viewZoom)
+    : null
+
+  useEffect(() => {
+    setViewCenter({
+      lat: normalizeCoordinate(center?.lat) ?? DEFAULT_MAP_COORDINATES.lat,
+      lng: normalizeCoordinate(center?.lng) ?? DEFAULT_MAP_COORDINATES.lng,
+    })
+    setViewZoom(zoom)
+  }, [center?.lat, center?.lng, zoom])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+
+    if (!canvas) {
+      return undefined
+    }
+
+    const updateSize = () => {
+      const rect = canvas.getBoundingClientRect()
+      const nextSize = {
+        width: Math.max(Math.round(rect.width), 1),
+        height: Math.max(Math.round(rect.height), 1),
+      }
+
+      setCanvasSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height ? current : nextSize,
+      )
+    }
+
+    updateSize()
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateSize()
+    })
+
+    observer.observe(canvas)
+    return () => observer.disconnect()
+  }, [])
+
+  function getCoordinatesFromClientPosition(clientX, clientY) {
+    const canvas = canvasRef.current
+
+    if (!canvas) {
+      return DEFAULT_MAP_COORDINATES
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const x = topLeft.x + ((clientX - rect.left) / rect.width) * mapSize.width
+    const y = topLeft.y + ((clientY - rect.top) / rect.height) * mapSize.height
+    return worldPointToLatLng(x, y, viewZoom)
+  }
+
+  for (let tileX = firstTileX; tileX <= lastTileX; tileX += 1) {
+    for (let tileY = firstTileY; tileY <= lastTileY; tileY += 1) {
+      if (tileY < 0 || tileY >= scaleTiles) {
+        continue
+      }
+
+      const wrappedTileX = ((tileX % scaleTiles) + scaleTiles) % scaleTiles
+      tiles.push({
+        key: `${tileX}-${tileY}`,
+        src: `https://tile.openstreetmap.org/${viewZoom}/${wrappedTileX}/${tileY}.png`,
+        left: tileX * OSM_TILE_SIZE - topLeft.x,
+        top: tileY * OSM_TILE_SIZE - topLeft.y,
+        width: OSM_TILE_SIZE,
+        height: OSM_TILE_SIZE,
+      })
+    }
+  }
+
+  function setZoomAt(nextZoom, event = null) {
+    const normalizedZoom = Math.max(11, Math.min(18, nextZoom))
+
+    if (normalizedZoom === viewZoom) {
+      return
+    }
+
+    if (!event?.currentTarget) {
+      setViewZoom(normalizedZoom)
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratioX = (event.clientX - rect.left) / rect.width
+    const ratioY = (event.clientY - rect.top) / rect.height
+    const currentWorldX = topLeft.x + ratioX * mapSize.width
+    const currentWorldY = topLeft.y + ratioY * mapSize.height
+    const anchor = worldPointToLatLng(currentWorldX, currentWorldY, viewZoom)
+    const anchorWorldAtNextZoom = latLngToWorldPoint(anchor.lat, anchor.lng, normalizedZoom)
+    const nextCenterWorld = clampMapCenterWorld({
+      x: anchorWorldAtNextZoom.x - (ratioX - 0.5) * mapSize.width,
+      y: anchorWorldAtNextZoom.y - (ratioY - 0.5) * mapSize.height,
+    }, mapSize, normalizedZoom)
+
+    setViewCenter(worldPointToLatLng(nextCenterWorld.x, nextCenterWorld.y, normalizedZoom))
+    setViewZoom(normalizedZoom)
+  }
+
+  function handlePointerDown(event) {
+    if (event.button !== 0 || event.target.closest('button') || pointDragRef.current) {
+      return
+    }
+
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      centerWorld: latLngToWorldPoint(viewCenter.lat, viewCenter.lng, viewZoom),
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setIsDragging(true)
+  }
+
+  function handlePointerMove(event) {
+    const drag = dragRef.current
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+
+    if (Math.abs(deltaX) + Math.abs(deltaY) > 4) {
+      drag.moved = true
+    }
+
+    const nextWorld = {
+      x: drag.centerWorld.x - (deltaX / rect.width) * mapSize.width,
+      y: drag.centerWorld.y - (deltaY / rect.height) * mapSize.height,
+    }
+
+    const nextCenterWorld = clampMapCenterWorld(nextWorld, mapSize, viewZoom)
+    setViewCenter(worldPointToLatLng(nextCenterWorld.x, nextCenterWorld.y, viewZoom))
+  }
+
+  function finishPointerInteraction(event) {
+    const drag = dragRef.current
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return
+    }
+
+    suppressClickRef.current = drag.moved
+    dragRef.current = null
+    setIsDragging(false)
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // Pointer capture can already be released by the browser.
+    }
+  }
+
+  function handleWheel(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    setZoomAt(viewZoom + (event.deltaY < 0 ? 1 : -1), event)
+  }
+
+  function handleMapClick(event) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+
+    if (!onMapClick) {
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = topLeft.x + ((event.clientX - rect.left) / rect.width) * mapSize.width
+    const y = topLeft.y + ((event.clientY - rect.top) / rect.height) * mapSize.height
+    const coordinates = worldPointToLatLng(x, y, viewZoom)
+
+    onMapClick([coordinates.lng, coordinates.lat])
+  }
+
+  function handleEditorPointPointerDown(event, index) {
+    if (!onMoveEditorPoint && !onSelectEditorPoint) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    pointDragRef.current = {
+      pointerId: event.pointerId,
+      index,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    }
+    suppressClickRef.current = false
+    setIsDraggingPoint(Boolean(onMoveEditorPoint))
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handleEditorPointPointerMove(event, index) {
+    const pointDrag = pointDragRef.current
+
+    if (!pointDrag || pointDrag.pointerId !== event.pointerId || pointDrag.index !== index || !onMoveEditorPoint) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const deltaX = event.clientX - pointDrag.startX
+    const deltaY = event.clientY - pointDrag.startY
+
+    if (Math.abs(deltaX) + Math.abs(deltaY) > 3) {
+      pointDrag.moved = true
+      suppressClickRef.current = true
+    }
+
+    const coordinates = getCoordinatesFromClientPosition(event.clientX, event.clientY)
+    onMoveEditorPoint(index, [coordinates.lng, coordinates.lat])
+  }
+
+  function finishEditorPointPointer(event, index) {
+    const pointDrag = pointDragRef.current
+
+    if (!pointDrag || pointDrag.pointerId !== event.pointerId || pointDrag.index !== index) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (!pointDrag.moved) {
+      onSelectEditorPoint?.(index)
+    }
+
+    pointDragRef.current = null
+    setIsDraggingPoint(false)
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // Pointer capture can already be released by the browser.
+    }
+  }
+
+  return (
+    <section className={`osm-map ${onMapClick ? 'osm-map--editable' : ''} ${isDragging || isDraggingPoint ? 'is-dragging' : ''}`.trim()}>
+      <div
+        className="osm-map__canvas"
+        ref={canvasRef}
+        role="application"
+        tabIndex={0}
+        aria-label={title}
+        onClick={handleMapClick}
+        onPointerCancel={finishPointerInteraction}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointerInteraction}
+        onWheelCapture={handleWheel}
+      >
+        {tiles.map((tile) => (
+          <img
+            alt=""
+            className="osm-map__tile"
+            draggable="false"
+            key={tile.key}
+            src={tile.src}
+            style={{
+              left: `${tile.left}px`,
+              top: `${tile.top}px`,
+              width: `${tile.width}px`,
+              height: `${tile.height}px`,
+            }}
+          />
+        ))}
+
+        <svg
+          className="osm-map__overlay"
+          viewBox={`0 0 ${mapSize.width} ${mapSize.height}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {zones
+            .filter((zone) => zone.polygon?.length >= 4)
+            .map((zone) => (
+              <polygon
+                className={`osm-map__zone ${zone.id === editingZoneId ? 'is-editing' : ''}`.trim()}
+                fill={zone.color || DELIVERY_ZONE_COLORS[0]}
+                key={zone.id}
+                points={getPolygonSvgPoints(zone.polygon, topLeft, mapSize, viewZoom)}
+                stroke={zone.color || DELIVERY_ZONE_COLORS[0]}
+              />
+            ))}
+
+          {editorPoints.length >= 2 ? (
+            <polyline
+              className="osm-map__editor-line"
+              points={getPolygonSvgPoints(getDeliveryZoneEditorOutline(editorPoints), topLeft, mapSize, viewZoom)}
+            />
+          ) : null}
+        </svg>
+
+        <span className="osm-map__marker osm-map__marker--store" style={{ left: `${storePosition.x}px`, top: `${storePosition.y}px` }}>
+          Loja
+        </span>
+
+        {selectedAddressPosition ? (
+          <span
+            className="osm-map__marker osm-map__marker--address"
+            style={{
+              left: `${selectedAddressPosition.x}px`,
+              top: `${selectedAddressPosition.y}px`,
+            }}
+          >
+            Cliente
+          </span>
+        ) : null}
+
+        {routes.map((route, index) => {
+          const routeCoordinates = getAddressCoordinates(route)
+
+          if (!routeCoordinates) {
+            return null
+          }
+
+          const position = getPointPositionOnMap(routeCoordinates, topLeft, mapSize, viewZoom)
+
+          return (
+            <span className="osm-map__marker osm-map__marker--route" key={route.id} style={{ left: `${position.x}px`, top: `${position.y}px` }}>
+              {String.fromCharCode(65 + index)}
+            </span>
+          )
+        })}
+
+        {editorPoints.map(([lng, lat], index) => {
+          const position = getPointPositionOnMap({ lat, lng }, topLeft, mapSize, viewZoom)
+          const isSelected = selectedEditorPointIndex === index
+
+          return (
+            <button
+              aria-pressed={isSelected}
+              className={`osm-map__point ${isSelected ? 'is-selected' : ''}`.trim()}
+              key={`${lng}-${lat}-${index}`}
+              style={{ left: `${position.x}px`, top: `${position.y}px` }}
+              type="button"
+              onPointerCancel={(event) => finishEditorPointPointer(event, index)}
+              onPointerDown={(event) => handleEditorPointPointerDown(event, index)}
+              onPointerMove={(event) => handleEditorPointPointerMove(event, index)}
+              onPointerUp={(event) => finishEditorPointPointer(event, index)}
+              title={isSelected ? 'Ponto selecionado' : 'Selecionar ponto'}
+            >
+              {index + 1}
+            </button>
+          )
+        })}
+
+        <div className="osm-map__controls">
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoomAt(viewZoom + 1) }}>+</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoomAt(viewZoom - 1) }}>-</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setViewCenter(storeCoordinates); setViewZoom(15) }}>Loja</button>
+        </div>
+      </div>
+
+      <footer className="osm-map__footer">
+        <span>{formatCoordinate(viewCenter.lat)}, {formatCoordinate(viewCenter.lng)} - zoom {viewZoom}</span>
+        <a href={buildOsmViewUrl(viewCenter)} target="_blank" rel="noreferrer">Abrir OpenStreetMap</a>
+      </footer>
+    </section>
+  )
+}
+
+function DeliveryAddressMap({ address, title = 'Mapa do endereco' }) {
+  const coordinates = getAddressCoordinates(address)
+
+  if (!coordinates) {
+    return null
+  }
+
+  return (
+    <section className="delivery-map-card">
+      <iframe
+        title={title}
+        src={buildOsmEmbedUrl(coordinates)}
+        loading="lazy"
+        referrerPolicy="strict-origin-when-cross-origin"
+      />
+      <footer>
+        <span>{formatCoordinate(coordinates.lat)}, {formatCoordinate(coordinates.lng)}</span>
+        <a href={buildOsmViewUrl(coordinates)} target="_blank" rel="noreferrer">Abrir OpenStreetMap</a>
+      </footer>
+    </section>
+  )
+}
+
+function DeliveryRouteMap({ routes, storeProfile, zones }) {
+  const center = getDeliveryMapCenter({ storeProfile, routes, zones })
+
+  return (
+    <OsmDeliveryMap
+      center={center}
+      routes={routes}
+      storeProfile={storeProfile}
+      title="Mapa de entregas"
+      zones={zones}
+      zoom={14}
+    />
   )
 }
 
@@ -649,25 +2533,33 @@ function StoreBadge() {
 
 function Sidebar({
   activeNav,
+  storeOpen,
   cashOpen,
-  navQuery,
   storeProfile,
-  onNavQuery,
   onOpenModal,
   onSetActiveNav,
 }) {
-  const visibleNav = navItems.filter((item) =>
-    item.label.toLowerCase().includes(navQuery.toLowerCase()),
-  )
-
   return (
     <aside className="sidebar" aria-label="Navegacao principal">
       <button className="store-profile" data-testid="store-profile" type="button" onClick={() => onOpenModal('store')}>
         <StoreBadge />
         <span>
           <strong>{storeProfile.name}</strong>
-          <small>{cashOpen ? 'Loja aberta agora' : 'Caixa fechado'}</small>
+          <small>{storeOpen ? 'Loja aberta agora' : 'Loja fechada para pedidos'}</small>
         </span>
+      </button>
+
+      <button
+        className={`store-card ${storeOpen ? 'is-open' : 'is-closed'}`}
+        data-testid="open-store-status"
+        type="button"
+        onClick={() => onOpenModal('storeStatus')}
+      >
+        <span>
+          <Icon name="store" size={18} />
+        </span>
+        <strong>Loja</strong>
+        <small>{storeOpen ? 'Aberta' : 'Fechada'}</small>
       </button>
 
       <button className="cash-card" data-testid="open-cash" type="button" onClick={() => onOpenModal('cash')}>
@@ -678,17 +2570,8 @@ function Sidebar({
         <small>{cashOpen ? 'Aberto' : 'Fechado'}</small>
       </button>
 
-      <label className="sidebar-search">
-        <Icon name="search" size={17} />
-        <input
-          value={navQuery}
-          onChange={(event) => onNavQuery(event.target.value)}
-          placeholder="Buscar area"
-        />
-      </label>
-
       <nav className="sidebar-nav">
-        {visibleNav.map((item) => (
+        {navItems.map((item) => (
           <button
             className={`sidebar-nav__item ${activeNav === item.id ? 'sidebar-nav__item--active' : ''}`.trim()}
             data-testid={`nav-${item.id}`}
@@ -713,7 +2596,7 @@ function Sidebar({
   )
 }
 
-function TopBar({ onOpenModal, notificationCount }) {
+function TopBar({ currentStoreUser, onLogout, onOpenModal, notificationCount }) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -747,6 +2630,10 @@ function TopBar({ onOpenModal, notificationCount }) {
         <button className="topbar-action" data-testid="open-printer" type="button" onClick={() => onOpenModal('printer')}>
           <Icon name="printer" size={19} />
           <span>Impressora</span>
+        </button>
+        <button className="topbar-action" data-testid="logout-store" type="button" onClick={onLogout}>
+          <Icon name="user" size={19} />
+          <span>{currentStoreUser?.name || 'Usuario'}</span>
         </button>
         <button
           className="topbar-action topbar-action--icon"
@@ -784,7 +2671,7 @@ function Notice({ visible, onClose, onOpenPassword }) {
   )
 }
 
-function Metrics({ orders, cashOpen }) {
+function Metrics({ orders, storeOpen }) {
   const activeOrders = orders.filter((order) => order.status !== 'completed')
   const ready = activeOrders.filter((order) => order.status === 'ready').length
   const production = activeOrders.filter((order) => order.status === 'production').length
@@ -808,9 +2695,9 @@ function Metrics({ orders, cashOpen }) {
         <span>Movimento</span>
         <strong>{formatCurrency(revenue)}</strong>
       </article>
-      <article className={`metric-card metric-card--status ${cashOpen ? 'is-open' : ''}`}>
+      <article className={`metric-card metric-card--status ${storeOpen ? 'is-open' : ''}`}>
         <span>Status</span>
-        <strong>{cashOpen ? 'Aberto' : 'Fechado'}</strong>
+        <strong>{storeOpen ? 'Loja aberta' : 'Loja fechada'}</strong>
       </article>
     </section>
   )
@@ -874,7 +2761,7 @@ function Toolbar({
 }
 
 function OrderCard({ order, stage, onOpenModal, onMoveOrder }) {
-  const channelLabel = order.channel === 'delivery' ? 'Delivery' : 'Balcao'
+  const fulfillmentMeta = getOrderFulfillmentMeta(order)
 
   return (
     <article className="order-card" data-testid={`order-${order.id}`}>
@@ -888,8 +2775,8 @@ function OrderCard({ order, stage, onOpenModal, onMoveOrder }) {
       </div>
       <div className="order-card__meta">
         <span>
-          <Icon name={order.channel === 'delivery' ? 'bike' : 'store'} size={15} />
-          {channelLabel}
+          <Icon name={fulfillmentMeta.icon} size={15} />
+          {fulfillmentMeta.label}
         </span>
         <span>
           <Icon name="clock" size={15} />
@@ -981,16 +2868,49 @@ function Board({ visibleOrders, onOpenModal, onMoveOrder }) {
   )
 }
 
-function ActivityPanel({ orders, onOpenModal }) {
-  const recent = orders.slice(0, 4)
+function OrdersSideRail({ orders, blockedOrders, suggestions, onOpenModal }) {
+  const serviceAlerts = orders
+    .filter((order) => order.status !== 'completed' && (getOrderSource(order) === 'WhatsApp' || order.status === 'analysis'))
+    .slice(0, 3)
+  const pendingAlerts = [
+    ...blockedOrders.map((order) => ({
+      id: `blocked-${order.id}`,
+      title: `#${order.id} - ${order.customer}`,
+      detail: order.reason,
+      action: () => onOpenModal('blocked'),
+    })),
+    ...orders
+      .filter((order) => order.status === 'ready')
+      .slice(0, 2)
+      .map((order) => ({
+        id: `ready-${order.id}`,
+        title: `#${order.id} - ${order.customer}`,
+        detail: 'Pedido pronto aguardando finalizacao.',
+        action: () => onOpenModal('orderDetails', order),
+      })),
+  ].slice(0, 4)
+  const requestAlerts = suggestions.length > 0
+    ? suggestions.slice(0, 3).map((item) => ({
+      id: item.id,
+      title: 'Solicitacao interna',
+      detail: item.text,
+      action: () => onOpenModal('suggestion'),
+    }))
+    : orders
+      .filter((order) => order.note)
+      .slice(0, 3)
+      .map((order) => ({
+        id: `note-${order.id}`,
+        title: `#${order.id} - ${order.customer}`,
+        detail: order.note,
+        action: () => onOpenModal('orderDetails', order),
+      }))
 
   return (
-    <aside className="activity-panel">
+    <aside className="activity-panel activity-panel--rail">
       <header>
-        <strong>Atalhos da loja</strong>
-        <Button variant="link" onClick={() => onOpenModal('reports')}>
-          Ver tudo
-        </Button>
+        <strong>Central lateral</strong>
+        <small>{serviceAlerts.length + pendingAlerts.length + requestAlerts.length} alerta(s)</small>
       </header>
 
       <div className="activity-actions">
@@ -1004,14 +2924,54 @@ function ActivityPanel({ orders, onOpenModal }) {
         </button>
       </div>
 
-      <div className="activity-list">
-        {recent.map((order) => (
-          <button type="button" key={order.id} onClick={() => onOpenModal('orderDetails', order)}>
-            <span>#{order.id}</span>
-            <strong>{order.customer}</strong>
-            <small>{formatCurrency(order.total)}</small>
-          </button>
-        ))}
+      <div className="activity-stack">
+        <section className="activity-group">
+          <div className="activity-group__header">
+            <strong>Atendimento</strong>
+            <small>{serviceAlerts.length}</small>
+          </div>
+          <div className="activity-list">
+            {serviceAlerts.map((order) => (
+              <button type="button" key={order.id} onClick={() => onOpenModal('orderDetails', order)}>
+                <span>#{order.id} - {order.customer}</span>
+                <strong>{getOrderStageLabel(order.status)}</strong>
+                <small>{getOrderSource(order)} - ETA {getOrderEta(order)}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="activity-group">
+          <div className="activity-group__header">
+            <strong>Pendencias</strong>
+            <small>{pendingAlerts.length}</small>
+          </div>
+          <div className="activity-list">
+            {pendingAlerts.length > 0 ? pendingAlerts.map((item) => (
+              <button type="button" key={item.id} onClick={item.action}>
+                <span>{item.title}</span>
+                <strong>Pendente</strong>
+                <small>{item.detail}</small>
+              </button>
+            )) : <div className="empty-modal">Sem pendencias agora.</div>}
+          </div>
+        </section>
+
+        <section className="activity-group">
+          <div className="activity-group__header">
+            <strong>Solicitacoes</strong>
+            <small>{requestAlerts.length}</small>
+          </div>
+          <div className="activity-list">
+            {requestAlerts.length > 0 ? requestAlerts.map((item) => (
+              <button type="button" key={item.id} onClick={item.action}>
+                <span>{item.title}</span>
+                <strong>Solicitacao</strong>
+                <small>{item.detail}</small>
+              </button>
+            )) : <div className="empty-modal">Nenhuma solicitacao registrada.</div>}
+          </div>
+        </section>
       </div>
     </aside>
   )
@@ -1019,6 +2979,672 @@ function ActivityPanel({ orders, onOpenModal }) {
 
 function StatusBadge({ children, tone = 'neutral' }) {
   return <span className={`status-badge status-badge--${tone}`}>{children}</span>
+}
+
+function sourceKey(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
+
+function getOrderSource(order) {
+  if (order.source) {
+    return order.source
+  }
+
+  if (inferOrderFulfillment(order) === 'dinein') {
+    return order.payment === 'Mesa' ? 'Mesa' : 'Salao'
+  }
+
+  if (order.payment === 'Mesa' || /^mesa/i.test(order.address || '')) {
+    return 'Mesa'
+  }
+
+  if (order.channel === 'pickup') {
+    return Number(order.id) % 2 === 0 ? 'Balcao' : 'WhatsApp'
+  }
+
+  const remoteSources = ['WhatsApp', 'iFood', 'Instagram', 'Cardapio Digital']
+  return remoteSources[Number(order.id) % remoteSources.length]
+}
+
+function getSourceTone(source) {
+  const tones = {
+    WhatsApp: 'success',
+    iFood: 'danger',
+    Instagram: 'warning',
+    'Cardapio Digital': 'neutral',
+    Balcao: 'muted',
+    Mesa: 'warning',
+    Salao: 'warning',
+  }
+
+  return tones[source] || 'neutral'
+}
+
+function getOrderStageLabel(status) {
+  const labels = {
+    analysis: 'Em analise',
+    production: 'Em preparo',
+    ready: 'Pronto',
+    completed: 'Concluido',
+  }
+
+  return labels[status] || status
+}
+
+function getOrderEta(order) {
+  const fulfillment = inferOrderFulfillment(order)
+
+  const etaMap = {
+    analysis: fulfillment === 'delivery' ? '8 min' : '4 min',
+    production: fulfillment === 'delivery' ? '26 min' : fulfillment === 'dinein' ? '12 min' : '14 min',
+    ready: fulfillment === 'delivery' ? '12 min' : fulfillment === 'dinein' ? 'Servir na mesa' : 'Retirada imediata',
+    completed: 'Encerrado',
+  }
+
+  return etaMap[order.status] || 'A conferir'
+}
+
+function getRouteProgress(order) {
+  const progressMap = {
+    analysis: 24,
+    production: 58,
+    ready: order.courier ? 86 : 74,
+    completed: 100,
+  }
+
+  return progressMap[order.status] || 0
+}
+
+function SourceBadge({ source }) {
+  return <span className={`source-badge source-badge--${sourceKey(source)}`}>{source}</span>
+}
+
+function OrdersCommandCenter({ orders, blockedOrders, onOpenModal, onSetActiveNav }) {
+  const activeOrders = orders.filter((order) => order.status !== 'completed')
+  const whatsappOrders = activeOrders.filter((order) => getOrderSource(order) === 'WhatsApp')
+  const counterOrders = activeOrders.filter((order) => getOrderSource(order) === 'Balcao')
+  const awaitingReview = activeOrders.filter((order) => order.status === 'analysis')
+  const readyOrders = activeOrders.filter((order) => order.status === 'ready')
+  const averageTicket = activeOrders.length > 0
+    ? activeOrders.reduce((sum, order) => sum + order.total, 0) / activeOrders.length
+    : 0
+
+  return (
+    <section className="command-center" aria-label="Central omnichannel">
+      <article className="command-card command-card--compact">
+        <div className="command-card__eyebrow">Operacao rapida</div>
+        <div className="command-metrics">
+          <div>
+            <span>WhatsApp</span>
+            <strong>{whatsappOrders.length}</strong>
+          </div>
+          <div>
+            <span>Balcao</span>
+            <strong>{counterOrders.length}</strong>
+          </div>
+          <div>
+            <span>Em analise</span>
+            <strong>{awaitingReview.length}</strong>
+          </div>
+          <div>
+            <span>Na saida</span>
+            <strong>{readyOrders.length}</strong>
+          </div>
+          <div>
+            <span>Ticket medio</span>
+            <strong>{formatCurrency(averageTicket || 0)}</strong>
+          </div>
+          <div>
+            <span>Bloqueados</span>
+            <strong>{blockedOrders.length}</strong>
+          </div>
+          <div>
+            <span>Pedidos ativos</span>
+            <strong>{activeOrders.length}</strong>
+          </div>
+        </div>
+        <div className="command-actions">
+          <Button variant="primary" onClick={() => onOpenModal('newOrder')}>Novo pedido</Button>
+          <Button onClick={() => onSetActiveNav('service')}>Atendimento</Button>
+          <Button onClick={() => onOpenModal('blocked')}>Pendencias</Button>
+        </div>
+      </article>
+    </section>
+  )
+}
+
+function ServiceInbox({ orders, chatMessages, onOpenModal }) {
+  const inbox = orders
+    .filter((order) => order.status !== 'completed')
+    .slice(0, 6)
+    .map((order, index) => ({
+      id: order.id,
+      order,
+      customer: order.customer,
+      source: getOrderSource(order),
+      status: order.status === 'analysis' ? 'Precisa de aceite' : order.status === 'ready' ? 'Cliente esperando' : 'Robo conduzindo',
+      owner: order.status === 'analysis' ? 'Fila humana' : 'Robo + operacao',
+      wait: index === 0 ? 'Agora' : `${index * 3 + 2} min`,
+      preview: order.note || 'Cliente aguardando retorno sobre o pedido.',
+    }))
+  const [selectedConversationId, setSelectedConversationId] = useState(inbox[0]?.id || null)
+
+  useEffect(() => {
+    if (!inbox.some((conversation) => conversation.id === selectedConversationId)) {
+      setSelectedConversationId(inbox[0]?.id || null)
+    }
+  }, [inbox, selectedConversationId])
+
+  const selectedConversation = inbox.find((conversation) => conversation.id === selectedConversationId) || inbox[0] || null
+  const latestChat = chatMessages[chatMessages.length - 1]
+
+  if (!selectedConversation) {
+    return null
+  }
+
+  const transcript = [
+    { id: 'bot', author: 'Robo', text: `Oi ${selectedConversation.customer}, posso te ajudar com o pedido #${selectedConversation.order.id}?`, tone: 'bot' },
+    { id: 'client', author: selectedConversation.customer, text: selectedConversation.preview, tone: 'client' },
+    { id: 'team', author: 'Equipe', text: latestChat?.text || 'Tudo certo por aqui. Vamos confirmar o melhor fluxo para voce.', tone: 'team' },
+  ]
+
+  return (
+    <article className="module-card module-card--span">
+      <header className="module-card__header">
+        <div>
+          <h2>Inbox humano + robo</h2>
+          <p>Visual de atendimento com conversa, handoff e acesso ao pedido.</p>
+        </div>
+        <Button variant="primary" onClick={() => onOpenModal('chat')}>Abrir chat</Button>
+      </header>
+
+      <div className="inbox-layout">
+        <aside className="inbox-list">
+          {inbox.map((conversation) => (
+            <button
+              type="button"
+              key={conversation.id}
+              className={`inbox-list__item ${conversation.id === selectedConversation.id ? 'is-active' : ''}`.trim()}
+              onClick={() => setSelectedConversationId(conversation.id)}
+            >
+              <span>
+                <strong>{conversation.customer}</strong>
+                <small>{conversation.status}</small>
+              </span>
+              <span>
+                <SourceBadge source={conversation.source} />
+                <small>{conversation.wait}</small>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <section className="inbox-thread">
+          <header className="inbox-thread__header">
+            <div>
+              <strong>{selectedConversation.customer}</strong>
+              <small>{selectedConversation.owner} - {selectedConversation.status}</small>
+            </div>
+            <div className="inbox-thread__actions">
+              <Button onClick={() => onOpenModal('orderDetails', selectedConversation.order)}>Pedido</Button>
+              <Button onClick={() => onOpenModal('newCoupon')}>Cupom</Button>
+              <Button variant="primary" onClick={() => onOpenModal('chat')}>Assumir</Button>
+            </div>
+          </header>
+
+          <div className="thread-messages">
+            {transcript.map((message) => (
+              <article className={`thread-message thread-message--${message.tone}`} key={message.id}>
+                <strong>{message.author}</strong>
+                <p>{message.text}</p>
+              </article>
+            ))}
+          </div>
+
+          <footer className="thread-replies">
+            <button type="button">Confirmar endereco</button>
+            <button type="button">Oferecer upsell</button>
+            <button type="button">Transferir para humano</button>
+            <button type="button">Enviar link do cardapio</button>
+          </footer>
+        </section>
+      </div>
+    </article>
+  )
+}
+
+function MenuPreviewPanel({ storeProfile, categories, products, coupons, qrCodes, onOpenModal }) {
+  const activeProducts = products.filter((product) => product.active)
+  const [previewProductId, setPreviewProductId] = useState(activeProducts[0]?.id || null)
+
+  useEffect(() => {
+    if (!activeProducts.some((product) => product.id === previewProductId)) {
+      setPreviewProductId(activeProducts[0]?.id || null)
+    }
+  }, [activeProducts, previewProductId])
+
+  const previewProduct = activeProducts.find((product) => product.id === previewProductId) || activeProducts[0] || null
+  const upsellProducts = activeProducts.filter((product) => product.id !== previewProduct?.id).slice(0, 3)
+  const activeCoupon = coupons.find((coupon) => coupon.active) || null
+  const leadQr = qrCodes[0] || null
+
+  if (!previewProduct) {
+    return null
+  }
+
+  return (
+    <section className="menu-preview-grid">
+      <article className="menu-preview-card">
+        <header className="menu-preview-card__header">
+          <div>
+            <span>Modo cliente</span>
+            <strong>{storeProfile.name}</strong>
+          </div>
+          <Button onClick={() => onOpenModal('newQr')}>QR</Button>
+        </header>
+        <div className="menu-phone">
+          <div className="menu-phone__hero">
+            <small>{storeProfile.schedule}</small>
+            <strong>{previewProduct.name}</strong>
+            <p>{previewProduct.category} com pagamento online, agendamento e retirada.</p>
+          </div>
+          <div className="menu-phone__chips">
+            {categories.slice(0, 4).map((category) => (
+              <span key={category.id}>{category.name}</span>
+            ))}
+          </div>
+          <article className="menu-phone__product">
+            <span className="product-thumb" />
+            <div>
+              <strong>{previewProduct.name}</strong>
+              <small>A partir de {formatCurrency(previewProduct.price)}</small>
+            </div>
+            <Button variant="primary" onClick={() => setPreviewProductId(previewProduct.id)}>Ver item</Button>
+          </article>
+          <div className="menu-phone__upsell">
+            <span>Pece tambem</span>
+            {upsellProducts.map((product) => (
+              <button type="button" key={product.id} onClick={() => setPreviewProductId(product.id)}>
+                <strong>{product.name}</strong>
+                <small>{formatCurrency(product.price)}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article className="menu-preview-card">
+        <header className="menu-preview-card__header">
+          <div>
+            <span>Checkout e fidelizacao</span>
+            <strong>O que ainda faltava no visual ja aparece aqui</strong>
+          </div>
+          <Button variant="primary" onClick={() => onOpenModal('newCoupon')}>Cupom</Button>
+        </header>
+        <div className="checkout-preview">
+          <div className="checkout-preview__summary">
+            <span>Total estimado</span>
+            <strong>{formatCurrency(previewProduct.price + upsellProducts.slice(0, 1).reduce((sum, product) => sum + product.price, 0))}</strong>
+            <small>Cartao, dinheiro, carteiras digitais e pagamento dividido.</small>
+          </div>
+          <div className="checkout-preview__blocks">
+            <article>
+              <strong>Agendamento</strong>
+              <small>Hoje 20:15 ou retirada imediata.</small>
+            </article>
+            <article>
+              <strong>Taxa de entrega</strong>
+              <small>Raio de {storeProfile.deliveryRadius} km com bairros e regioes.</small>
+            </article>
+            <article>
+              <strong>Peça de novo</strong>
+              <small>Historico do cliente com repeticao rapida e sugestoes.</small>
+            </article>
+            <article>
+              <strong>Cashback</strong>
+              <small>{activeCoupon ? `${activeCoupon.code} ativo para recompra.` : 'Pronto para ativar campanhas.'}</small>
+            </article>
+          </div>
+          <div className="checkout-preview__footer">
+            <div>
+              <span>Autoatendimento</span>
+              <strong>{leadQr ? `${leadQr.table} com QR ativo` : 'Gerar QR para mesa'}</strong>
+            </div>
+            <Button onClick={() => onOpenModal('botTraining')}>Treinar robo</Button>
+          </div>
+        </div>
+      </article>
+    </section>
+  )
+}
+
+function WaiterConsole({ tables, orders, qrCodes, onOpenModal }) {
+  const [activeTableId, setActiveTableId] = useState(tables[0]?.id || null)
+
+  useEffect(() => {
+    if (!tables.some((table) => table.id === activeTableId)) {
+      setActiveTableId(tables[0]?.id || null)
+    }
+  }, [tables, activeTableId])
+
+  const activeTable = tables.find((table) => table.id === activeTableId) || tables[0] || null
+
+  if (!activeTable) {
+    return null
+  }
+
+  const tableOrders = orders.filter((order) =>
+    order.address === activeTable.name
+    || order.customer === activeTable.customer
+    || (order.payment === 'Mesa' && order.customer === activeTable.customer),
+  )
+  const qrCode = qrCodes.find((qr) => qr.table === activeTable.name) || null
+
+  return (
+    <section className="waiter-console">
+      <article className="waiter-console__device">
+        <header>
+          <div>
+            <span>Modo garcom</span>
+            <strong>Aplicacao de mesa e comanda</strong>
+          </div>
+          <Button onClick={() => onOpenModal('newQr')}>Novo QR</Button>
+        </header>
+        <div className="waiter-phone">
+          {tables.map((table) => (
+            <button
+              type="button"
+              key={table.id}
+              className={`waiter-phone__table ${table.id === activeTable.id ? 'is-active' : ''}`.trim()}
+              onClick={() => setActiveTableId(table.id)}
+            >
+              <span>{table.name}</span>
+              <strong>{table.customer || 'Livre'}</strong>
+              <small>{formatCurrency(table.total)}</small>
+            </button>
+          ))}
+        </div>
+      </article>
+
+      <article className="waiter-console__detail">
+        <header>
+          <div>
+            <span>Mesa selecionada</span>
+            <strong>{activeTable.name}</strong>
+          </div>
+          <StatusBadge tone={activeTable.status === 'free' ? 'success' : activeTable.status === 'closing' ? 'warning' : 'danger'}>
+            {activeTable.status === 'free' ? 'Livre' : activeTable.status === 'closing' ? 'Fechando' : 'Ativa'}
+          </StatusBadge>
+        </header>
+        <div className="waiter-stats">
+          <article>
+            <span>Cliente</span>
+            <strong>{activeTable.customer || 'Aguardando abertura'}</strong>
+          </article>
+          <article>
+            <span>Pedidos ligados</span>
+            <strong>{tableOrders.length}</strong>
+          </article>
+          <article>
+            <span>QR na mesa</span>
+            <strong>{qrCode ? `${qrCode.scans} leitura(s)` : 'Sem QR'}</strong>
+          </article>
+          <article>
+            <span>Fechamento</span>
+            <strong>{formatCurrency(activeTable.total)}</strong>
+          </article>
+        </div>
+        <div className="waiter-actions">
+          <Button variant="primary" onClick={() => onOpenModal('tableOrder', activeTable)}>Adicionar pedido</Button>
+          <Button onClick={() => onOpenModal(qrCode ? 'printQr' : 'newQr', qrCode || null)}>
+            {qrCode ? 'Imprimir QR' : 'Gerar QR'}
+          </Button>
+          <Button onClick={() => onOpenModal('closeTable', activeTable)}>Fechar conta</Button>
+        </div>
+      </article>
+    </section>
+  )
+}
+
+function DeliveryRadar({ orders, couriers, onOpenModal }) {
+  const routes = orders
+    .filter((order) => order.channel === 'delivery' && order.status !== 'completed')
+    .map((order, index) => ({
+      ...order,
+      source: getOrderSource(order),
+      eta: getOrderEta(order),
+      route: `Rota ${String.fromCharCode(65 + index)}`,
+      progress: getRouteProgress(order),
+    }))
+
+  if (routes.length === 0) {
+    return null
+  }
+
+  return (
+    <article className="module-card module-card--span">
+      <header className="module-card__header">
+        <div>
+          <h2>Radar de entrega</h2>
+          <p>Rota, ETA, origem e entregador em uma visualizacao mais apresentavel.</p>
+        </div>
+        <Button onClick={() => onOpenModal('deliveryMap')}>Mapa expandido</Button>
+      </header>
+
+      <div className="delivery-radar">
+        <div className="delivery-radar__summary">
+          <article>
+            <span>Rotas abertas</span>
+            <strong>{routes.length}</strong>
+          </article>
+          <article>
+            <span>Entregadores ativos</span>
+            <strong>{couriers.filter((courier) => courier.active).length}</strong>
+          </article>
+          <article>
+            <span>Pedidos sem motoboy</span>
+            <strong>{routes.filter((route) => !route.courier).length}</strong>
+          </article>
+        </div>
+
+        <div className="route-grid">
+          {routes.map((route) => (
+            <article className="route-card" key={route.id}>
+              <header>
+                <div>
+                  <strong>{route.route}</strong>
+                  <small>Pedido #{route.id} - {route.customer}</small>
+                </div>
+                <SourceBadge source={route.source} />
+              </header>
+              <div className="route-card__progress">
+                <span style={{ width: `${route.progress}%` }} />
+              </div>
+              <div className="route-card__meta">
+                <span>ETA {route.eta}</span>
+                <span>{route.courier || 'Aguardando atribuicao'}</span>
+                <span>{getOrderStageLabel(route.status)}</span>
+              </div>
+              <footer>
+                <Button onClick={() => onOpenModal('orderDetails', route)}>Detalhes</Button>
+                {!route.courier ? <Button variant="primary" onClick={() => onOpenModal('assignDelivery', route)}>Atribuir</Button> : null}
+              </footer>
+            </article>
+          ))}
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function CashDeskPanel({ orders, finance, cashOpen, onOpenModal }) {
+  const paymentMix = ['Cartao', 'Dinheiro', 'Dividir', 'Mesa'].map((payment) => ({
+    payment,
+    amount: orders
+      .filter((order) => order.payment === payment)
+      .reduce((sum, order) => sum + order.total, 0),
+  }))
+  const pendingFinance = finance.filter((item) => item.status !== 'Pago')
+  const drawerEstimate = paymentMix.find((item) => item.payment === 'Dinheiro')?.amount || 0
+
+  return (
+    <article className="module-card module-card--span">
+      <header className="module-card__header">
+        <div>
+          <h2>Frente de caixa</h2>
+          <p>Abertura, recebimentos por forma de pagamento e fechamento visual.</p>
+        </div>
+        <Button variant="primary" onClick={() => onOpenModal('cash')}>{cashOpen ? 'Fechar caixa' : 'Abrir caixa'}</Button>
+      </header>
+
+      <div className="cash-grid">
+        <div className="cash-grid__status">
+          <span>Status atual</span>
+          <strong>{cashOpen ? 'Caixa aberto para operacao' : 'Caixa fechado para conferencia'}</strong>
+          <small>Dinheiro estimado no gaveteiro: {formatCurrency(drawerEstimate)}</small>
+        </div>
+
+        <div className="cash-grid__payments">
+          {paymentMix.map((item) => (
+            <article key={item.payment}>
+              <span>{item.payment}</span>
+              <strong>{formatCurrency(item.amount)}</strong>
+            </article>
+          ))}
+        </div>
+
+        <div className="cash-grid__pending">
+          <span>Pendencias do turno</span>
+          <strong>{pendingFinance.length} lancamento(s)</strong>
+          <small>Use o fechamento para conferir dinheiro, pix, cartao e comandas.</small>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function ReportsDeepDive({ orders, products, tables, finance, coupons, recoveries, onOpenModal }) {
+  const bySource = ['WhatsApp', 'iFood', 'Instagram', 'Cardapio Digital', 'Balcao', 'Mesa'].map((source) => ({
+    source,
+    total: orders
+      .filter((order) => getOrderSource(order) === source)
+      .reduce((sum, order) => sum + order.total, 0),
+  })).filter((item) => item.total > 0)
+  const maxSourceTotal = Math.max(...bySource.map((item) => item.total), 1)
+  const topProducts = Object.entries(
+    orders.reduce((accumulator, order) => {
+      order.items.forEach((item) => {
+        accumulator[item] = (accumulator[item] || 0) + 1
+      })
+      return accumulator
+    }, {}),
+  )
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4)
+  const balance = finance.filter((item) => item.type === 'Entrada').reduce((sum, item) => sum + item.amount, 0)
+    - finance.filter((item) => item.type === 'Saida').reduce((sum, item) => sum + item.amount, 0)
+
+  return (
+    <article className="module-card module-card--span">
+      <header className="module-card__header">
+        <div>
+          <h2>Dashboard executivo</h2>
+          <p>Graficos e resumos para apresentar desempenho por canal, produto e operacao.</p>
+        </div>
+        <Button onClick={() => onOpenModal('exportReports')}>Exportar</Button>
+      </header>
+
+      <div className="insights-grid">
+        <section className="insights-panel">
+          <strong>Vendas por origem</strong>
+          <div className="bar-list">
+            {bySource.map((item) => (
+              <article className="bar-row" key={item.source}>
+                <span>{item.source}</span>
+                <div>
+                  <b style={{ width: `${(item.total / maxSourceTotal) * 100}%` }} />
+                </div>
+                <strong>{formatCurrency(item.total)}</strong>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="insights-panel">
+          <strong>Top itens e operacao</strong>
+          <div className="mini-kpi-grid">
+            <article>
+              <span>Saldo</span>
+              <strong>{formatCurrency(balance)}</strong>
+            </article>
+            <article>
+              <span>Produtos ativos</span>
+              <strong>{products.filter((product) => product.active).length}</strong>
+            </article>
+            <article>
+              <span>Mesas ocupadas</span>
+              <strong>{tables.filter((table) => table.status !== 'free').length}</strong>
+            </article>
+            <article>
+              <span>Campanhas ativas</span>
+              <strong>{coupons.filter((coupon) => coupon.active).length + recoveries.filter((recovery) => recovery.active).length}</strong>
+            </article>
+          </div>
+          <div className="top-items">
+            {topProducts.map(([label, count]) => (
+              <article key={label}>
+                <span>{label}</span>
+                <strong>{count} pedido(s)</strong>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </article>
+  )
+}
+
+function IntegrationStudio({ integrations, onOpenModal }) {
+  const setupPhases = [
+    { id: 'channels', title: 'Canais de venda', count: integrations.filter((integration) => ['iFood', 'Rappi'].includes(integration.name)).length },
+    { id: 'marketing', title: 'Ads e pixel', count: integrations.filter((integration) => /Ads|Pixel/i.test(integration.name)).length },
+    { id: 'payments', title: 'Pagamento online', count: integrations.filter((integration) => /Pagamento/i.test(integration.name)).length },
+  ]
+
+  return (
+    <article className="module-card module-card--span">
+      <header className="module-card__header">
+        <div>
+          <h2>Studio de integracoes</h2>
+          <p>Checklist, status de sincronizacao e visao de implantacao por parceiro.</p>
+        </div>
+        <Button onClick={() => onOpenModal('integrationHelp')}>Checklist</Button>
+      </header>
+
+      <div className="integration-studio">
+        <div className="integration-studio__phases">
+          {setupPhases.map((phase) => (
+            <article key={phase.id}>
+              <span>{phase.title}</span>
+              <strong>{phase.count} frente(s)</strong>
+            </article>
+          ))}
+        </div>
+
+        <div className="integration-log">
+          {integrations.map((integration, index) => (
+            <article className="integration-log__row" key={integration.id}>
+              <span>
+                <strong>{integration.name}</strong>
+                <small>{integration.status}</small>
+              </span>
+              <small>{integration.active ? `Sincronizado ha ${index + 1} min` : 'Aguardando credenciais'}</small>
+            </article>
+          ))}
+        </div>
+      </div>
+    </article>
+  )
 }
 
 function CounterSection({ products, cart, onAddCart, onRemoveCart, onClearCart, onOpenModal }) {
@@ -1098,18 +3724,80 @@ function MenuSection({
   onCopyProductLink,
   onToggleCategory,
   onToggleProduct,
+  onUpdateProductConfig,
+  onUpdateProductFlavor,
+  onRemoveProductFlavor,
+  onAddProductAddonGroup,
+  onUpdateProductAddonGroup,
+  onRemoveProductAddonGroup,
+  onAddProductAddonOption,
+  onUpdateProductAddonOption,
+  onRemoveProductAddonOption,
+  onToggleProductAvailabilityDay,
   onOpenModal,
 }) {
-  const visibleProducts = products.filter((product) => {
-    const categoryMatch = selectedCategory === 'all' || product.category === selectedCategory
-    const searchMatch = product.name.toLowerCase().includes(menuSearch.toLowerCase())
-    return categoryMatch && searchMatch
-  })
-  const activeCategory = selectedCategory === 'all' ? categories[0] : categories.find((category) => category.name === selectedCategory)
-  const activeCategoryProducts = visibleProducts.filter((product) =>
-    selectedCategory === 'all' ? product.category === activeCategory?.name : true,
+  const [expandedCategories, setExpandedCategories] = useState(() =>
+    Object.fromEntries(categories.map((category, index) => [category.id, index === 0])),
   )
-  const qualityPercent = Math.min(98, 64 + products.filter((product) => product.active).length * 6)
+  const [expandedProducts, setExpandedProducts] = useState(() =>
+    Object.fromEntries(products.map((product, index) => [product.id, index === 0])),
+  )
+
+  useEffect(() => {
+    setExpandedCategories((current) =>
+      Object.fromEntries(categories.map((category, index) => [category.id, current[category.id] ?? index === 0])),
+    )
+  }, [categories])
+
+  useEffect(() => {
+    setExpandedProducts((current) =>
+      Object.fromEntries(products.map((product, index) => [product.id, current[product.id] ?? index === 0])),
+    )
+  }, [products])
+
+  const normalizedSearch = menuSearch.trim().toLowerCase()
+  const qualityPercent = Math.min(
+    98,
+    Math.round(
+      ((products.filter((product) => product.active).length + categories.filter((category) => category.active).length) /
+        Math.max(products.length + categories.length, 1)) *
+        100,
+    ),
+  )
+
+  const categoryCards = useMemo(() => (
+    categories
+      .map((category) => {
+        if (selectedCategory !== 'all' && category.name !== selectedCategory) {
+          return null
+        }
+
+        const allCategoryProducts = products.filter((product) => product.category === category.name)
+        const categoryNameMatches = normalizedSearch.length > 0 && category.name.toLowerCase().includes(normalizedSearch)
+        const visibleProducts = normalizedSearch && !categoryNameMatches
+          ? allCategoryProducts.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
+          : allCategoryProducts
+
+        if (normalizedSearch && visibleProducts.length === 0 && !categoryNameMatches) {
+          return null
+        }
+
+        return {
+          category,
+          visibleProducts,
+          totalProducts: allCategoryProducts.length,
+        }
+      })
+      .filter(Boolean)
+  ), [categories, normalizedSearch, products, selectedCategory])
+
+  function toggleCategoryExpansion(categoryId) {
+    setExpandedCategories((current) => ({ ...current, [categoryId]: !current[categoryId] }))
+  }
+
+  function toggleProductExpansion(productId) {
+    setExpandedProducts((current) => ({ ...current, [productId]: !current[productId] }))
+  }
 
   return (
     <section className="menu-manager">
@@ -1118,9 +3806,6 @@ function MenuSection({
           <h2>Gestor de cardapio</h2>
           <p>Inicio / Gestor de cardapio / Gestor / PDV</p>
         </div>
-        <button className="assistant-chip" data-testid="menu-bot-training" type="button" onClick={() => onOpenModal('botTraining')}>
-          <Icon name="message" size={18} />
-        </button>
       </header>
 
       <section className="menu-quality">
@@ -1144,91 +3829,445 @@ function MenuSection({
         <label className="menu-manager__search">
           <input value={menuSearch} onChange={(event) => onMenuSearch(event.target.value)} placeholder="Pesquisar" />
         </label>
-        <Button className="menu-action-button" data-testid="menu-new-product" onClick={() => onOpenModal('newProduct')}>Acoes</Button>
+        <Button
+          className="menu-action-button"
+          data-testid="menu-new-product"
+          onClick={() => onOpenModal('newProduct', selectedCategory === 'all' ? null : { category: selectedCategory })}
+        >
+          Acoes
+        </Button>
         <Button variant="primary" data-testid="menu-new-category" onClick={() => onOpenModal('newCategory')}>
           <Icon name="plus" size={18} />
           Nova categoria
         </Button>
       </section>
 
-      <article className="menu-category-panel">
-        <header className="menu-category-panel__header">
-          <span className="drag-handle">::</span>
-          <div>
-            <h3>{activeCategory?.name ?? 'Mais Vendidas'} <span>v</span></h3>
-            <small>Itens principais</small>
-          </div>
-          <div className="menu-category-panel__tools">
-            <span>Esgotar tudo</span>
-            <button
-              className={`mini-toggle ${activeCategory?.active ? '' : 'is-off'}`}
-              type="button"
-              aria-label="Ativar categoria"
-              onClick={() => activeCategory && onToggleCategory(activeCategory.id)}
-            />
-            <button
-              className="select-action"
-              type="button"
-              onClick={() => activeCategory && onOpenModal('editCategory', activeCategory)}
-            >
-              Editar categoria
-            </button>
-            <button
-              className="chevron-button"
-              type="button"
-              aria-label="Apagar categoria"
-              onClick={() => activeCategory && onOpenModal('deleteCategory', activeCategory)}
-            >
-              <Icon name="trash" size={15} />
-            </button>
-          </div>
-        </header>
+      <div className="menu-manager__scroll">
+        <div className="menu-category-stack">
+          {categoryCards.length > 0 ? categoryCards.map(({ category, visibleProducts, totalProducts }) => {
+            const isCategoryExpanded = normalizedSearch ? true : Boolean(expandedCategories[category.id])
 
-        <div className="menu-product-list">
-          {activeCategoryProducts.map((product) => (
-            <article className="menu-product-row" data-testid={`product-${product.id}`} key={product.id}>
-              <span className="drag-handle">::</span>
-              <span className="product-thumb" />
-              <div className="menu-product-row__name">
-                <strong>{product.name}</strong>
-                <small>{product.category}</small>
+            return (
+              <article className={`menu-category-card ${isCategoryExpanded ? 'is-open' : ''}`.trim()} key={category.id}>
+                <header className="menu-category-card__header">
+                  <span className="drag-handle" aria-hidden="true" />
+
+                  <div className="menu-category-card__lead">
+                    <div className="menu-category-card__meta">
+                      <h3>{category.name}</h3>
+                      <small>{totalProducts} item(ns) principais</small>
+                    </div>
+
+                    <button
+                      className="menu-inline-action"
+                      type="button"
+                      onClick={() => onOpenModal('newProduct', { category: category.name })}
+                    >
+                      <Icon name="plus" size={16} />
+                      Adicionar item
+                    </button>
+                  </div>
+
+                  <div className="menu-category-card__tools">
+                    <div className="menu-toggle-group">
+                      <span>Esgotar tudo</span>
+                      <button
+                        className={`mini-toggle ${category.active ? '' : 'is-off'}`.trim()}
+                        type="button"
+                        aria-label={`Ativar categoria ${category.name}`}
+                        onClick={() => onToggleCategory(category.id)}
+                      />
+                    </div>
+
+                    <button className="select-action" type="button" onClick={() => onOpenModal('editCategory', category)}>
+                      Editar categoria
+                    </button>
+
+                    <Button
+                      className="menu-row-icon-button menu-row-icon-button--danger"
+                      variant="danger"
+                      onClick={() => onOpenModal('deleteCategory', category)}
+                    >
+                      <Icon name="trash" size={15} />
+                    </Button>
+
+                    <button
+                      className={`chevron-button ${isCategoryExpanded ? 'is-open' : ''}`.trim()}
+                      type="button"
+                      aria-label={isCategoryExpanded ? 'Recolher categoria' : 'Expandir categoria'}
+                      onClick={() => toggleCategoryExpansion(category.id)}
+                    >
+                      <Icon name="arrow" size={16} />
+                    </button>
+                  </div>
+                </header>
+
+                {isCategoryExpanded ? (
+                  <div className="menu-category-card__body">
+                    {visibleProducts.length > 0 ? visibleProducts.map((product) => {
+                      const thumbClass = getMenuProductThumbClass(product)
+                      const isProductExpanded = normalizedSearch ? true : Boolean(expandedProducts[product.id])
+
+                      return (
+                        <article className={`menu-product-card ${isProductExpanded ? 'is-open' : ''}`.trim()} key={product.id}>
+                          <div className="menu-product-row" data-testid={`product-${product.id}`}>
+                            <span className="drag-handle" aria-hidden="true" />
+                            <span className={`product-thumb ${thumbClass}`.trim()} />
+
+                            <div className="menu-product-row__name">
+                              <strong>{product.name}</strong>
+                              <small>{product.category} - {product.stock} em estoque</small>
+                            </div>
+
+                            <div className="menu-product-row__controls">
+                              <button className="link-button" type="button" title="Copiar link do item" onClick={() => onCopyProductLink(product)}>
+                                <Icon name="chain" size={16} />
+                              </button>
+
+                              <div className="price-cell">
+                                <span>A partir de</span>
+                                <strong>{formatCurrency(product.price)}</strong>
+                              </div>
+
+                              <button className="menu-row-icon-button" type="button" aria-label={`Editar ${product.name}`} onClick={() => onOpenModal('editProduct', product)}>
+                                <Icon name="edit" size={15} />
+                              </button>
+
+                              <Button
+                                className="menu-row-icon-button menu-row-icon-button--danger"
+                                variant="danger"
+                                onClick={() => onOpenModal('deleteProduct', product)}
+                              >
+                                <Icon name="trash" size={15} />
+                              </Button>
+
+                              <div className="menu-toggle-group menu-toggle-group--compact">
+                                <span>Esgotar</span>
+                                <button
+                                  className={`mini-toggle ${product.active ? '' : 'is-off'}`.trim()}
+                                  type="button"
+                                  aria-label={`Esgotar ${product.name}`}
+                                  onClick={() => onToggleProduct(product.id)}
+                                />
+                              </div>
+
+                              <button className="select-action" type="button" onClick={() => onOpenModal('editProduct', product)}>
+                                Editar item
+                              </button>
+
+                              <button
+                                className={`chevron-button ${isProductExpanded ? 'is-open' : ''}`.trim()}
+                                type="button"
+                                aria-label={isProductExpanded ? 'Recolher item' : 'Expandir item'}
+                                onClick={() => toggleProductExpansion(product.id)}
+                              >
+                                <Icon name="arrow" size={16} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {isProductExpanded ? (
+                            <div className="menu-product-editor">
+                              <section className="menu-product-settings">
+                                <label className="menu-setting-field">
+                                  <span>Maximo de sabores</span>
+                                  <input
+                                    min="1"
+                                    type="number"
+                                    value={product.maxFlavors}
+                                    onChange={(event) => onUpdateProductConfig(product.id, { maxFlavors: Number(event.target.value) || 1 })}
+                                  />
+                                </label>
+
+                                <label className="menu-setting-field">
+                                  <span>Disponivel das</span>
+                                  <input
+                                    type="time"
+                                    value={product.availableFrom}
+                                    onChange={(event) => onUpdateProductConfig(product.id, { availableFrom: event.target.value })}
+                                  />
+                                </label>
+
+                                <label className="menu-setting-field">
+                                  <span>Ate</span>
+                                  <input
+                                    type="time"
+                                    value={product.availableTo}
+                                    onChange={(event) => onUpdateProductConfig(product.id, { availableTo: event.target.value })}
+                                  />
+                                </label>
+
+                                <div className="menu-setting-field menu-setting-field--wide">
+                                  <span>Dias da semana</span>
+                                  <div className="menu-day-selector">
+                                    {WEEK_DAY_OPTIONS.map((day) => (
+                                      <button
+                                        className={product.availableDays.includes(day.id) ? 'is-active' : ''}
+                                        key={`${product.id}-${day.id}`}
+                                        type="button"
+                                        onClick={() => onToggleProductAvailabilityDay(product.id, day.id)}
+                                      >
+                                        {day.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="menu-product-summary">
+                                  <strong>{getProductAvailabilityLabel(product)}</strong>
+                                  <small>{product.flavors.length} {getFlavorEntityLabel(product, true)} cadastrados neste item</small>
+                                </div>
+
+                                <button
+                                  className="menu-inline-action menu-inline-action--panel"
+                                  type="button"
+                                  onClick={() => onOpenModal('newFlavor', { productId: product.id, product })}
+                                >
+                                  <Icon name="plus" size={16} />
+                                  Adicionar {getFlavorEntityLabel(product)}
+                                </button>
+                              </section>
+
+                              <section className="menu-option-table">
+                                <header className="menu-option-table__header">
+                                  <strong>{isComboProduct(product) ? 'Subsabores do combo' : 'Sabores e variacoes do item'}</strong>
+                                  <span className="menu-option-table__qty">
+                                    <small>Qtd</small>
+                                    <b>De 1 a {product.maxFlavors}</b>
+                                  </span>
+                                  <span className="menu-option-table__stock-label">Esgotar</span>
+                                </header>
+
+                                {product.flavors.map((flavor) => (
+                                  <div className="menu-option-row" key={flavor.id}>
+                                    <span className={`menu-option-thumb ${thumbClass}`.trim()} />
+                                    <input
+                                      value={flavor.name}
+                                      onChange={(event) => onUpdateProductFlavor(product.id, flavor.id, { name: event.target.value })}
+                                    />
+                                    <input
+                                      className="menu-option-row__price"
+                                      inputMode="decimal"
+                                      value={String(flavor.price).replace('.', ',')}
+                                      onChange={(event) => onUpdateProductFlavor(product.id, flavor.id, {
+                                        price: Number(String(event.target.value).replace(',', '.')) || 0,
+                                      })}
+                                    />
+                                    <span className="menu-option-row__limit">Max. {product.maxFlavors}</span>
+                                    <button
+                                      className={`mini-toggle ${flavor.active ? '' : 'is-off'}`.trim()}
+                                      type="button"
+                                      aria-label={`Alternar sabor ${flavor.name}`}
+                                      onClick={() => onUpdateProductFlavor(product.id, flavor.id, { active: !flavor.active })}
+                                    />
+                                    <button
+                                      className="menu-option-row__delete"
+                                      type="button"
+                                      aria-label={`Excluir ${getFlavorEntityLabel(product)} ${flavor.name}`}
+                                      onClick={() => onRemoveProductFlavor(product.id, flavor.id)}
+                                    >
+                                      <Icon name="trash" size={15} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </section>
+
+                              <section className="menu-addon-stack">
+                                <header className="menu-addon-stack__header">
+                                  <div>
+                                    <strong>Grupos de adicionais</strong>
+                                    <p>A ordem abaixo define a sequencia exibida no pedido deste item.</p>
+                                  </div>
+
+                                  <button
+                                    className="menu-inline-action"
+                                    data-testid={`add-addon-group-${product.id}`}
+                                    type="button"
+                                    onClick={() => onAddProductAddonGroup(product.id)}
+                                  >
+                                    <Icon name="plus" size={16} />
+                                    Adicionar grupo
+                                  </button>
+                                </header>
+
+                                {product.addonGroups.length > 0 ? (
+                                  <div className="menu-addon-stack__list">
+                                    {product.addonGroups.map((group, groupIndex) => (
+                                      <article className="menu-addon-card" data-testid={`addon-group-${group.id}`} key={group.id}>
+                                        <header className="menu-addon-card__header">
+                                          <div>
+                                            <strong>{groupIndex + 1}. {group.name || `Grupo ${groupIndex + 1}`}</strong>
+                                            <small>
+                                              {group.required ? 'Etapa obrigatoria' : 'Etapa opcional'} - {group.options.length} opcao(oes)
+                                            </small>
+                                          </div>
+
+                                          <div className="menu-addon-card__actions">
+                                            <button
+                                              className="menu-inline-action"
+                                              data-testid={`add-addon-option-${group.id}`}
+                                              type="button"
+                                              onClick={() => onAddProductAddonOption(product.id, group.id)}
+                                            >
+                                              <Icon name="plus" size={16} />
+                                              Adicionar opcao
+                                            </button>
+
+                                            <button
+                                              className="menu-option-row__delete"
+                                              data-testid={`remove-addon-group-${group.id}`}
+                                              type="button"
+                                              aria-label={`Excluir grupo ${group.name}`}
+                                              onClick={() => onRemoveProductAddonGroup(product.id, group.id)}
+                                            >
+                                              <Icon name="trash" size={15} />
+                                            </button>
+                                          </div>
+                                        </header>
+
+                                        <div className="menu-addon-grid">
+                                          <label className="menu-setting-field menu-addon-grid__name">
+                                            <span>Nome do grupo</span>
+                                            <input
+                                              data-testid={`addon-group-name-${group.id}`}
+                                              value={group.name}
+                                              onChange={(event) => onUpdateProductAddonGroup(product.id, group.id, { name: event.target.value })}
+                                            />
+                                          </label>
+
+                                          <label className="menu-setting-field">
+                                            <span>Minimo</span>
+                                            <input
+                                              min={group.required ? '1' : '0'}
+                                              type="number"
+                                              value={group.minSelect}
+                                              onChange={(event) => onUpdateProductAddonGroup(product.id, group.id, {
+                                                minSelect: Number(event.target.value) || 0,
+                                              })}
+                                            />
+                                          </label>
+
+                                          <label className="menu-setting-field">
+                                            <span>Maximo</span>
+                                            <input
+                                              min="1"
+                                              type="number"
+                                              value={group.maxSelect}
+                                              onChange={(event) => onUpdateProductAddonGroup(product.id, group.id, {
+                                                maxSelect: Number(event.target.value) || 1,
+                                              })}
+                                            />
+                                          </label>
+
+                                          <div className="menu-setting-field menu-setting-field--toggle">
+                                            <span>Obrigatorio</span>
+                                            <div className="menu-setting-switch">
+                                              <strong>{group.required ? 'Sim' : 'Nao'}</strong>
+                                              <button
+                                                className={`mini-toggle ${group.required ? '' : 'is-off'}`.trim()}
+                                                data-testid={`addon-group-required-${group.id}`}
+                                                type="button"
+                                                aria-label={`Alternar obrigatoriedade do grupo ${group.name}`}
+                                                onClick={() => onUpdateProductAddonGroup(product.id, group.id, { required: !group.required })}
+                                              />
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <section className="menu-option-table menu-option-table--addons">
+                                          <header className="menu-option-table__header">
+                                            <strong>Opcoes deste grupo</strong>
+                                            <span className="menu-option-table__qty">
+                                              <small>Selecao</small>
+                                              <b>{group.required ? `De ${Math.max(1, group.minSelect)} a ${group.maxSelect}` : `Ate ${group.maxSelect}`}</b>
+                                            </span>
+                                            <span className="menu-option-table__stock-label">Ativo</span>
+                                          </header>
+
+                                          {group.options.length > 0 ? group.options.map((option) => (
+                                            <div className="menu-option-row" key={option.id}>
+                                              <span className={`menu-option-thumb ${thumbClass}`.trim()} />
+                                              <input
+                                                data-testid={`addon-option-name-${option.id}`}
+                                                value={option.name}
+                                                onChange={(event) => onUpdateProductAddonOption(product.id, group.id, option.id, { name: event.target.value })}
+                                              />
+                                              <input
+                                                className="menu-option-row__price"
+                                                inputMode="decimal"
+                                                value={String(option.price).replace('.', ',')}
+                                                onChange={(event) => onUpdateProductAddonOption(product.id, group.id, option.id, {
+                                                  price: Number(String(event.target.value).replace(',', '.')) || 0,
+                                                })}
+                                              />
+                                              <span className="menu-option-row__limit">Max. {group.maxSelect}</span>
+                                              <button
+                                                className={`mini-toggle ${option.active ? '' : 'is-off'}`.trim()}
+                                                data-testid={`addon-option-active-${option.id}`}
+                                                type="button"
+                                                aria-label={`Alternar adicional ${option.name}`}
+                                                onClick={() => onUpdateProductAddonOption(product.id, group.id, option.id, { active: !option.active })}
+                                              />
+                                              <button
+                                                className="menu-option-row__delete"
+                                                data-testid={`remove-addon-option-${option.id}`}
+                                                type="button"
+                                                aria-label={`Excluir adicional ${option.name}`}
+                                                onClick={() => onRemoveProductAddonOption(product.id, group.id, option.id)}
+                                              >
+                                                <Icon name="trash" size={15} />
+                                              </button>
+                                            </div>
+                                          )) : (
+                                            <div className="menu-addon-empty">
+                                              <strong>Nenhuma opcao cadastrada neste grupo.</strong>
+                                              <p>Adicione opcoes para que esta etapa apareca no pedido.</p>
+                                            </div>
+                                          )}
+                                        </section>
+                                      </article>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="menu-addon-empty">
+                                    <strong>Nenhum grupo de adicional configurado.</strong>
+                                    <p>Crie etapas como adicionais, borda, molhos, ponto da carne ou qualquer outra escolha deste produto.</p>
+                                  </div>
+                                )}
+                              </section>
+                            </div>
+                          ) : null}
+                        </article>
+                      )
+                    }) : (
+                      <div className="menu-category-card__empty">
+                        <strong>Nenhum item localizado nesta categoria.</strong>
+                        <button type="button" onClick={() => onOpenModal('newProduct', { category: category.name })}>
+                          Criar primeiro item
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </article>
+            )
+          }) : (
+            <article className="menu-category-card menu-category-card--empty">
+              <div className="menu-category-card__empty">
+                <strong>Nenhuma categoria encontrada.</strong>
+                <button type="button" onClick={() => onSelectCategory('all')}>
+                  Limpar filtro
+                </button>
               </div>
-              <button className="link-button" type="button" title="Copiar link do item" onClick={() => onCopyProductLink(product)}>
-                <Icon name="chain" size={17} />
-              </button>
-              <div className="price-cell">
-                <span>A partir de</span>
-                <strong>{formatCurrency(product.price)}</strong>
-              </div>
-              <Button onClick={() => onOpenModal('editProduct', product)}><Icon name="edit" size={15} /></Button>
-              <button className={`mini-toggle ${product.active ? '' : 'is-off'}`} type="button" onClick={() => onToggleProduct(product.id)} aria-label="Esgotar item" />
-              <button className="select-action" type="button" onClick={() => onOpenModal('editProduct', product)}>Editar item</button>
-              <Button variant="danger" onClick={() => onOpenModal('deleteProduct', product)}><Icon name="trash" size={15} /></Button>
-              <button
-                className="chevron-button"
-                type="button"
-                onClick={() => onOpenModal('orderDetails', {
-                  id: `item-${product.id}` ,
-                  customer: product.name,
-                  phone: 'Cardapio',
-                  address: product.category,
-                  payment: 'Sem venda',
-                  total: product.price,
-                  items: [`Estoque: ${product.stock}`],
-                  note: product.active ? 'Item visivel no cardapio.' : 'Item pausado no cardapio.',
-                })}
-              >
-                <Icon name="arrow" size={15} />
-              </button>
             </article>
-          ))}
+          )}
         </div>
-      </article>
+      </div>
     </section>
   )
 }
 
-function TablesSection({ tables, onOpenModal }) {
+function TablesSection({ tables, orders, qrCodes, onOpenModal }) {
   return (
     <section className="module-card module-card--full">
       <header className="module-card__header">
@@ -1262,12 +4301,15 @@ function TablesSection({ tables, onOpenModal }) {
           </article>
         ))}
       </div>
+
+      <WaiterConsole tables={tables} orders={orders} qrCodes={qrCodes} onOpenModal={onOpenModal} />
     </section>
   )
 }
 
-function DeliverySection({ orders, couriers, onToggleCourier, onOpenModal }) {
+function DeliverySection({ orders, couriers, deliveryZones, onToggleCourier, onOpenModal }) {
   const deliveryOrders = orders.filter((order) => order.channel === 'delivery' && order.status !== 'completed')
+  const activeZoneCount = deliveryZones.filter((zone) => zone.active !== false).length
 
   return (
     <section className="module-grid module-grid--delivery">
@@ -1277,14 +4319,17 @@ function DeliverySection({ orders, couriers, onToggleCourier, onOpenModal }) {
             <h2>Fila de entregas</h2>
             <p>Atribua entregador e acompanhe status.</p>
           </div>
-          <Button data-testid="delivery-map" onClick={() => onOpenModal('deliveryMap')}>Mapa</Button>
+          <div className="module-header-actions">
+            <Button onClick={() => onOpenModal('deliveryZones')}>Zonas ({activeZoneCount})</Button>
+            <Button data-testid="delivery-map" onClick={() => onOpenModal('deliveryMap')}>Mapa</Button>
+          </div>
         </header>
         <div className="data-list">
           {deliveryOrders.map((order) => (
             <article className="data-row" key={order.id}>
               <span>
                 <strong>#{order.id} - {order.customer}</strong>
-                <small>{order.address} - {formatCurrency(order.total)}</small>
+                <small>{order.address} - {order.deliveryZoneName || 'Sem zona'} - {formatCurrency(order.total)}</small>
               </span>
               <StatusBadge tone={order.courier ? 'success' : 'warning'}>{order.courier || 'Sem entregador'}</StatusBadge>
               <Button variant="primary" onClick={() => onOpenModal('assignDelivery', order)}>Atribuir</Button>
@@ -1319,11 +4364,13 @@ function DeliverySection({ orders, couriers, onToggleCourier, onOpenModal }) {
           ))}
         </div>
       </article>
+
+      <DeliveryRadar orders={orders} couriers={couriers} onOpenModal={onOpenModal} />
     </section>
   )
 }
 
-function ReportsSection({ orders, products, tables, onOpenModal }) {
+function ReportsSection({ orders, products, tables, finance, coupons, recoveries, onOpenModal }) {
   const completed = orders.filter((order) => order.status === 'completed')
   const revenue = orders.reduce((sum, order) => sum + order.total, 0)
 
@@ -1363,11 +4410,21 @@ function ReportsSection({ orders, products, tables, onOpenModal }) {
           ))}
         </div>
       </article>
+
+      <ReportsDeepDive
+        orders={orders}
+        products={products}
+        tables={tables}
+        finance={finance}
+        coupons={coupons}
+        recoveries={recoveries}
+        onOpenModal={onOpenModal}
+      />
     </section>
   )
 }
 
-function ServiceSection({ channels, recoveries, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
+function ServiceSection({ orders, channels, recoveries, chatMessages, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
   return (
     <section className="module-grid module-grid--service">
       <article className="module-card">
@@ -1420,6 +4477,8 @@ function ServiceSection({ channels, recoveries, onToggleChannel, onToggleRobot, 
           ))}
         </div>
       </article>
+
+      <ServiceInbox orders={orders} chatMessages={chatMessages} onOpenModal={onOpenModal} />
     </section>
   )
 }
@@ -1513,6 +4572,8 @@ function MarketingSection({ coupons, qrCodes, onToggleCoupon, onOpenModal }) {
 }
 
 function InventorySection({ inventory, onOpenModal, onStockAdjust }) {
+  const lowItems = inventory.filter((stock) => stock.quantity <= stock.min)
+
   return (
     <section className="module-card module-card--full">
       <header className="module-card__header">
@@ -1539,29 +4600,56 @@ function InventorySection({ inventory, onOpenModal, onStockAdjust }) {
           </article>
         ))}
       </div>
+
+      <div className="inventory-insights">
+        <article className="inventory-insights__card">
+          <span>Reposicao urgente</span>
+          <strong>{lowItems.length} item(ns)</strong>
+          <small>Itens abaixo do minimo para o comprador agir antes do pico.</small>
+        </article>
+        <div className="inventory-insights__list">
+          {(lowItems.length > 0 ? lowItems : inventory.slice(0, 3)).map((stock) => (
+            <article key={stock.id}>
+              <strong>{stock.item}</strong>
+              <small>{stock.quantity} {stock.unit} disponivel(is) - alvo {stock.min}</small>
+            </article>
+          ))}
+        </div>
+      </div>
     </section>
   )
 }
 
-function FinanceSection({ finance, onOpenModal, onPayFinance }) {
+function FinanceSection({ finance, orders, onOpenModal, onPayFinance }) {
   const income = finance.filter((item) => item.type === 'Entrada').reduce((sum, item) => sum + item.amount, 0)
   const outcome = finance.filter((item) => item.type === 'Saida').reduce((sum, item) => sum + item.amount, 0)
+  const earningsBySource = ['WhatsApp', 'Balcao', 'Mesa'].map((source) => ({
+    source,
+    total: orders
+      .filter((order) => getOrderSource(order) === source)
+      .reduce((sum, order) => sum + order.total, 0),
+  })).filter((item) => item.total > 0)
+  const earningsPeak = Math.max(...earningsBySource.map((item) => item.total), 1)
+  const paidRevenue = finance
+    .filter((item) => item.type === 'Entrada' && item.status === 'Pago')
+    .reduce((sum, item) => sum + item.amount, 0)
+  const averageOrder = orders.length > 0 ? orders.reduce((sum, order) => sum + order.total, 0) / orders.length : 0
 
   return (
     <section className="module-grid module-grid--finance">
       <article className="module-card">
         <header className="module-card__header">
           <div>
-            <h2>Financeiro</h2>
-            <p>Entradas, saidas e pendencias da operacao.</p>
+            <h2>Relatorio de ganhos</h2>
+            <p>Entradas, despesas e resultado da operacao.</p>
           </div>
           <Button variant="primary" data-testid="new-finance" onClick={() => onOpenModal('newFinance')}>Lancamento</Button>
         </header>
         <div className="report-grid">
-          <div><span>Entradas</span><strong>{formatCurrency(income)}</strong></div>
-          <div><span>Saidas</span><strong>{formatCurrency(outcome)}</strong></div>
-          <div><span>Saldo</span><strong>{formatCurrency(income - outcome)}</strong></div>
-          <div><span>Pendentes</span><strong>{finance.filter((item) => item.status !== 'Pago').length}</strong></div>
+          <div><span>Ganhos brutos</span><strong>{formatCurrency(income)}</strong></div>
+          <div><span>Despesas</span><strong>{formatCurrency(outcome)}</strong></div>
+          <div><span>Resultado</span><strong>{formatCurrency(income - outcome)}</strong></div>
+          <div><span>Pedidos pagos</span><strong>{formatCurrency(paidRevenue)}</strong></div>
         </div>
       </article>
       <article className="module-card">
@@ -1586,11 +4674,52 @@ function FinanceSection({ finance, onOpenModal, onPayFinance }) {
           ))}
         </div>
       </article>
+
+      <article className="module-card module-card--span">
+        <header className="module-card__header">
+          <div>
+            <h2>Ganhos por origem</h2>
+            <p>Leitura simples do que mais trouxe receita para a operacao.</p>
+          </div>
+          <Button onClick={() => onOpenModal('exportReports')}>Exportar</Button>
+        </header>
+        <div className="finance-workbench">
+          <div className="finance-workbench__bars">
+            {earningsBySource.map((item) => (
+              <article className="bar-row" key={item.source}>
+                <span>{item.source}</span>
+                <div>
+                  <b style={{ width: `${(item.total / earningsPeak) * 100}%` }} />
+                </div>
+                <strong>{formatCurrency(item.total)}</strong>
+              </article>
+            ))}
+          </div>
+          <div className="finance-workbench__summary">
+            <article>
+              <span>Resultado estimado</span>
+              <strong>{formatCurrency(income - outcome)}</strong>
+            </article>
+            <article>
+              <span>Ticket medio</span>
+              <strong>{formatCurrency(averageOrder)}</strong>
+            </article>
+            <article>
+              <span>Lancamentos pendentes</span>
+              <strong>{finance.filter((item) => item.status !== 'Pago').length}</strong>
+            </article>
+          </div>
+        </div>
+      </article>
     </section>
   )
 }
 
 function FiscalSection({ invoices, onOpenModal, onUpdateInvoice }) {
+  const authorized = invoices.filter((invoice) => invoice.status === 'Autorizada').length
+  const pending = invoices.filter((invoice) => invoice.status === 'Pendente').length
+  const canceled = invoices.filter((invoice) => invoice.status === 'Cancelada').length
+
   return (
     <section className="module-card module-card--full">
       <header className="module-card__header">
@@ -1600,6 +4729,20 @@ function FiscalSection({ invoices, onOpenModal, onUpdateInvoice }) {
         </div>
         <Button variant="primary" onClick={() => onOpenModal('issueInvoice')}>Emitir NFC-e</Button>
       </header>
+      <div className="fiscal-overview">
+        <article>
+          <span>Autorizadas</span>
+          <strong>{authorized}</strong>
+        </article>
+        <article>
+          <span>Pendentes</span>
+          <strong>{pending}</strong>
+        </article>
+        <article>
+          <span>Canceladas</span>
+          <strong>{canceled}</strong>
+        </article>
+      </div>
       <div className="data-list">
         {invoices.map((invoice) => (
           <article className="data-row" key={invoice.id}>
@@ -1642,6 +4785,8 @@ function IntegrationsSection({ integrations, onToggleIntegration, onOpenModal })
           </article>
         ))}
       </div>
+
+      <IntegrationStudio integrations={integrations} onOpenModal={onOpenModal} />
     </section>
   )
 }
@@ -1655,16 +4800,37 @@ function App() {
 
   const initialData = initialDataRef.current
   const importInputRef = useRef(null)
+  const geocodeCacheRef = useRef(new Map())
+  const nominatimLastRequestRef = useRef(0)
 
   const [orders, setOrders] = useState(initialData.orders)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const [navQuery, setNavQuery] = useState('')
+  const [storeOpen, setStoreOpen] = useState(initialData.storeOpen)
   const [cashOpen, setCashOpen] = useState(initialData.cashOpen)
-  const [noticeVisible, setNoticeVisible] = useState(initialData.noticeVisible)
+  const [noticeVisible, setNoticeVisible] = useState(false)
   const [modal, setModal] = useState(null)
   const [newOrder, setNewOrder] = useState(blankOrder)
+  const [showManualTotalInput, setShowManualTotalInput] = useState(false)
+  const [showFiscalField, setShowFiscalField] = useState(false)
+  const [orderPanel, setOrderPanel] = useState(null)
+  const [paymentDraft, setPaymentDraft] = useState(blankOrder.payment)
+  const [deliveryTabDraft, setDeliveryTabDraft] = useState(blankOrder.fulfillment)
+  const [deliveryFeeDraft, setDeliveryFeeDraft] = useState(blankOrder.deliveryFee)
+  const [selectedAddressDraftId, setSelectedAddressDraftId] = useState('')
+  const [deliveryAddressForm, setDeliveryAddressForm] = useState(blankDeliveryAddress)
+  const [deliveryAddressLookup, setDeliveryAddressLookup] = useState({ status: 'idle', message: '' })
+  const [editingDeliveryAddressId, setEditingDeliveryAddressId] = useState(null)
+  const [deliveryAddressMapMode, setDeliveryAddressMapMode] = useState('view')
+  const deliveryAddressFormRef = useRef(blankDeliveryAddress)
+  const [documentDraft, setDocumentDraft] = useState(blankOrder.document)
+  const [adjustmentDraft, setAdjustmentDraft] = useState({
+    discountType: blankOrder.discountType,
+    discountValue: blankOrder.discountValue,
+    surchargeType: blankOrder.surchargeType,
+    surchargeValue: blankOrder.surchargeValue,
+  })
   const [blockedOrders, setBlockedOrders] = useState(initialData.blockedOrders)
   const [toast, setToast] = useState('Pronto para operar')
   const [settings, setSettings] = useState(initialData.settings)
@@ -1679,11 +4845,14 @@ function App() {
   const [counterCart, setCounterCart] = useState([])
   const [orderCart, setOrderCart] = useState([])
   const [selectedCartItemId, setSelectedCartItemId] = useState(null)
+  const [cartItemForm, setCartItemForm] = useState(blankCartItemForm)
+  const [cartItemStepIndex, setCartItemStepIndex] = useState(0)
   const [posCategory, setPosCategory] = useState('all')
   const [posSearch, setPosSearch] = useState('')
   const [tables, setTables] = useState(initialData.tables)
   const [couriers, setCouriers] = useState(initialData.couriers)
   const [productForm, setProductForm] = useState(blankProduct)
+  const [flavorForm, setFlavorForm] = useState(blankFlavor)
   const [categoryForm, setCategoryForm] = useState(blankCategory)
   const [tableForm, setTableForm] = useState(blankTable)
   const [orderForm, setOrderForm] = useState(blankOrder)
@@ -1697,11 +4866,21 @@ function App() {
   const [invoices, setInvoices] = useState(initialData.invoices)
   const [integrations, setIntegrations] = useState(initialData.integrations)
   const [qrCodes, setQrCodes] = useState(initialData.qrCodes)
+  const [orderAddresses, setOrderAddresses] = useState(initialData.orderAddresses)
+  const [deliveryZones, setDeliveryZones] = useState(initialData.deliveryZones)
+  const [deliveryZoneForm, setDeliveryZoneForm] = useState(blankDeliveryZone)
+  const [editingDeliveryZoneId, setEditingDeliveryZoneId] = useState(null)
+  const [deliveryZoneStep, setDeliveryZoneStep] = useState(1)
+  const [deliveryZonePoints, setDeliveryZonePoints] = useState([])
+  const [selectedDeliveryZonePointIndex, setSelectedDeliveryZonePointIndex] = useState(null)
   const [couponForm, setCouponForm] = useState(blankCoupon)
   const [stockForm, setStockForm] = useState(blankStock)
   const [financeForm, setFinanceForm] = useState(blankFinance)
   const [storeProfile, setStoreProfile] = useState(initialData.storeProfile)
   const [storeForm, setStoreForm] = useState(initialData.storeProfile)
+  const [storeAddressLookup, setStoreAddressLookup] = useState({ status: 'idle', message: '' })
+  const [storeMapMode, setStoreMapMode] = useState('view')
+  const storeFormRef = useRef(initialData.storeProfile)
   const [printerConfig, setPrinterConfig] = useState(initialData.printerConfig)
   const [printerForm, setPrinterForm] = useState({
     deviceName: initialData.printerConfig.deviceName,
@@ -1710,6 +4889,8 @@ function App() {
     connected: initialData.printerConfig.connected ? 'yes' : 'no',
   })
   const [security, setSecurity] = useState(initialData.security)
+  const [storeUsers, setStoreUsers] = useState(initialData.storeUsers)
+  const [currentStoreUser, setCurrentStoreUser] = useState(initialData.currentStoreUser)
   const [passwordForm, setPasswordForm] = useState(blankPassword)
   const [botConfig, setBotConfig] = useState(initialData.botConfig)
   const [botForm, setBotForm] = useState(initialData.botConfig)
@@ -1728,11 +4909,39 @@ function App() {
   const [dataImportError, setDataImportError] = useState('')
   const activeTitle = navItems.find((item) => item.id === activeNav)?.label ?? 'Pedidos'
   const lowStockCount = inventory.filter((item) => item.quantity <= item.min).length
-  const notificationCount = Math.min(9, blockedOrders.length + lowStockCount + (noticeVisible ? 1 : 0))
+  const notificationCount = Math.min(9, blockedOrders.length + lowStockCount)
+  const isStoreReady = isStoreConfigured(storeProfile) && storeUsers.length > 0
+
+  useEffect(() => {
+    const nextCoordinates = formatDeliveryZoneCoordinates(deliveryZonePoints)
+
+    setDeliveryZoneForm((current) =>
+      current.coordinates === nextCoordinates ? current : { ...current, coordinates: nextCoordinates },
+    )
+  }, [deliveryZonePoints])
+
+  useEffect(() => {
+    setSelectedDeliveryZonePointIndex((current) => {
+      if (current === null) {
+        return null
+      }
+
+      return current < deliveryZonePoints.length ? current : null
+    })
+  }, [deliveryZonePoints])
+
+  useEffect(() => {
+    deliveryAddressFormRef.current = deliveryAddressForm
+  }, [deliveryAddressForm])
+
+  useEffect(() => {
+    storeFormRef.current = storeForm
+  }, [storeForm])
 
   const persistedSnapshot = useMemo(() => ({
     orders,
     activeNav,
+    storeOpen,
     cashOpen,
     noticeVisible,
     blockedOrders,
@@ -1750,9 +4959,13 @@ function App() {
     invoices,
     integrations,
     qrCodes,
+    orderAddresses,
+    deliveryZones,
     storeProfile,
     printerConfig,
     security,
+    storeUsers,
+    currentStoreUser,
     botConfig,
     kdsConfig,
     orderDrafts,
@@ -1761,6 +4974,7 @@ function App() {
   }), [
     orders,
     activeNav,
+    storeOpen,
     cashOpen,
     noticeVisible,
     blockedOrders,
@@ -1778,9 +4992,13 @@ function App() {
     invoices,
     integrations,
     qrCodes,
+    orderAddresses,
+    deliveryZones,
     storeProfile,
     printerConfig,
     security,
+    storeUsers,
+    currentStoreUser,
     botConfig,
     kdsConfig,
     orderDrafts,
@@ -1791,6 +5009,34 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedSnapshot))
   }, [persistedSnapshot])
+
+  useEffect(() => {
+    if (!orderCart.some((item) => item.id === selectedCartItemId)) {
+      setSelectedCartItemId(orderCart[0]?.id || null)
+    }
+  }, [orderCart, selectedCartItemId])
+
+  useEffect(() => {
+    if (selectedCategory !== 'all' && !categories.some((category) => category.name === selectedCategory)) {
+      setSelectedCategory('all')
+    }
+
+    if (posCategory !== 'all' && !categories.some((category) => category.name === posCategory)) {
+      setPosCategory('all')
+    }
+  }, [categories, posCategory, selectedCategory])
+
+  useEffect(() => {
+    if (deliveryTabDraft !== 'delivery' || !selectedAddressDraftId) {
+      return
+    }
+
+    const selectedAddress = orderAddresses.find((address) => address.id === selectedAddressDraftId)
+
+    if (selectedAddress?.deliveryFee) {
+      setDeliveryFeeDraft(selectedAddress.deliveryFee)
+    }
+  }, [deliveryTabDraft, orderAddresses, selectedAddressDraftId])
 
   const visibleOrders = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -1847,15 +5093,48 @@ function App() {
     }
 
     if (type === 'newProduct') {
-      setProductForm(blankProduct)
+      if (categories.length === 0) {
+        setCategoryForm(blankCategory)
+        setModal({ type: 'newCategory', payload: null })
+        notify('Crie uma categoria antes de cadastrar um item.', 'warning')
+        return
+      }
+
+      const fallbackCategory = payload?.category ?? (selectedCategory === 'all' ? categories[0]?.name : selectedCategory) ?? blankProduct.category
+      setProductForm({ ...blankProduct, category: fallbackCategory })
+    }
+
+    if (type === 'newFlavor') {
+      setFlavorForm(blankFlavor)
+    }
+
+    if (type === 'editFlavor' && payload?.flavor) {
+      setFlavorForm(flavorToForm(payload.flavor))
+    }
+
+    if (type === 'editCartItem' && payload) {
+      const product = products.find((item) => item.id === payload.productId)
+
+      if (!product) {
+        notify('Produto nao encontrado no cardapio.', 'warning')
+        return
+      }
+
+      setCartItemForm(orderCartItemToForm(product, payload))
+      setCartItemStepIndex(0)
     }
 
     if (type === 'newOrder') {
       setNewOrder(blankOrder)
       setOrderCart([])
       setSelectedCartItemId(null)
+      setCartItemForm(blankCartItemForm)
+      setCartItemStepIndex(0)
       setPosCategory('all')
       setPosSearch('')
+      setShowManualTotalInput(false)
+      setShowFiscalField(false)
+      setOrderPanel(null)
     }
 
     if (type === 'editCategory' && payload) {
@@ -1925,6 +5204,22 @@ function App() {
       setCourierForm(courierToForm(payload))
     }
 
+    if (type === 'newDeliveryZone') {
+      setDeliveryZoneForm(blankDeliveryZone)
+      setEditingDeliveryZoneId(null)
+      setDeliveryZoneStep(1)
+      setDeliveryZonePoints([])
+      setSelectedDeliveryZonePointIndex(null)
+    }
+
+    if (type === 'editDeliveryZone' && payload) {
+      setDeliveryZoneForm(deliveryZoneToForm(payload))
+      setEditingDeliveryZoneId(payload.id)
+      setDeliveryZoneStep(1)
+      setDeliveryZonePoints((payload.polygon || []).slice(0, -1))
+      setSelectedDeliveryZonePointIndex(null)
+    }
+
     if (type === 'newRecovery') {
       setRecoveryForm(blankRecovery)
     }
@@ -1934,7 +5229,11 @@ function App() {
     }
 
     if (type === 'store' || type === 'register') {
-      setStoreForm(storeProfile)
+      const nextStoreForm = normalizeStoreProfile(storeProfile)
+      setStoreForm(nextStoreForm)
+      storeFormRef.current = nextStoreForm
+      setStoreAddressLookup({ status: 'idle', message: '' })
+      setStoreMapMode('view')
       setDataImportError('')
     }
 
@@ -1989,7 +5288,13 @@ function App() {
   }
 
   function closeModal() {
+    setOrderPanel(null)
     setModal(null)
+  }
+
+  function handleStoreFormChange(nextStore) {
+    storeFormRef.current = nextStore
+    setStoreForm(nextStore)
   }
 
   function notify(message, tone = 'neutral') {
@@ -1998,6 +5303,51 @@ function App() {
       { id: `evt-${Date.now()}-${current.length}`, message, time: nowDateTime(), tone },
       ...current,
     ].slice(0, 60))
+  }
+
+  function loginStoreUser(credentials) {
+    const result = authenticateStoreUser(storeUsers, credentials)
+
+    if (result.ok === false) {
+      return result
+    }
+
+    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime))
+    setToast(`Bem-vindo, ${result.user.name}.`)
+    return { ok: true }
+  }
+
+  function logoutStoreUser() {
+    setCurrentStoreUser(null)
+    setToast('Sessao encerrada.')
+  }
+
+  function completeStoreOnboarding({ profile, owner }) {
+    const nextProfile = normalizeStoreProfile({
+      ...profile,
+      owner: profile.owner || owner.name,
+      email: profile.email || owner.email,
+      configuredAt: nowDateTime(),
+    })
+    const result = createStoreUserRecord([], owner, nowDateTime)
+
+    if (result.ok === false) {
+      return result
+    }
+
+    setStoreProfile(nextProfile)
+    setStoreForm(nextProfile)
+    storeFormRef.current = nextProfile
+    setStoreUsers(result.users)
+    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime))
+    setSecurity((current) => ({
+      ...current,
+      operator: nextProfile.owner || current.operator,
+      email: nextProfile.supportEmail || nextProfile.email || result.user.email,
+    }))
+    setToast(`Loja ${nextProfile.name} criada.`)
+    notify('Cadastro comercial concluido.')
+    return { ok: true }
   }
 
   function applySnapshot(snapshot) {
@@ -2010,7 +5360,9 @@ function App() {
       settings: { ...defaults.settings, ...(snapshot.settings ?? {}) },
       chatMessages: Array.isArray(snapshot.chatMessages) ? snapshot.chatMessages : defaults.chatMessages,
       categories: Array.isArray(snapshot.categories) ? snapshot.categories : defaults.categories,
-      products: Array.isArray(snapshot.products) ? snapshot.products : defaults.products,
+      products: Array.isArray(snapshot.products)
+        ? snapshot.products.map((product) => normalizeProduct(product, defaults.categories[0]?.name || 'Pizzas'))
+        : defaults.products,
       tables: Array.isArray(snapshot.tables) ? snapshot.tables : defaults.tables,
       couriers: Array.isArray(snapshot.couriers) ? snapshot.couriers : defaults.couriers,
       channels: Array.isArray(snapshot.channels) ? snapshot.channels : defaults.channels,
@@ -2021,13 +5373,23 @@ function App() {
       invoices: Array.isArray(snapshot.invoices) ? snapshot.invoices : defaults.invoices,
       integrations: Array.isArray(snapshot.integrations) ? snapshot.integrations : defaults.integrations,
       qrCodes: Array.isArray(snapshot.qrCodes) ? snapshot.qrCodes : defaults.qrCodes,
-      storeProfile: { ...defaults.storeProfile, ...(snapshot.storeProfile ?? {}) },
+      orderAddresses: Array.isArray(snapshot.orderAddresses)
+        ? snapshot.orderAddresses.map(normalizeOrderAddress)
+        : defaults.orderAddresses,
+      deliveryZones: Array.isArray(snapshot.deliveryZones)
+        ? snapshot.deliveryZones.map(normalizeDeliveryZone)
+        : defaults.deliveryZones,
+      storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(snapshot.storeProfile ?? {}) }),
       printerConfig: {
         ...defaults.printerConfig,
         ...(snapshot.printerConfig ?? {}),
         queue: Array.isArray(snapshot.printerConfig?.queue) ? snapshot.printerConfig.queue : defaults.printerConfig.queue,
       },
       security: { ...defaults.security, ...(snapshot.security ?? {}) },
+      storeUsers: Array.isArray(snapshot.storeUsers)
+        ? snapshot.storeUsers.map(normalizeStoreUser)
+        : defaults.storeUsers,
+      currentStoreUser: snapshot.currentStoreUser || defaults.currentStoreUser,
       botConfig: {
         ...defaults.botConfig,
         ...(snapshot.botConfig ?? {}),
@@ -2041,8 +5403,9 @@ function App() {
 
     setOrders(merged.orders)
     setActiveNav(merged.activeNav)
+    setStoreOpen(Boolean(merged.storeOpen))
     setCashOpen(Boolean(merged.cashOpen))
-    setNoticeVisible(Boolean(merged.noticeVisible))
+    setNoticeVisible(false)
     setBlockedOrders(merged.blockedOrders)
     setSettings(merged.settings)
     setChatMessages(merged.chatMessages)
@@ -2058,6 +5421,8 @@ function App() {
     setInvoices(merged.invoices)
     setIntegrations(merged.integrations)
     setQrCodes(merged.qrCodes)
+    setOrderAddresses(merged.orderAddresses)
+    setDeliveryZones(merged.deliveryZones)
     setStoreProfile(merged.storeProfile)
     setStoreForm(merged.storeProfile)
     setPrinterConfig(merged.printerConfig)
@@ -2068,6 +5433,8 @@ function App() {
       connected: merged.printerConfig.connected ? 'yes' : 'no',
     })
     setSecurity(merged.security)
+    setStoreUsers(merged.storeUsers)
+    setCurrentStoreUser(merged.currentStoreUser)
     setBotConfig(merged.botConfig)
     setBotForm(merged.botConfig)
     setKdsConfig(merged.kdsConfig)
@@ -2132,8 +5499,29 @@ function App() {
   }
 
   function resetFrontData() {
-    applySnapshot(createDefaultAppData())
+    applySnapshot({
+      ...createDefaultAppData(),
+      storeProfile,
+      storeUsers,
+      currentStoreUser,
+      security,
+      printerConfig,
+      botConfig,
+      kdsConfig,
+    })
     notify('Base local redefinida para o estado inicial.')
+  }
+
+  function deleteStoreProfile() {
+    const defaults = createDefaultAppData()
+    applySnapshot({
+      ...defaults,
+      storeProfile: normalizeStoreProfile(createEmptyStoreProfile()),
+      storeUsers: [],
+      currentStoreUser: null,
+      security: defaults.security,
+    })
+    notify('Cadastro da loja removido deste navegador.', 'warning')
   }
 
   function enqueuePrintJob(label, type = 'Pedido') {
@@ -2148,9 +5536,59 @@ function App() {
 
   function saveStoreProfile(event) {
     event.preventDefault()
-    setStoreProfile(storeForm)
+    const nextStore = normalizeStoreProfile(storeFormRef.current)
+    setStoreProfile(nextStore)
+    setStoreForm(nextStore)
+    storeFormRef.current = nextStore
+    setSecurity((current) => ({
+      ...current,
+      operator: nextStore.owner || current.operator,
+      email: nextStore.supportEmail || nextStore.email || current.email,
+    }))
     closeModal()
     notify('Dados da loja atualizados.')
+  }
+
+  async function verifyStoreAddress() {
+    const geocodingAddress = buildStoreAddressForGeocoding(storeFormRef.current)
+
+    if (!geocodingAddress.street.trim() || !geocodingAddress.city.trim()) {
+      notify('Informe endereco e cidade da loja.', 'warning')
+      return
+    }
+
+    setStoreAddressLookup({ status: 'loading', message: 'Localizando loja no mapa...' })
+
+    try {
+      const geocode = await geocodeDeliveryAddress(geocodingAddress)
+
+      if (!geocode) {
+        setStoreAddressLookup({ status: 'danger', message: 'Endereco da loja nao encontrado no mapa.' })
+        notify('Endereco da loja nao encontrado no mapa.', 'warning')
+        return
+      }
+
+      const lat = normalizeCoordinate(geocode.lat)
+      const lng = normalizeCoordinate(geocode.lon)
+
+      setStoreForm((current) => {
+        const nextStore = normalizeStoreProfile({
+          ...current,
+          lat: formatCoordinate(lat),
+          lng: formatCoordinate(lng),
+          mapLabel: geocode.display_name || '',
+          verifiedAt: nowDateTime(),
+        })
+        storeFormRef.current = nextStore
+        return nextStore
+      })
+      setStoreMapMode('view')
+      setStoreAddressLookup({ status: 'success', message: 'Loja localizada no mapa.' })
+      notify('Endereco da loja localizado.')
+    } catch {
+      setStoreAddressLookup({ status: 'danger', message: 'Nao foi possivel localizar a loja agora.' })
+      notify('Nao foi possivel localizar a loja agora.', 'warning')
+    }
   }
 
   function savePasswordSettings(event) {
@@ -2269,6 +5707,568 @@ function App() {
     notify('Configuracoes do KDS atualizadas.')
   }
 
+  function openOrderPaymentPanel() {
+    if (orderCart.length === 0) {
+      notify('Adicione pelo menos um item para liberar o pagamento.', 'warning')
+      return
+    }
+
+    setPaymentDraft(normalizeOrderPayment(newOrder.payment))
+    setOrderPanel('payment')
+  }
+
+  function openOrderDeliveryPanel() {
+    if (orderCart.length === 0) {
+      notify('Adicione pelo menos um item para liberar a entrega.', 'warning')
+      return
+    }
+
+    setDeliveryTabDraft(newOrder.fulfillment || (newOrder.channel === 'delivery' ? 'delivery' : 'pickup'))
+    setDeliveryFeeDraft(newOrder.deliveryFee || '0,00')
+    setSelectedAddressDraftId(newOrder.addressId || '')
+    setEditingDeliveryAddressId(null)
+    setDeliveryAddressForm(blankDeliveryAddress)
+    deliveryAddressFormRef.current = blankDeliveryAddress
+    setDeliveryAddressMapMode('view')
+    setOrderPanel('delivery')
+  }
+
+  function openOrderDocumentPanel() {
+    if (orderCart.length === 0) {
+      notify('Adicione pelo menos um item para liberar os dados fiscais.', 'warning')
+      return
+    }
+
+    setDocumentDraft(newOrder.document || '')
+    setOrderPanel('document')
+  }
+
+  function openOrderAdjustmentPanel() {
+    if (orderCart.length === 0) {
+      notify('Adicione pelo menos um item para liberar ajustes do pedido.', 'warning')
+      return
+    }
+
+    const adjustments = normalizeOrderAdjustmentFields(newOrder)
+
+    setAdjustmentDraft({
+      discountType: adjustments.discountType,
+      discountValue: adjustments.discountValue,
+      surchargeType: adjustments.surchargeType,
+      surchargeValue: adjustments.surchargeValue,
+    })
+    setOrderPanel('adjustment')
+  }
+
+  function updateDeliveryAddressField(field, value) {
+    const nextAddress = {
+      ...deliveryAddressFormRef.current,
+      [field]: field === 'cep' ? formatCepInput(value) : value,
+    }
+    const updatedAddress = field === 'complement' ? nextAddress : resetDeliveryAddressVerification(nextAddress)
+    deliveryAddressFormRef.current = updatedAddress
+    setDeliveryAddressForm(updatedAddress)
+    setDeliveryAddressLookup({ status: 'idle', message: '' })
+  }
+
+  function applyCoordinatesToDeliveryAddress(lat, lng, label = getPointLabelFromCoordinates(lat, lng)) {
+    const nextAddress = {
+      ...resetDeliveryAddressVerification(deliveryAddressFormRef.current),
+      lat: formatCoordinate(lat),
+      lng: formatCoordinate(lng),
+      mapLabel: label,
+    }
+    deliveryAddressFormRef.current = nextAddress
+    setDeliveryAddressForm(nextAddress)
+  }
+
+  function applyCoordinatesToStore(lat, lng, label = getPointLabelFromCoordinates(lat, lng, 'Localizacao da loja')) {
+    const nextStore = normalizeStoreProfile({
+      ...storeFormRef.current,
+      lat: formatCoordinate(lat),
+      lng: formatCoordinate(lng),
+      mapLabel: label,
+      verifiedAt: nowDateTime(),
+    })
+    storeFormRef.current = nextStore
+    setStoreForm(nextStore)
+  }
+
+  async function useCurrentLocationForDeliveryAddress() {
+    setDeliveryAddressLookup({ status: 'loading', message: 'Buscando a localizacao atual...' })
+
+    try {
+      const position = await getCurrentBrowserPosition()
+      const lat = normalizeCoordinate(position.coords.latitude)
+      const lng = normalizeCoordinate(position.coords.longitude)
+      applyCoordinatesToDeliveryAddress(lat, lng, getPointLabelFromCoordinates(lat, lng, 'Localizacao atual'))
+      setDeliveryAddressMapMode('view')
+      setDeliveryAddressLookup({ status: 'success', message: 'Localizacao atual aplicada ao endereco.' })
+      notify('Localizacao atual aplicada ao endereco.')
+    } catch {
+      setDeliveryAddressLookup({ status: 'danger', message: 'Nao foi possivel obter a localizacao atual.' })
+      notify('Nao foi possivel obter a localizacao atual.', 'warning')
+    }
+  }
+
+  function toggleDeliveryAddressMapPicking() {
+    setDeliveryAddressMapMode((current) => (current === 'pick' ? 'view' : 'pick'))
+    setDeliveryAddressLookup((current) => ({
+      status: current.status === 'loading' ? 'idle' : current.status,
+      message: current.message,
+    }))
+  }
+
+  function handleDeliveryAddressMapPick(point) {
+    const [lng, lat] = point
+    applyCoordinatesToDeliveryAddress(lat, lng)
+    setDeliveryAddressMapMode('view')
+    setDeliveryAddressLookup({ status: 'success', message: 'Ponto marcado no mapa. Agora confirme a taxa.' })
+    notify('Ponto do endereco marcado no mapa.')
+  }
+
+  async function useCurrentLocationForStore() {
+    setStoreAddressLookup({ status: 'loading', message: 'Buscando a localizacao atual da loja...' })
+
+    try {
+      const position = await getCurrentBrowserPosition()
+      const lat = normalizeCoordinate(position.coords.latitude)
+      const lng = normalizeCoordinate(position.coords.longitude)
+      applyCoordinatesToStore(lat, lng, getPointLabelFromCoordinates(lat, lng, 'Localizacao atual da loja'))
+      setStoreMapMode('view')
+      setStoreAddressLookup({ status: 'success', message: 'Localizacao atual aplicada a loja.' })
+      notify('Localizacao atual aplicada a loja.')
+    } catch {
+      setStoreAddressLookup({ status: 'danger', message: 'Nao foi possivel obter a localizacao atual da loja.' })
+      notify('Nao foi possivel obter a localizacao atual da loja.', 'warning')
+    }
+  }
+
+  function toggleStoreMapPicking() {
+    setStoreMapMode((current) => (current === 'pick' ? 'view' : 'pick'))
+  }
+
+  function handleStoreMapPick(point) {
+    const [lng, lat] = point
+    applyCoordinatesToStore(lat, lng)
+    setStoreMapMode('view')
+    setStoreAddressLookup({ status: 'success', message: 'Ponto da loja marcado no mapa.' })
+    notify('Ponto da loja marcado no mapa.')
+  }
+
+  function startNewOrderAddress() {
+    setEditingDeliveryAddressId(null)
+    setDeliveryAddressForm(blankDeliveryAddress)
+    deliveryAddressFormRef.current = blankDeliveryAddress
+    setDeliveryAddressLookup({ status: 'idle', message: '' })
+    setDeliveryAddressMapMode('view')
+    setOrderPanel('deliveryAddress')
+  }
+
+  function startEditOrderAddress() {
+    if (!selectedAddressDraftId) {
+      notify('Selecione um endereco para editar.', 'warning')
+      return
+    }
+
+    const selectedAddress = orderAddresses.find((address) => address.id === selectedAddressDraftId)
+
+    if (!selectedAddress) {
+      notify('Endereco nao encontrado.', 'warning')
+      return
+    }
+
+    setEditingDeliveryAddressId(selectedAddress.id)
+    const nextAddress = {
+      cep: selectedAddress.cep,
+      street: selectedAddress.street,
+      number: selectedAddress.number,
+      complement: selectedAddress.complement,
+      district: selectedAddress.district,
+      city: selectedAddress.city,
+      lat: selectedAddress.lat,
+      lng: selectedAddress.lng,
+      mapLabel: selectedAddress.mapLabel,
+      deliveryZoneId: selectedAddress.deliveryZoneId,
+      deliveryZoneName: selectedAddress.deliveryZoneName,
+      deliveryFee: selectedAddress.deliveryFee,
+      deliveryAvailable: selectedAddress.deliveryAvailable,
+      verifiedAt: selectedAddress.verifiedAt,
+    }
+    setDeliveryAddressForm(nextAddress)
+    deliveryAddressFormRef.current = nextAddress
+    setDeliveryAddressLookup({
+      status: selectedAddress.deliveryAvailable ? 'success' : selectedAddress.verifiedAt ? 'danger' : 'idle',
+      message: getDeliveryAddressSummary(selectedAddress),
+    })
+    setDeliveryAddressMapMode('view')
+    setOrderPanel('deliveryAddress')
+  }
+
+  function deleteOrderAddressSelection() {
+    if (!selectedAddressDraftId) {
+      notify('Selecione um endereco para excluir.', 'warning')
+      return
+    }
+
+    setOrderAddresses((current) => current.filter((address) => address.id !== selectedAddressDraftId))
+    setSelectedAddressDraftId('')
+
+    if (newOrder.addressId === selectedAddressDraftId) {
+      setNewOrder((current) => ({
+        ...current,
+        addressId: '',
+        address: '',
+        addressLat: '',
+        addressLng: '',
+        deliveryZoneId: '',
+        deliveryZoneName: '',
+        deliveryFee: '0,00',
+      }))
+    }
+
+    notify('Endereco removido.')
+  }
+
+  async function lookupCepForDeliveryAddress() {
+    const cep = normalizePostalCode(deliveryAddressFormRef.current.cep)
+
+    if (cep.length !== 8) {
+      notify('Informe um CEP com 8 digitos.', 'warning')
+      return
+    }
+
+    setDeliveryAddressLookup({ status: 'loading', message: 'Buscando CEP no ViaCEP...' })
+
+    try {
+      const response = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {}, 4500)
+
+      if (!response.ok) {
+        throw new Error('cep-request')
+      }
+
+      const data = await response.json()
+
+      if (data.erro) {
+        setDeliveryAddressLookup({ status: 'danger', message: 'CEP nao encontrado.' })
+        notify('CEP nao encontrado.', 'warning')
+        return
+      }
+
+      const city = [data.localidade, data.uf].filter(Boolean).join(' - ')
+
+      const currentAddress = deliveryAddressFormRef.current
+      const nextAddress = resetDeliveryAddressVerification({
+        ...currentAddress,
+        cep: data.cep || formatCepInput(cep),
+        street: data.logradouro || currentAddress.street,
+        district: data.bairro || currentAddress.district,
+        city: city || currentAddress.city,
+      })
+      deliveryAddressFormRef.current = nextAddress
+      setDeliveryAddressForm(nextAddress)
+      setDeliveryAddressLookup({ status: 'success', message: 'CEP encontrado. Confira o numero e verifique a taxa.' })
+      notify('Endereco preenchido pelo CEP.')
+    } catch {
+      setDeliveryAddressLookup({ status: 'danger', message: 'Nao foi possivel consultar o CEP agora.' })
+      notify('Nao foi possivel consultar o CEP agora.', 'warning')
+    }
+  }
+
+  async function fetchNominatimResults(url) {
+    const cachedResult = geocodeCacheRef.current.get(url)
+
+    if (cachedResult) {
+      return cachedResult
+    }
+
+    const elapsed = Date.now() - nominatimLastRequestRef.current
+
+    if (elapsed < NOMINATIM_MIN_INTERVAL_MS) {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, NOMINATIM_MIN_INTERVAL_MS - elapsed)
+      })
+    }
+
+    nominatimLastRequestRef.current = Date.now()
+
+    const response = await fetchWithTimeout(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+    }, 1500)
+
+    if (!response.ok) {
+      throw new Error('nominatim-request')
+    }
+
+    const data = await response.json()
+    const results = Array.isArray(data) ? data : []
+    geocodeCacheRef.current.set(url, results)
+    return results
+  }
+
+  async function geocodeDeliveryAddress(address) {
+    const urls = buildNominatimSearchUrls(address)
+
+    for (const url of urls) {
+      const results = await fetchNominatimResults(url)
+      const match = results.find((result) => normalizeCoordinate(result.lat) !== null && normalizeCoordinate(result.lon) !== null)
+
+      if (match) {
+        return match
+      }
+    }
+
+    return null
+  }
+
+  async function verifyDeliveryAddressForm({ silent = false, addressInput = deliveryAddressFormRef.current } = {}) {
+    const coordinates = getAddressCoordinates(addressInput)
+
+    if (!coordinates && (!addressInput.street.trim() || !addressInput.number.trim() || !addressInput.city.trim())) {
+      notify('Preencha rua, numero e cidade ou marque um ponto no mapa para verificar.', 'warning')
+      return null
+    }
+
+    setDeliveryAddressLookup({
+      status: 'loading',
+      message: coordinates ? 'Conferindo o ponto marcado no mapa...' : 'Verificando endereco no mapa...',
+    })
+
+    try {
+      let geocode = null
+      let lat = coordinates?.lat ?? null
+      let lng = coordinates?.lng ?? null
+      const fallbackZoneByDistrict = findDeliveryZoneByDistrict(addressInput, deliveryZones)
+
+      if (!coordinates) {
+        geocode = getFallbackGeocodeForAddress(addressInput, deliveryZones)
+
+        if (!geocode) {
+          try {
+            geocode = await geocodeDeliveryAddress(addressInput)
+          } catch {
+            geocode = null
+          }
+        }
+
+        if (!geocode) {
+          setDeliveryAddressLookup({ status: 'danger', message: 'Endereco nao encontrado no mapa.' })
+
+          if (!silent) {
+            notify('Endereco nao encontrado no mapa.', 'warning')
+          }
+
+          return null
+        }
+
+        lat = normalizeCoordinate(geocode.lat)
+        lng = normalizeCoordinate(geocode.lon)
+      }
+
+      const directZone = geocode?.fallbackZone || findDeliveryZoneForCoordinates(lat, lng, deliveryZones)
+      const zone = directZone || fallbackZoneByDistrict || null
+
+      if (!directZone && zone) {
+        const fallbackCoordinates = getDeliveryZoneCentroid(zone)
+
+        if (fallbackCoordinates) {
+          lat = fallbackCoordinates.lat
+          lng = fallbackCoordinates.lng
+        }
+      }
+
+      const verifiedAddress = createOrderAddress({
+        ...addressInput,
+        cep: formatCepInput(addressInput.cep),
+        lat: formatCoordinate(lat),
+        lng: formatCoordinate(lng),
+        mapLabel: geocode?.display_name || addressInput.mapLabel || getPointLabelFromCoordinates(lat, lng),
+        deliveryZoneId: zone?.id || '',
+        deliveryZoneName: zone?.name || '',
+        deliveryFee: zone ? formatCurrencyInput(parseCurrencyInput(zone.fee)) : '0,00',
+        deliveryAvailable: Boolean(zone),
+        verifiedAt: nowDateTime(),
+      })
+
+      setDeliveryAddressForm(verifiedAddress)
+      deliveryAddressFormRef.current = verifiedAddress
+
+      if (zone) {
+        setDeliveryFeeDraft(verifiedAddress.deliveryFee)
+        setDeliveryAddressLookup({
+          status: 'success',
+          message: `Atende ${zone.name}. Taxa ${verifiedAddress.deliveryFee}.`,
+        })
+
+        if (!silent) {
+          notify(`Endereco atendido em ${zone.name}. Taxa ${verifiedAddress.deliveryFee}.`)
+        }
+      } else {
+        setDeliveryAddressLookup({
+          status: 'danger',
+          message: 'Fora das zonas de entrega cadastradas.',
+        })
+
+        if (!silent) {
+          notify('Endereco fora das zonas de entrega.', 'warning')
+        }
+      }
+
+      return { address: verifiedAddress, zone }
+    } catch {
+      setDeliveryAddressLookup({ status: 'danger', message: 'Falha ao consultar o mapa. Tente novamente.' })
+
+      if (!silent) {
+        notify('Falha ao consultar o mapa. Tente novamente.', 'warning')
+      }
+
+      return null
+    }
+  }
+
+  async function saveOrderAddress(event) {
+    event.preventDefault()
+
+    const currentAddressForm = deliveryAddressFormRef.current
+    const hasCoordinates = Boolean(getAddressCoordinates(currentAddressForm))
+    const hasStructuredAddress = Boolean(
+      currentAddressForm.street.trim()
+      && currentAddressForm.number.trim()
+      && currentAddressForm.district.trim()
+      && currentAddressForm.city.trim(),
+    )
+
+    if (!hasCoordinates && !hasStructuredAddress) {
+      notify('Preencha o endereco completo ou marque um ponto no mapa.', 'warning')
+      return
+    }
+
+    let addressToSave = currentAddressForm
+
+    if (!addressToSave.deliveryAvailable) {
+      const verification = await verifyDeliveryAddressForm({ silent: true, addressInput: addressToSave })
+
+      if (!verification) {
+        notify('Verifique o endereco no mapa antes de salvar.', 'warning')
+        return
+      }
+
+      if (!verification.zone) {
+        notify('A loja nao atende esse endereco.', 'warning')
+        return
+      }
+
+      addressToSave = verification.address
+    }
+
+    const normalizedAddress = createOrderAddress({
+      id: editingDeliveryAddressId || undefined,
+      cep: addressToSave.cep.trim(),
+      street: addressToSave.street.trim(),
+      number: addressToSave.number.trim(),
+      complement: addressToSave.complement.trim(),
+      district: addressToSave.district.trim(),
+      city: addressToSave.city.trim(),
+      lat: addressToSave.lat,
+      lng: addressToSave.lng,
+      mapLabel: addressToSave.mapLabel,
+      deliveryZoneId: addressToSave.deliveryZoneId,
+      deliveryZoneName: addressToSave.deliveryZoneName,
+      deliveryFee: addressToSave.deliveryFee,
+      deliveryAvailable: addressToSave.deliveryAvailable,
+      verifiedAt: addressToSave.verifiedAt,
+    })
+
+    setOrderAddresses((current) => {
+      if (editingDeliveryAddressId) {
+        return current.map((address) => (address.id === editingDeliveryAddressId ? normalizedAddress : address))
+      }
+
+      return [...current, normalizedAddress]
+    })
+
+    setSelectedAddressDraftId(normalizedAddress.id)
+    setEditingDeliveryAddressId(null)
+    setDeliveryAddressForm(blankDeliveryAddress)
+    deliveryAddressFormRef.current = blankDeliveryAddress
+    setDeliveryAddressLookup({ status: 'idle', message: '' })
+    setDeliveryAddressMapMode('view')
+    setOrderPanel('delivery')
+    notify(editingDeliveryAddressId ? 'Endereco atualizado.' : 'Endereco criado.')
+  }
+
+  function applyOrderPayment(paymentId = paymentDraft) {
+    setNewOrder((current) => ({
+      ...current,
+      payment: normalizeOrderPayment(paymentId),
+    }))
+    setOrderPanel(null)
+  }
+
+  function applyOrderDelivery() {
+    if (deliveryTabDraft === 'delivery') {
+      const selectedAddress = orderAddresses.find((address) => address.id === selectedAddressDraftId)
+
+      if (!selectedAddress) {
+        notify('Selecione ou cadastre um endereco para delivery.', 'warning')
+        return
+      }
+
+      if (!selectedAddress.deliveryAvailable) {
+        notify('Verifique o endereco no mapa antes de aplicar delivery.', 'warning')
+        return
+      }
+
+      setNewOrder((current) => ({
+        ...current,
+        channel: 'delivery',
+        fulfillment: 'delivery',
+        addressId: selectedAddress.id,
+        address: formatOrderAddress(selectedAddress),
+        deliveryFee: deliveryFeeDraft || selectedAddress.deliveryFee || '0,00',
+        addressLat: selectedAddress.lat,
+        addressLng: selectedAddress.lng,
+        deliveryZoneId: selectedAddress.deliveryZoneId,
+        deliveryZoneName: selectedAddress.deliveryZoneName,
+      }))
+      setOrderPanel(null)
+      return
+    }
+
+    setNewOrder((current) => ({
+      ...current,
+      channel: 'pickup',
+      fulfillment: deliveryTabDraft,
+      addressId: '',
+      address: '',
+      deliveryFee: '0,00',
+    }))
+    setOrderPanel(null)
+  }
+
+  function applyOrderDocument() {
+    setNewOrder((current) => ({
+      ...current,
+      document: documentDraft.trim(),
+    }))
+    setShowFiscalField(Boolean(documentDraft.trim()))
+    setOrderPanel(null)
+  }
+
+  function applyOrderAdjustment() {
+    setNewOrder((current) => ({
+      ...current,
+      discountType: adjustmentDraft.discountType,
+      discountValue: adjustmentDraft.discountValue,
+      surchargeType: adjustmentDraft.surchargeType,
+      surchargeValue: adjustmentDraft.surchargeValue,
+    }))
+    setShowManualTotalInput(Boolean(adjustmentDraft.discountValue || adjustmentDraft.surchargeValue))
+    setOrderPanel(null)
+  }
+
   function saveOrderDraft() {
     if (!settings.saveDrafts) {
       notify('Salvamento de rascunho esta desligado nos ajustes.', 'warning')
@@ -2303,11 +6303,22 @@ function App() {
       return
     }
 
-    setNewOrder(cloneData(draft.data.newOrder))
-    setOrderCart(cloneData(draft.data.orderCart))
+    const draftOrder = normalizeOrderRecord(cloneData(draft.data.newOrder))
+
+    setNewOrder({
+      ...blankOrder,
+      ...draftOrder,
+      items: Array.isArray(draftOrder.items) ? draftOrder.items.join(', ') : (draftOrder.items || ''),
+    })
+    setOrderCart((draft.data.orderCart || []).map((item) => normalizeStoredOrderCartItem(item, products)))
     setPosCategory(draft.data.posCategory || 'all')
     setPosSearch('')
     setSelectedCartItemId(null)
+    setCartItemForm(blankCartItemForm)
+    setCartItemStepIndex(0)
+    setShowManualTotalInput(Boolean(draftOrder.discountValue || draftOrder.surchargeValue || draft.data.newOrder?.total) && (draft.data.orderCart?.length ?? 0) > 0)
+    setShowFiscalField(Boolean(draft.data.newOrder?.document))
+    setOrderPanel(null)
     reopenOrderEditor()
     notify(`Rascunho "${draft.label}" carregado.`)
   }
@@ -2355,29 +6366,95 @@ function App() {
     ])
   }
 
+  function syncOrderFinanceEntry(order) {
+    setFinance((current) =>
+      current.map((entry) =>
+        String(entry.title || '').endsWith(`#${order.id}`)
+          ? {
+              ...entry,
+              amount: order.total,
+              status: order.payment === 'Mesa' ? 'Pendente' : 'Pago',
+            }
+          : entry,
+      ),
+    )
+  }
+
+  function removeOrderFinanceEntry(orderId) {
+    setFinance((current) => current.filter((entry) => !String(entry.title || '').endsWith(`#${orderId}`)))
+  }
+
   function createOrder(event) {
     event.preventDefault()
 
     const cartTotal = orderCart.reduce((sum, item) => sum + item.price * item.qty, 0)
-    const total = cartTotal || Number(String(newOrder.total).replace(',', '.')) || 0
+    const adjustments = normalizeOrderAdjustmentFields(newOrder)
+    const legacyManualTotal = showManualTotalInput && !adjustments.discountValue && !adjustments.surchargeValue
+      ? parseCurrencyInput(newOrder.total)
+      : 0
+    const financialBreakdown = getOrderFinancialBreakdown(cartTotal, newOrder)
+    const total = legacyManualTotal > 0
+      ? legacyManualTotal
+      : financialBreakdown.total
+    const typedItems = String(Array.isArray(newOrder.items) ? newOrder.items.join(', ') : (newOrder.items || ''))
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    const normalizedDocument = newOrder.document.trim()
+    const normalizedNote = [newOrder.note.trim(), normalizedDocument ? `CPF/CNPJ: ${normalizedDocument}` : '']
+      .filter(Boolean)
+      .join(' | ')
+
+    if (orderCart.length === 0 && typedItems.length === 0) {
+      notify('Adicione pelo menos um item antes de gerar o pedido.', 'warning')
+      return
+    }
+
+    if (newOrder.channel === 'delivery' && !newOrder.address.trim()) {
+      notify('Informe o endereco para pedidos de delivery.', 'warning')
+      return
+    }
+
+    if (total <= 0) {
+      notify('Confirme um total valido para o pedido.', 'warning')
+      return
+    }
+
     const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
     const createdOrder = {
       id: nextId,
       customer: newOrder.customer || 'Cliente balcao',
       phone: newOrder.phone || '(47) 9 0000-0000',
-      channel: newOrder.channel,
+      channel: newOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
+      fulfillment: newOrder.fulfillment,
+      source: resolveOrderSourceForFulfillment(newOrder.fulfillment),
       status: settings.autoAccept ? 'production' : 'analysis',
       total,
-      payment: newOrder.payment,
+      payment: normalizeOrderPayment(newOrder.payment),
+      document: normalizedDocument,
       time: nowTime(),
-      address: newOrder.channel === 'delivery' ? 'Endereco informado no pedido' : 'Retirada no balcao',
-      note: newOrder.note || 'Pedido criado pelo painel.',
+      addressId: newOrder.addressId || '',
+      addressLat: newOrder.addressLat || '',
+      addressLng: newOrder.addressLng || '',
+      deliveryZoneId: newOrder.deliveryZoneId || '',
+      deliveryZoneName: newOrder.deliveryZoneName || '',
+      address: newOrder.fulfillment === 'delivery'
+        ? newOrder.address.trim()
+        : newOrder.fulfillment === 'dinein'
+          ? 'Consumir no local'
+          : 'Retirada no balcao',
+      subtotal: financialBreakdown.subtotal,
+      deliveryFee: formatCurrencyInput(financialBreakdown.deliveryFee),
+      discountType: adjustments.discountType,
+      discountValue: adjustments.discountValue,
+      discountAmount: formatCurrencyInput(financialBreakdown.discountAmount),
+      surchargeType: adjustments.surchargeType,
+      surchargeValue: adjustments.surchargeValue,
+      surchargeAmount: formatCurrencyInput(financialBreakdown.surchargeAmount),
+      note: normalizedNote || 'Pedido criado pelo painel.',
       items: orderCart.length
-        ? orderCart.map((item) => `${item.qty}x ${item.name}`)
-        : newOrder.items
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean),
+        ? orderCart.map(getOrderCartItemLabel)
+        : typedItems,
     }
 
     setOrders((current) => [createdOrder, ...current])
@@ -2388,6 +6465,7 @@ function App() {
     setNewOrder(blankOrder)
     setOrderCart([])
     setSelectedCartItemId(null)
+    setOrderPanel(null)
     closeModal()
     notify(`Pedido #${nextId} criado no front.`)
   }
@@ -2395,32 +6473,69 @@ function App() {
   function updateOrder(event, orderId) {
     event.preventDefault()
 
+    let updatedOrder = null
+
     setOrders((current) =>
       current.map((order) =>
         order.id === orderId
-          ? {
-              ...order,
-              customer: orderForm.customer || 'Cliente balcao',
-              phone: orderForm.phone || '(47) 9 0000-0000',
-              channel: orderForm.channel,
-              total: Number(String(orderForm.total).replace(',', '.')) || 0,
-              payment: orderForm.payment,
-              address: orderForm.channel === 'delivery' ? order.address || 'Endereco informado no pedido' : 'Retirada no balcao',
-              note: orderForm.note || 'Pedido editado pelo painel.',
-              items: orderForm.items
+          ? (() => {
+              const fulfillment = orderForm.fulfillment || inferOrderFulfillment(orderForm)
+              const subtotal = parseCurrencyInput(orderForm.subtotal || order.subtotal || order.total)
+              const normalizedItems = orderForm.items
                 .split(',')
                 .map((item) => item.trim())
-                .filter(Boolean),
-            }
+                .filter(Boolean)
+              const normalizedOrder = normalizeOrderRecord({
+                ...order,
+                customer: orderForm.customer || 'Cliente balcao',
+                phone: orderForm.phone || '(47) 9 0000-0000',
+                channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
+                fulfillment,
+                source: fulfillment === 'dinein' && orderForm.payment === 'Mesa'
+                  ? 'Mesa'
+                  : resolveOrderSourceForFulfillment(fulfillment, order.source),
+                payment: normalizeOrderPayment(orderForm.payment),
+                subtotal,
+                deliveryFee: fulfillment === 'delivery' ? (orderForm.deliveryFee || '0,00') : '0,00',
+                address: fulfillment === 'delivery'
+                  ? (orderForm.address.trim() || 'Endereco informado no pedido')
+                  : fulfillment === 'dinein'
+                    ? (orderForm.address.trim() || 'Consumir no local')
+                    : 'Retirada no balcao',
+                document: orderForm.document.trim(),
+                discountType: orderForm.discountType,
+                discountValue: orderForm.discountValue,
+                surchargeType: orderForm.surchargeType,
+                surchargeValue: orderForm.surchargeValue,
+                note: orderForm.note || 'Pedido editado pelo painel.',
+                items: normalizedItems,
+              })
+              const financialBreakdown = getOrderFinancialBreakdown(subtotal, normalizedOrder)
+
+              updatedOrder = normalizeOrderRecord({
+                ...normalizedOrder,
+                total: financialBreakdown.total,
+                discountAmount: formatCurrencyInput(financialBreakdown.discountAmount),
+                surchargeAmount: formatCurrencyInput(financialBreakdown.surchargeAmount),
+              })
+
+              return updatedOrder
+            })()
           : order,
       ),
     )
+
+    if (updatedOrder) {
+      syncOrderFinanceEntry(updatedOrder)
+    }
+
     closeModal()
     notify(`Pedido #${orderId} editado.`)
   }
 
   function deleteOrder(orderId) {
     setOrders((current) => current.filter((order) => order.id !== orderId))
+    removeOrderFinanceEntry(orderId)
     closeModal()
     notify(`Pedido #${orderId} apagado.`)
   }
@@ -2446,21 +6561,27 @@ function App() {
       return
     }
 
+    const restoredOrder = normalizeOrderRecord({
+      id: blocked.id,
+      customer: blocked.customer,
+      phone: '(47) 9 1111-2222',
+      channel: 'pickup',
+      fulfillment: 'pickup',
+      source: 'WhatsApp',
+      status: 'analysis',
+      subtotal: 28.5,
+      total: 28.5,
+      payment: 'Cartao',
+      time: '18:30',
+      address: 'Retirada no balcao',
+      deliveryFee: '0,00',
+      note: blocked.reason,
+      items: ['Pedido recuperado'],
+    })
+
     setBlockedOrders((current) => current.filter((order) => order.id !== id))
     setOrders((current) => [
-      {
-        id: blocked.id,
-        customer: blocked.customer,
-        phone: '(47) 9 1111-2222',
-        channel: 'pickup',
-        status: 'analysis',
-        total: 28.5,
-        payment: 'Pix',
-        time: '18:30',
-        address: 'Retirada no balcao',
-        note: blocked.reason,
-        items: ['Pedido recuperado'],
-      },
+      restoredOrder,
       ...current,
     ])
     notify(`Pedido #${id} recuperado.`)
@@ -2487,23 +6608,44 @@ function App() {
     notify('Carrinho limpo.')
   }
 
+  function resetOrderCatalog(goToCategories = false) {
+    setCartItemForm(blankCartItemForm)
+    setCartItemStepIndex(0)
+
+    if (goToCategories) {
+      setPosCategory('all')
+    }
+
+    setPosSearch('')
+  }
+
+  function openNewOrderCartItem(product) {
+    setPosCategory(product.category)
+    setPosSearch('')
+    setCartItemForm(orderCartItemToForm(product))
+    setCartItemStepIndex(0)
+  }
+
+  function openExistingOrderCartItem(cartItem) {
+    const product = products.find((item) => item.id === cartItem.productId)
+
+    if (!product) {
+      notify('Produto nao encontrado no cardapio.', 'warning')
+      return
+    }
+
+    setSelectedCartItemId(cartItem.id)
+    setPosCategory(product.category)
+    setPosSearch('')
+    setCartItemForm(orderCartItemToForm(product, cartItem))
+    setCartItemStepIndex(0)
+  }
+
   function addOrderCart(product) {
-    setOrderCart((current) => {
-      const existing = current.find((item) => item.id === product.id)
-
-      if (existing) {
-        return current.map((item) => (item.id === product.id ? { ...item, qty: item.qty + 1 } : item))
-      }
-
-      return [...current, { ...product, qty: 1 }]
-    })
+    openNewOrderCartItem(product)
   }
 
   function removeOrderCart(productId) {
-    if (selectedCartItemId === productId) {
-      setSelectedCartItemId(null)
-    }
-
     setOrderCart((current) => current.filter((item) => item.id !== productId))
   }
 
@@ -2516,25 +6658,168 @@ function App() {
     setOrderCart((current) =>
       current.map((item) => (item.id === productId ? { ...item, qty: nextQty } : item)),
     )
+    setSelectedCartItemId(productId)
     notify('Quantidade do item atualizada.')
   }
 
+  function toggleCartItemFlavor(flavorId, maxFlavors, product) {
+    const isSelected = cartItemForm.flavorIds.includes(flavorId)
+
+    if (!isSelected && maxFlavors > 1 && cartItemForm.flavorIds.length >= maxFlavors) {
+      notify(`Escolha no maximo ${maxFlavors} ${getFlavorEntityLabel(product, true)}.`, 'warning')
+      return
+    }
+
+    setCartItemForm((current) => {
+      if (current.flavorIds.includes(flavorId)) {
+        return { ...current, flavorIds: current.flavorIds.filter((currentId) => currentId !== flavorId) }
+      }
+
+      if (maxFlavors === 1) {
+        return { ...current, flavorIds: [flavorId] }
+      }
+
+      return { ...current, flavorIds: [...current.flavorIds, flavorId] }
+    })
+  }
+
+  function toggleCartItemAddonOption(step, optionId) {
+    const isSelected = getCartStepSelectedIds(cartItemForm, step).includes(optionId)
+    const maxSelect = Math.max(1, Number(step?.maxSelect) || 1)
+
+    if (!isSelected && maxSelect > 1 && getCartStepSelectedIds(cartItemForm, step).length >= maxSelect) {
+      notify(`Escolha no maximo ${maxSelect} opcoes em ${step.title.toLowerCase()}.`, 'warning')
+      return
+    }
+
+    setCartItemForm((current) => {
+      const selectedIds = Array.isArray(current.addonSelections?.[step.id]) ? current.addonSelections[step.id] : []
+
+      if (selectedIds.includes(optionId)) {
+        const nextSelections = selectedIds.filter((currentId) => currentId !== optionId)
+
+        return {
+          ...current,
+          addonSelections: {
+            ...current.addonSelections,
+            [step.id]: nextSelections,
+          },
+        }
+      }
+
+      const nextSelections = maxSelect === 1 ? [optionId] : [...selectedIds, optionId]
+
+      return {
+        ...current,
+        addonSelections: {
+          ...current.addonSelections,
+          [step.id]: nextSelections,
+        },
+      }
+    })
+  }
+
+  function ensureCartItemStepSelection(step) {
+    if (isCartStepSelectionValid(step, cartItemForm)) {
+      return true
+    }
+
+    const minimumRequired = Math.max(step.required ? 1 : 0, Number(step.minSelect) || 0)
+
+    if (minimumRequired > 0) {
+      notify(`Selecione pelo menos ${minimumRequired} opcao(oes) em ${step.title.toLowerCase()}.`, 'warning')
+      return false
+    }
+
+    notify(`Revise a selecao de ${step.title.toLowerCase()}.`, 'warning')
+    return false
+  }
+
+  function goToNextCartItemStep(product) {
+    const steps = getCartConfigurationSteps(product)
+    const currentStep = steps[cartItemStepIndex]
+
+    if (currentStep && !ensureCartItemStepSelection(currentStep)) {
+      return
+    }
+
+    setCartItemStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))
+  }
+
+  function goToPreviousCartItemStep() {
+    setCartItemStepIndex((current) => Math.max(current - 1, 0))
+  }
+
+  function commitOrderCartItem() {
+    const product = products.find((item) => item.id === cartItemForm.productId)
+
+    if (!product) {
+      notify('Produto nao encontrado no cardapio.', 'warning')
+      resetOrderCatalog(false)
+      return false
+    }
+
+    const steps = getCartConfigurationSteps(product)
+    const invalidStep = steps.find((step) => !isCartStepSelectionValid(step, cartItemForm))
+
+    if (invalidStep) {
+      ensureCartItemStepSelection(invalidStep)
+      return false
+    }
+
+    const activeFlavors = getActiveProductFlavors(product)
+    const maxFlavors = Math.max(1, Number(product.maxFlavors) || 1)
+    const selectedFlavorIds = cartItemForm.flavorIds
+      .filter((flavorId) => activeFlavors.some((flavor) => flavor.id === flavorId))
+      .slice(0, maxFlavors)
+    const normalizedAddonSelections = normalizeCartAddonSelections(product, cartItemForm.addonSelections)
+
+    const nextItem = createOrderCartLine(product, {
+      lineId: cartItemForm.lineId || undefined,
+      qty: Math.max(1, Number(cartItemForm.qty) || 1),
+      flavorIds: selectedFlavorIds,
+      addonSelections: normalizedAddonSelections,
+    })
+
+    setOrderCart((current) => {
+      if (cartItemForm.lineId) {
+        return current.map((item) => (item.id === cartItemForm.lineId ? nextItem : item))
+      }
+
+      return [...current, nextItem]
+    })
+
+    setSelectedCartItemId(nextItem.id)
+    resetOrderCatalog(false)
+    notify(cartItemForm.lineId ? 'Item atualizado no pedido.' : 'Item adicionado ao pedido.')
+    return true
+  }
+
+  function saveOrderCartItem(event) {
+    event.preventDefault()
+    commitOrderCartItem()
+  }
+
   function checkoutCounter() {
-    const total = counterCart.reduce((sum, item) => sum + item.price * item.qty, 0)
+    const subtotal = counterCart.reduce((sum, item) => sum + item.price * item.qty, 0)
     const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
-    const createdOrder = {
+    const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: 'Cliente PDV',
       phone: '(47) 9 0000-0000',
       channel: 'pickup',
+      fulfillment: 'pickup',
+      source: 'Balcao',
       status: 'production',
-      total,
+      subtotal,
+      total: subtotal,
       payment: 'Cartao',
       time: nowTime(),
       address: 'Retirada no balcao',
+      deliveryFee: '0,00',
       note: 'Venda criada no PDV.',
       items: counterCart.map((item) => `${item.qty}x ${item.name}`),
-    }
+    })
 
     setOrders((current) => [createdOrder, ...current])
     registerOrderFinanceEntry(createdOrder, 'Venda PDV')
@@ -2550,13 +6835,28 @@ function App() {
   function saveProduct(event, productId = null) {
     event.preventDefault()
 
-    const normalizedProduct = {
+    if (!productId && categories.length === 0) {
+      notify('Crie uma categoria antes de cadastrar um item.', 'warning')
+      closeModal()
+      openModal('newCategory')
+      return
+    }
+
+    const baseProduct = productId ? products.find((product) => product.id === productId) : null
+    const normalizedProduct = normalizeProduct({
+      ...baseProduct,
       name: productForm.name || 'Produto sem nome',
-      category: productForm.category || categories[0]?.name || 'Geral',
+      category: productForm.category || categories[0]?.name || baseProduct?.category || '',
       price: Number(String(productForm.price).replace(',', '.')) || 0,
       stock: Number(productForm.stock) || 0,
       active: productForm.active,
-    }
+      maxFlavors: Number(productForm.maxFlavors) || baseProduct?.maxFlavors || 2,
+      availableFrom: productForm.availableFrom || baseProduct?.availableFrom || '18:00',
+      availableTo: productForm.availableTo || baseProduct?.availableTo || '23:30',
+      availableDays: productForm.availableDays || baseProduct?.availableDays || getAllWeekDays(),
+      flavors: baseProduct?.flavors,
+      addonGroups: baseProduct?.addonGroups,
+    }, categories[0]?.name || 'Pizzas')
 
     if (productId) {
       setProducts((current) =>
@@ -2567,7 +6867,7 @@ function App() {
       notify('Produto editado.')
     } else {
       setProducts((current) => [
-        { id: `prod-${Date.now()}`, ...normalizedProduct },
+        { ...normalizedProduct, id: `prod-${Date.now()}` },
         ...current,
       ])
       notify('Produto criado.')
@@ -2599,6 +6899,260 @@ function App() {
     if (toggledProduct) {
       notify(`${toggledProduct.name} ${toggledProduct.active ? 'ativado' : 'pausado'}.`)
     }
+  }
+
+  function updateProductConfig(productId, patch) {
+    setProducts((current) =>
+      current.map((product) =>
+        product.id === productId ? normalizeProduct({ ...product, ...patch }, categories[0]?.name || 'Pizzas') : product,
+      ),
+    )
+  }
+
+  function updateProductFlavor(productId, flavorId, patch) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          flavors: product.flavors.map((flavor) =>
+            flavor.id === flavorId ? { ...flavor, ...patch } : flavor,
+          ),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+  }
+
+  function saveFlavor(event, productId, flavorId = null) {
+    event.preventDefault()
+    const flavorOwner = products.find((product) => product.id === productId)
+    const flavorEntity = getFlavorEntityLabel(flavorOwner, false)
+
+    const normalizedFlavor = createProductFlavor(
+      flavorForm.name.trim() || (flavorId ? 'Sabor editado' : 'Novo sabor'),
+      Number(String(flavorForm.price).replace(',', '.')) || 0,
+      flavorForm.active,
+      flavorId || undefined,
+    )
+
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        const nextFlavors = flavorId
+          ? product.flavors.map((flavor) => (flavor.id === flavorId ? normalizedFlavor : flavor))
+          : [...product.flavors, normalizedFlavor]
+
+        return normalizeProduct({
+          ...product,
+          flavors: nextFlavors,
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+
+    closeModal()
+    notify(flavorId ? `${flavorEntity} atualizado.` : `${flavorEntity} criado.`)
+  }
+
+  function removeProductFlavor(productId, flavorId) {
+    let removedFlavorName = ''
+    const flavorOwner = products.find((product) => product.id === productId)
+    const flavorEntity = getFlavorEntityLabel(flavorOwner, false)
+
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        const nextFlavors = product.flavors.filter((flavor) => {
+          if (flavor.id === flavorId) {
+            removedFlavorName = flavor.name
+            return false
+          }
+
+          return true
+        })
+
+        return normalizeProduct({
+          ...product,
+          flavors: nextFlavors,
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+
+    notify(removedFlavorName ? `${flavorEntity} "${removedFlavorName}" removido.` : `${flavorEntity} removido.`)
+  }
+
+  function addProductAddonGroup(productId) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        const nextGroupIndex = (product.addonGroups?.length ?? 0) + 1
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: [
+            ...(product.addonGroups || []),
+            createProductAddonGroup({
+              name: `Grupo ${nextGroupIndex}`,
+              options: [createProductAddonOption('Nova opcao')],
+            }),
+          ],
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+
+    notify('Grupo de adicional criado.')
+  }
+
+  function updateProductAddonGroup(productId, groupId, patch) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: (product.addonGroups || []).map((group) => {
+            if (group.id !== groupId) {
+              return group
+            }
+
+            const maxSelect = Math.max(1, Number(patch.maxSelect ?? group.maxSelect) || 1)
+            const required = patch.required ?? group.required
+            const minSelect = Math.max(required ? 1 : 0, Number(patch.minSelect ?? group.minSelect) || 0)
+
+            return {
+              ...group,
+              ...patch,
+              required,
+              maxSelect,
+              minSelect: Math.min(minSelect, maxSelect),
+            }
+          }),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+  }
+
+  function removeProductAddonGroup(productId, groupId) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: (product.addonGroups || []).filter((group) => group.id !== groupId),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+
+    notify('Grupo de adicional removido.')
+  }
+
+  function addProductAddonOption(productId, groupId) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: (product.addonGroups || []).map((group) => {
+            if (group.id !== groupId) {
+              return group
+            }
+
+            return {
+              ...group,
+              options: [...(group.options || []), createProductAddonOption('Nova opcao')],
+            }
+          }),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+  }
+
+  function updateProductAddonOption(productId, groupId, optionId, patch) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: (product.addonGroups || []).map((group) => {
+            if (group.id !== groupId) {
+              return group
+            }
+
+            return {
+              ...group,
+              options: (group.options || []).map((option) =>
+                option.id === optionId ? { ...option, ...patch } : option,
+              ),
+            }
+          }),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+  }
+
+  function removeProductAddonOption(productId, groupId, optionId) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          addonGroups: (product.addonGroups || []).map((group) => {
+            if (group.id !== groupId) {
+              return group
+            }
+
+            return {
+              ...group,
+              options: (group.options || []).filter((option) => option.id !== optionId),
+            }
+          }),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+  }
+
+  function toggleProductAvailabilityDay(productId, dayId) {
+    setProducts((current) =>
+      current.map((product) => {
+        if (product.id !== productId) {
+          return product
+        }
+
+        const activeDays = product.availableDays.includes(dayId)
+          ? product.availableDays.filter((day) => day !== dayId)
+          : [...product.availableDays, dayId]
+
+        return normalizeProduct({
+          ...product,
+          availableDays: activeDays.length > 0 ? activeDays : [dayId],
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
   }
 
   function saveCategory(event, categoryId = null) {
@@ -2650,21 +7204,34 @@ function App() {
 
   function deleteCategory(categoryId) {
     const currentCategory = categories.find((category) => category.id === categoryId)
-    const fallbackCategory = categories.find((category) => category.id !== categoryId)?.name || 'Geral'
+    const remainingCategories = categories.filter((category) => category.id !== categoryId)
+    const fallbackCategory = remainingCategories[0]?.name || ''
 
-    setCategories((current) => current.filter((category) => category.id !== categoryId))
-    setProducts((current) =>
-      current.map((product) =>
-        product.category === currentCategory?.name ? { ...product, category: fallbackCategory } : product,
-      ),
-    )
+    setCategories(remainingCategories)
+    setProducts((current) => {
+      if (!currentCategory) {
+        return current
+      }
+
+      if (!fallbackCategory) {
+        return current.filter((product) => product.category !== currentCategory.name)
+      }
+
+      return current.map((product) =>
+        product.category === currentCategory.name ? { ...product, category: fallbackCategory } : product,
+      )
+    })
 
     if (selectedCategory === currentCategory?.name) {
       setSelectedCategory('all')
     }
 
+    if (posCategory === currentCategory?.name) {
+      setPosCategory('all')
+    }
+
     closeModal()
-    notify('Categoria apagada.')
+    notify(fallbackCategory ? 'Categoria apagada.' : 'Categoria apagada com os itens vinculados.')
   }
 
   function saveTable(event, tableId = null) {
@@ -2709,19 +7276,24 @@ function App() {
 
   function addTableOrder(table) {
     const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
-    const createdOrder = {
+    const subtotal = table.total || 49.9
+    const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: table.customer || table.name,
       phone: '(47) 9 2222-3333',
       channel: 'pickup',
+      fulfillment: 'dinein',
+      source: 'Mesa',
       status: 'production',
-      total: table.total || 49.9,
+      subtotal,
+      total: subtotal,
       payment: 'Mesa',
       time: nowTime(),
       address: table.name,
+      deliveryFee: '0,00',
       note: 'Pedido vindo do salao.',
       items: ['Consumo da mesa'],
-    }
+    })
 
     setOrders((current) => [createdOrder, ...current])
     setTables((current) =>
@@ -2748,6 +7320,87 @@ function App() {
     }
     closeModal()
     notify(`Entrega #${orderId} atribuida para ${courierName}.`)
+  }
+
+  function updateDeliveryZonePoint(pointIndex, nextPoint) {
+    setDeliveryZonePoints((current) =>
+      current.map((point, index) => (index === pointIndex ? nextPoint : point)),
+    )
+  }
+
+  function removeSelectedDeliveryZonePoint() {
+    if (selectedDeliveryZonePointIndex === null) {
+      notify('Selecione um ponto para remover.', 'warning')
+      return
+    }
+
+    setDeliveryZonePoints((current) =>
+      current.filter((_, pointIndex) => pointIndex !== selectedDeliveryZonePointIndex),
+    )
+    setSelectedDeliveryZonePointIndex(null)
+  }
+
+  function trimDeliveryZoneFromSelectedPoint() {
+    if (selectedDeliveryZonePointIndex === null) {
+      notify('Selecione um ponto para cortar a area a partir dele.', 'warning')
+      return
+    }
+
+    setDeliveryZonePoints((current) => current.slice(0, selectedDeliveryZonePointIndex + 1))
+    notify('Area cortada a partir do ponto selecionado.')
+  }
+
+  function saveDeliveryZone(zoneId = editingDeliveryZoneId) {
+    const polygon = getDeliveryZoneDraftPolygon(deliveryZonePoints, deliveryZoneForm.coordinates)
+
+    if (!deliveryZoneForm.name.trim() || parseCurrencyInput(deliveryZoneForm.fee) < 0) {
+      notify('Informe nome e taxa da zona.', 'warning')
+      return
+    }
+
+    if (!polygon || polygon.length < 4) {
+      notify('Informe pelo menos 3 coordenadas validas para a zona.', 'warning')
+      return
+    }
+
+    const normalizedZone = normalizeDeliveryZone({
+      id: zoneId || undefined,
+      name: deliveryZoneForm.name.trim(),
+      fee: deliveryZoneForm.fee,
+      active: deliveryZoneForm.active === 'yes',
+      color: deliveryZoneForm.color,
+      polygon,
+    })
+
+    if (zoneId) {
+      setDeliveryZones((current) =>
+        current.map((zone) => (zone.id === zoneId ? normalizedZone : zone)),
+      )
+      notify('Zona de entrega atualizada.')
+    } else {
+      setDeliveryZones((current) => [normalizedZone, ...current])
+      notify('Zona de entrega criada.')
+    }
+
+    setEditingDeliveryZoneId(null)
+    setDeliveryZoneForm(blankDeliveryZone)
+    setDeliveryZoneStep(1)
+    setDeliveryZonePoints([])
+    setSelectedDeliveryZonePointIndex(null)
+    setModal({ type: 'deliveryZones', payload: null })
+  }
+
+  function toggleDeliveryZone(zoneId) {
+    setDeliveryZones((current) =>
+      current.map((zone) => (zone.id === zoneId ? { ...zone, active: !zone.active } : zone)),
+    )
+    notify('Status da zona atualizado.')
+  }
+
+  function deleteDeliveryZone(zoneId) {
+    setDeliveryZones((current) => current.filter((zone) => zone.id !== zoneId))
+    closeModal()
+    notify('Zona de entrega apagada.')
   }
 
   function toggleChannel(channelId) {
@@ -3132,8 +7785,10 @@ function App() {
     if (activeNav === 'service') {
       return (
         <ServiceSection
+          orders={orders}
           channels={channels}
           recoveries={recoveries}
+          chatMessages={chatMessages}
           onToggleChannel={toggleChannel}
           onToggleRobot={toggleRobot}
           onToggleRecovery={toggleRecovery}
@@ -3167,13 +7822,23 @@ function App() {
           onCopyProductLink={copyProductLink}
           onToggleCategory={toggleCategory}
           onToggleProduct={toggleProduct}
+          onUpdateProductConfig={updateProductConfig}
+          onUpdateProductFlavor={updateProductFlavor}
+          onRemoveProductFlavor={removeProductFlavor}
+          onAddProductAddonGroup={addProductAddonGroup}
+          onUpdateProductAddonGroup={updateProductAddonGroup}
+          onRemoveProductAddonGroup={removeProductAddonGroup}
+          onAddProductAddonOption={addProductAddonOption}
+          onUpdateProductAddonOption={updateProductAddonOption}
+          onRemoveProductAddonOption={removeProductAddonOption}
+          onToggleProductAvailabilityDay={toggleProductAvailabilityDay}
           onOpenModal={openModal}
         />
       )
     }
 
     if (activeNav === 'tables') {
-      return <TablesSection tables={tables} onOpenModal={openModal} />
+      return <TablesSection tables={tables} orders={orders} qrCodes={qrCodes} onOpenModal={openModal} />
     }
 
     if (activeNav === 'kds') {
@@ -3181,7 +7846,7 @@ function App() {
     }
 
     if (activeNav === 'delivery') {
-      return <DeliverySection orders={orders} couriers={couriers} onToggleCourier={toggleCourier} onOpenModal={openModal} />
+      return <DeliverySection orders={orders} couriers={couriers} deliveryZones={deliveryZones} onToggleCourier={toggleCourier} onOpenModal={openModal} />
     }
 
     if (activeNav === 'marketing') {
@@ -3200,7 +7865,7 @@ function App() {
     }
 
     if (activeNav === 'finance') {
-      return <FinanceSection finance={finance} onOpenModal={openModal} onPayFinance={payFinance} />
+      return <FinanceSection finance={finance} orders={orders} onOpenModal={openModal} onPayFinance={payFinance} />
     }
 
     if (activeNav === 'fiscal') {
@@ -3218,7 +7883,17 @@ function App() {
     }
 
     if (activeNav === 'reports') {
-      return <ReportsSection orders={orders} products={products} tables={tables} onOpenModal={openModal} />
+      return (
+        <ReportsSection
+          orders={orders}
+          products={products}
+          tables={tables}
+          finance={finance}
+          coupons={coupons}
+          recoveries={recoveries}
+          onOpenModal={openModal}
+        />
+      )
     }
 
     return (
@@ -3233,8 +7908,15 @@ function App() {
         />
 
         <div className="operations-grid">
-          <Board visibleOrders={visibleOrders} onOpenModal={openModal} onMoveOrder={moveOrder} />
-          <ActivityPanel orders={orders} onOpenModal={openModal} />
+          <div className="operations-stack">
+            <Board visibleOrders={visibleOrders} onOpenModal={openModal} onMoveOrder={moveOrder} />
+          </div>
+          <OrdersSideRail
+            orders={orders}
+            blockedOrders={blockedOrders}
+            suggestions={suggestions}
+            onOpenModal={openModal}
+          />
         </div>
       </>
     )
@@ -3248,26 +7930,118 @@ function App() {
     const payload = modal.payload
 
     if (modal.type === 'newOrder') {
+      const normalizedPosSearch = posSearch.trim().toLowerCase()
+      const configuredProduct = products.find((product) => product.id === cartItemForm.productId) || null
+      const availableCategories = categories
+        .filter((category) => category.active)
+        .filter((category) => products.some((product) => product.active && product.category === category.name))
+      const visibleCategories = availableCategories.filter((category) => {
+        if (!normalizedPosSearch) {
+          return true
+        }
+
+        const productNames = products
+          .filter((product) => product.active && product.category === category.name)
+          .map((product) => product.name)
+          .join(' ')
+
+        return `${category.name} ${productNames}`.toLowerCase().includes(normalizedPosSearch)
+      })
       const activeProducts = products
         .filter((product) => product.active)
         .filter((product) => posCategory === 'all' || product.category === posCategory)
-        .filter((product) => product.name.toLowerCase().includes(posSearch.toLowerCase()))
+        .filter((product) => product.name.toLowerCase().includes(normalizedPosSearch))
+      const posStep = configuredProduct ? 'configure' : posCategory === 'all' ? 'categories' : 'products'
+      const configurationSteps = configuredProduct ? getCartConfigurationSteps(configuredProduct) : []
+      const currentConfigStep = configurationSteps[cartItemStepIndex] || configurationSteps[0] || null
+      const currentConfigOptions = currentConfigStep
+        ? currentConfigStep.options.filter((option) => option.name.toLowerCase().includes(normalizedPosSearch))
+        : []
+      const configuredUnitPrice = configuredProduct ? getCartItemUnitPrice(configuredProduct, cartItemForm.flavorIds, cartItemForm.addonSelections) : 0
+      const configuredFlavorLimit = configuredProduct ? Math.max(1, Number(configuredProduct.maxFlavors) || 1) : 1
+      const configuredFlavorLabel = configuredProduct ? getCartItemFlavorLabel(configuredProduct, cartItemForm.flavorIds) : ''
+      const configuredAddonEntries = configuredProduct ? getSelectedCartAddonEntries(configuredProduct, cartItemForm.addonSelections) : []
+      const hasConfiguredTrail = Boolean(configuredFlavorLabel) || configuredAddonEntries.length > 0
+      const canFinalizeConfiguredItem = configuredProduct
+        ? getCartConfigurationSteps(configuredProduct).every((step) => isCartStepSelectionValid(step, cartItemForm))
+        : false
+      const hasNextConfigStep = cartItemStepIndex < Math.max(configurationSteps.length - 1, 0)
       const orderSubtotal = orderCart.reduce((sum, item) => sum + item.price * item.qty, 0)
+      const orderBreakdown = getOrderFinancialBreakdown(orderSubtotal, newOrder)
+      const legacyAdjustments = normalizeOrderAdjustmentFields(newOrder)
+      const legacyManualTotal = showManualTotalInput && !legacyAdjustments.discountValue && !legacyAdjustments.surchargeValue ? parseCurrencyInput(newOrder.total) : 0
+      const orderTotal = legacyManualTotal > 0
+        ? legacyManualTotal
+        : orderBreakdown.total
       const selectedCartItem = orderCart.find((item) => item.id === selectedCartItemId) || null
+      const orderAddressPreview = newOrder.fulfillment === 'delivery'
+        ? newOrder.address || 'Nenhum endereco selecionado'
+        : getOrderFulfillmentLabel(newOrder.fulfillment)
+      const hasOrderAdjustments = orderBreakdown.discountAmount > 0 || orderBreakdown.surchargeAmount > 0
+      const hasOrderItems = orderCart.length > 0
 
       return (
-        <div className="pos-backdrop" role="presentation">
-          <section className="pos-shell" role="dialog" aria-modal="true" aria-label="Criar pedido no PDV">
+        <div className="pos-backdrop" role="presentation" onMouseDown={closeModal}>
+          <section
+            className="pos-shell"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Criar pedido no PDV"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <form id="new-order-form" onSubmit={createOrder} className="pos-shell__form">
-              <main className="pos-catalog">
+              <main className={`pos-catalog ${posStep === 'configure' ? 'pos-catalog--config' : ''}`.trim()}>
                 <header className="pos-tabs">
-                  <button className={newOrder.channel === 'pickup' ? 'is-active' : ''} type="button" onClick={() => setNewOrder({ ...newOrder, channel: 'pickup' })}>Pedidos balcao (PDV)</button>
-                  <button className={newOrder.channel === 'delivery' ? 'is-active' : ''} type="button" onClick={() => setNewOrder({ ...newOrder, channel: 'delivery' })}>[ D ] Delivery e Balao</button>
+                  <button
+                    className={newOrder.channel === 'pickup' ? 'is-active' : ''}
+                    data-testid="new-order-tab-pickup"
+                    type="button"
+                    onClick={() => setNewOrder({
+                      ...newOrder,
+                      channel: 'pickup',
+                      fulfillment: newOrder.fulfillment === 'dinein' ? 'dinein' : 'pickup',
+                      address: '',
+                      addressId: '',
+                      deliveryFee: '0,00',
+                    })}
+                  >
+                    Pedidos balcao (PDV)
+                  </button>
+                  <button
+                    className={newOrder.channel === 'delivery' ? 'is-active' : ''}
+                    data-testid="new-order-tab-delivery"
+                    disabled={!hasOrderItems}
+                    type="button"
+                    onClick={() => setNewOrder({ ...newOrder, channel: 'delivery', fulfillment: 'delivery' })}
+                  >
+                    [ D ] Delivery e Balcao
+                  </button>
                   <button type="button" onClick={() => setActiveNav('tables')}>[ M ] Mesas e Comandas</button>
                 </header>
 
                 <section className="pos-catalog__toolbar">
-                  <button type="button" className="pos-filter" onClick={() => setPosCategory('all')}>{posCategory === 'all' ? '[F] Filtros' : posCategory}</button>
+                  <button
+                    type="button"
+                    className="pos-filter"
+                    onClick={() => {
+                      if (posStep === 'configure') {
+                        resetOrderCatalog(false)
+                        return
+                      }
+
+                      setPosCategory('all')
+                      setPosSearch('')
+                    }}
+                  >
+                    <Icon name={posStep === 'categories' ? 'filter' : 'arrow'} size={18} />
+                    <span>
+                      {posStep === 'categories'
+                        ? '[F] Filtros'
+                        : posStep === 'products'
+                          ? posCategory
+                          : configuredProduct?.name || '[F] Filtros'}
+                    </span>
+                  </button>
                   <label>
                     <input value={posSearch} onChange={(event) => setPosSearch(event.target.value)} placeholder="[ P ] Pesquisar" />
                     <Icon name="search" size={22} />
@@ -3275,37 +8049,235 @@ function App() {
                 </section>
 
                 <div className="pos-hints">
-                  <span>Navegacao rapida</span>
-                  <span>ENTER seleciona item</span>
+                  {posStep === 'categories' ? (
+                    <>
+                      <span>
+                        <Icon name="menu" size={14} />
+                        Categorias
+                      </span>
+                      <span>
+                        <b>ENTER</b>
+                        Abrir itens
+                      </span>
+                    </>
+                  ) : null}
+
+                  {posStep === 'products' ? (
+                    <>
+                      <span>
+                        <Icon name="menu" size={14} />
+                        {posCategory} / Itens
+                      </span>
+                      <span>
+                        <b>ENTER</b>
+                        Configurar item
+                      </span>
+                    </>
+                  ) : null}
+
+                  {posStep === 'configure' ? (
+                    <>
+                      <span>
+                        <Icon name="menu" size={14} />
+                        Configuracao simplificada
+                      </span>
+                      <span>
+                        <b>F</b>
+                        Finalizar item
+                      </span>
+                    </>
+                  ) : null}
                 </div>
 
-                <section className="pos-product-grid">
-                  {categories.slice(0, 8).map((category) => (
-                    <button className="pos-product-tile" type="button" key={category.id} onClick={() => setPosCategory(category.name)}>
-                      <span className="tile-pattern" />
-                      <strong>{category.name}</strong>
-                    </button>
-                  ))}
-                  {activeProducts.slice(0, 8).map((product) => (
-                    <button className="pos-product-tile" data-testid={`pos-product-${product.id}`} type="button" key={product.id} onClick={() => addOrderCart(product)}>
-                      <span className="tile-pattern tile-pattern--food" />
-                      <strong>{product.name}</strong>
-                      <small>{formatCurrency(product.price)}</small>
-                    </button>
-                  ))}
-                </section>
+                {posStep === 'categories' ? (
+                  <section className="pos-product-grid">
+                    {visibleCategories.length > 0 ? visibleCategories.map((category) => (
+                      <button
+                        className="pos-product-tile pos-product-tile--category"
+                        data-testid={`pos-category-${category.id}`}
+                        type="button"
+                        key={category.id}
+                        onClick={() => {
+                          setPosCategory(category.name)
+                          setPosSearch('')
+                        }}
+                      >
+                        <span className="tile-pattern" />
+                        <strong>{category.name}</strong>
+                        <small>{products.filter((product) => product.active && product.category === category.name).length} item(ns)</small>
+                      </button>
+                    )) : (
+                      <div className="pos-stage-empty">Nenhuma categoria encontrada para o filtro atual.</div>
+                    )}
+                  </section>
+                ) : null}
+
+                {posStep === 'products' ? (
+                  <section className="pos-stage">
+                    <header className="pos-stage__header">
+                      <div className="pos-stage__title">
+                        <strong>{posCategory}</strong>
+                        <small>Itens disponiveis para montagem do pedido</small>
+                      </div>
+                      <span className="pos-stage__badge">{activeProducts.length} item(ns)</span>
+                    </header>
+
+                    <div className="pos-product-grid pos-product-grid--items">
+                      {activeProducts.length > 0 ? activeProducts.map((product) => (
+                        <button
+                          className="pos-product-tile pos-product-tile--product"
+                          data-testid={`pos-product-${product.id}`}
+                          type="button"
+                          key={product.id}
+                          onClick={() => addOrderCart(product)}
+                        >
+                          <span className={`tile-pattern tile-pattern--food ${getMenuProductThumbClass(product)}`.trim()} />
+                          <strong>{product.name}</strong>
+                          <small>{formatCurrency(product.price)}</small>
+                        </button>
+                      )) : (
+                        <div className="pos-stage-empty">Nenhum item encontrado nesta categoria.</div>
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+
+                {posStep === 'configure' && configuredProduct ? (
+                  <section className="pos-config">
+                    <header className="pos-config__header">
+                      <div className="pos-config__lead">
+                        <span className={`product-thumb ${getMenuProductThumbClass(configuredProduct)}`.trim()} />
+                        <div>
+                          <strong>{configuredProduct.name}</strong>
+                          <small>
+                            {currentConfigStep
+                              ? `${currentConfigStep.title} ${currentConfigStep.required ? '(obrigatorio)' : '(opcional)'}`
+                              : 'Defina a quantidade do item'}
+                          </small>
+                        </div>
+                      </div>
+                      <span className="pos-config__badge">
+                        {configurationSteps.length > 0 ? `${Math.min(cartItemStepIndex + 1, configurationSteps.length)} de ${configurationSteps.length}` : 'Item direto'}
+                      </span>
+                    </header>
+
+                    <div className="pos-config__body">
+                      <div className="pos-config__summary">
+                        <div>
+                          <strong>{currentConfigStep?.title || configuredProduct.category}</strong>
+                          <small>
+                            {currentConfigStep
+                              ? currentConfigStep.required
+                                ? `Selecione de ${Math.max(1, Number(currentConfigStep.minSelect) || 1)} a ${currentConfigStep.maxSelect} opcao(oes)`
+                                : `Selecione ate ${currentConfigStep.maxSelect} opcao(oes)`
+                              : 'Nenhuma configuracao extra para este item'}
+                          </small>
+                        </div>
+                        <b>{formatCurrency(configuredUnitPrice)}</b>
+                      </div>
+
+                      {hasConfiguredTrail ? (
+                        <div className="pos-config__trail">
+                          {configuredFlavorLabel ? (
+                            <article className="pos-config__trail-item pos-config__trail-item--primary">
+                              <span>{isComboProduct(configuredProduct) ? 'Subsabores escolhidos' : 'Sabores escolhidos'}</span>
+                              <strong>{configuredFlavorLabel}</strong>
+                            </article>
+                          ) : null}
+
+                          {configuredAddonEntries.map((entry) => (
+                            <article className="pos-config__trail-item" key={entry.groupId}>
+                              <span>{entry.groupName}</span>
+                              <strong>{entry.label}</strong>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {currentConfigStep ? (
+                        <div className="pos-config__grid">
+                          {currentConfigOptions.length > 0 ? currentConfigOptions.map((option) => {
+                            const isSelected = getCartStepSelectedIds(cartItemForm, currentConfigStep).includes(option.id)
+
+                            return (
+                              <button
+                                className={`pos-flavor-card ${isSelected ? 'is-active' : ''}`.trim()}
+                                data-testid={`${currentConfigStep.type === 'flavors' ? 'cart-flavor' : 'cart-addon'}-${option.id}`}
+                                key={option.id}
+                                type="button"
+                                onClick={() => {
+                                  if (currentConfigStep.type === 'flavors') {
+                                    toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)
+                                    return
+                                  }
+
+                                  toggleCartItemAddonOption(currentConfigStep, option.id)
+                                }}
+                              >
+                                <strong>{option.name}</strong>
+                                <small>{option.price > 0 ? `+${formatCurrency(option.price)}` : 'Sem adicional'}</small>
+                                <span>{isSelected ? 'Selecionado' : 'Selecionar'}</span>
+                              </button>
+                            )
+                          }) : (
+                            <div className="pos-stage-empty">Nenhuma opcao encontrada para o filtro atual.</div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="pos-stage-empty">Este item nao possui sabores ou adicionais configuraveis. Ajuste a quantidade e finalize.</div>
+                      )}
+
+                      <div className="pos-config__footer">
+                        <label className="pos-config__qty">
+                          <span>Quantidade</span>
+                          <input
+                            data-testid="cart-item-qty"
+                            min="1"
+                            type="number"
+                            value={cartItemForm.qty}
+                            onChange={(event) => setCartItemForm({ ...cartItemForm, qty: event.target.value })}
+                          />
+                        </label>
+
+                        {cartItemForm.lineId ? (
+                          <Button variant="danger" onClick={() => { removeOrderCart(cartItemForm.lineId); resetOrderCatalog(false) }}>
+                            Remover item
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
 
                 <footer className="pos-next-row">
                   <button type="button" onClick={closeModal}>Cancelar</button>
-                  <button type="button" onClick={() => setPosCategory('all')}>[ A ] Proximo</button>
+                  {posStep === 'products' ? (
+                    <button type="button" onClick={() => { setPosCategory('all'); setPosSearch('') }}>[ V ] Voltar</button>
+                  ) : null}
+                  {posStep === 'configure' ? (
+                    <>
+                      <button type="button" onClick={() => {
+                        if (cartItemStepIndex > 0) {
+                          goToPreviousCartItemStep()
+                          return
+                        }
+
+                        resetOrderCatalog(false)
+                      }}>[ V ] Voltar</button>
+                      {hasNextConfigStep ? (
+                        <button type="button" onClick={() => configuredProduct && goToNextCartItemStep(configuredProduct)}>[ A ] Proximo</button>
+                      ) : null}
+                      <button type="button" disabled={!canFinalizeConfiguredItem} onClick={commitOrderCartItem}>[ F ] Finalizar item</button>
+                    </>
+                  ) : null}
                 </footer>
               </main>
 
               <aside className="pos-summary">
                 <header className="pos-summary__header">
                   <button type="button" onClick={() => openModal('orderDrafts')}>[CTRL+X] Rascunhos <b>{orderDrafts.length}</b></button>
-                  <button type="button" disabled={!selectedCartItem} onClick={() => selectedCartItem && openModal('editCartItem', selectedCartItem)}>Editar</button>
-                  <button type="button" disabled={!selectedCartItem} onClick={() => selectedCartItem && removeOrderCart(selectedCartItem.id)}>Excluir</button>
+                  <button type="button" disabled={!selectedCartItem} onClick={() => selectedCartItem && openExistingOrderCartItem(selectedCartItem)}>[Q] Editar</button>
+                  <button type="button" disabled={!selectedCartItem} onClick={() => selectedCartItem && removeOrderCart(selectedCartItem.id)}>[W] Excluir</button>
                   <button type="button" className="summary-settings" onClick={() => openModal('automations')}><Icon name="settings" size={22} /></button>
                 </header>
 
@@ -3315,19 +8287,55 @@ function App() {
                     <span>Subtotal</span>
                   </div>
                   {orderCart.length > 0 ? (
-                    orderCart.map((item) => (
-                      <article className={`summary-item ${selectedCartItemId === item.id ? 'is-selected' : ''}`} key={item.id} onClick={() => setSelectedCartItemId(item.id)}>
-                        <span>
-                          <strong>{item.qty}x {item.name}</strong>
-                          <small>{formatCurrency(item.price)}</small>
-                        </span>
-                        <button type="button" onClick={() => removeOrderCart(item.id)}>
-                          <Icon name="trash" size={16} />
-                        </button>
-                      </article>
-                    ))
+                    <div className="pos-summary__list" data-testid="order-cart-list">
+                      {orderCart.map((item) => (
+                        <article
+                          className={`summary-item ${selectedCartItemId === item.id ? 'is-selected' : ''}`.trim()}
+                          data-product-id={item.productId}
+                          data-testid={`order-cart-item-${item.id}`}
+                          key={item.id}
+                          onClick={() => setSelectedCartItemId(item.id)}
+                        >
+                          <div className="summary-item__main">
+                            <span>
+                              <strong>{item.qty}x {item.name}</strong>
+                              {item.flavorLabel ? <small>{getFlavorEntityLabel({ category: item.category, name: item.name }, true)}: {item.flavorLabel}</small> : null}
+                              {Array.isArray(item.addonEntries) ? item.addonEntries.map((entry) => (
+                                <small key={`${item.id}-${entry.groupId}`}>{entry.groupName}: {entry.label}</small>
+                              )) : null}
+                              <small>{formatCurrency(item.price)} por unidade</small>
+                            </span>
+                            <b className="summary-item__price">{formatCurrency(item.price * item.qty)}</b>
+                          </div>
+                          <div className="summary-item__controls" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              data-testid={`order-item-subtract-${item.id}`}
+                              type="button"
+                              onClick={() => changeOrderCartQuantity(item.id, item.qty - 1)}
+                            >
+                              -
+                            </button>
+                            <b className="summary-item__qty">{item.qty}</b>
+                            <button
+                              data-testid={`order-item-add-${item.id}`}
+                              type="button"
+                              onClick={() => changeOrderCartQuantity(item.id, item.qty + 1)}
+                            >
+                              +
+                            </button>
+                            <button
+                              className="summary-item__remove"
+                              type="button"
+                              onClick={() => removeOrderCart(item.id)}
+                            >
+                              <Icon name="trash" size={15} />
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
                   ) : (
-                    <p>Finalize o item ao lado, ele vai aparecer aqui</p>
+                    <div className="pos-summary__empty">Finalize o item ao lado, ele vai aparecer aqui</div>
                   )}
                 </div>
 
@@ -3338,25 +8346,69 @@ function App() {
 
                 <div className="pos-total">
                   <span>Subtotal <b>{formatCurrency(orderSubtotal)}</b></span>
-                  <span>Entrega <b>Gratis</b></span>
-                  <strong>Total <b>{formatCurrency(orderSubtotal || Number(String(newOrder.total).replace(',', '.')) || 0)}</b></strong>
+                  <span>Entrega <b>{orderBreakdown.deliveryFee > 0 ? formatCurrency(orderBreakdown.deliveryFee) : 'Gratis'}</b></span>
+                  {orderBreakdown.discountAmount > 0 ? <span>Desconto <b>{formatCurrency(orderBreakdown.discountAmount)}</b></span> : null}
+                  {orderBreakdown.surchargeAmount > 0 ? <span>Acrescimo <b>{formatCurrency(orderBreakdown.surchargeAmount)}</b></span> : null}
+                  <strong>Total <b>{formatCurrency(orderTotal)}</b></strong>
                 </div>
 
                 <div className="customer-grid">
-                  <input data-testid="new-total" inputMode="decimal" value={newOrder.total} onChange={(event) => setNewOrder({ ...newOrder, total: event.target.value })} placeholder="Valor manual" />
-                  <input value={newOrder.phone} onChange={(event) => setNewOrder({ ...newOrder, phone: event.target.value })} placeholder="(XX) X XXXX-XXXX" />
-                  <input data-testid="new-customer" value={newOrder.customer} onChange={(event) => setNewOrder({ ...newOrder, customer: event.target.value })} placeholder="Nome do cliente" />
-                  <select data-testid="new-channel" value={newOrder.channel} onChange={(event) => setNewOrder({ ...newOrder, channel: event.target.value })}>
-                    <option value="pickup">Balcao</option>
-                    <option value="delivery">Delivery</option>
-                  </select>
+                  <input
+                    className={!hasOrderItems ? 'is-locked' : ''}
+                    disabled={!hasOrderItems}
+                    value={newOrder.phone}
+                    onChange={(event) => setNewOrder({ ...newOrder, phone: event.target.value })}
+                    placeholder="(XX) X XXXX-XXXX"
+                  />
+                  <input
+                    className={!hasOrderItems ? 'is-locked' : ''}
+                    data-testid="new-customer"
+                    disabled={!hasOrderItems}
+                    value={newOrder.customer}
+                    onChange={(event) => setNewOrder({ ...newOrder, customer: event.target.value })}
+                    placeholder="Nome do cliente"
+                  />
                 </div>
 
-                <div className="payment-grid">
-                  <button type="button" className={newOrder.payment === 'Pix' ? 'is-active' : ''} onClick={() => setNewOrder({ ...newOrder, payment: 'Pix' })}>[ X ] Pix</button>
-                  <button type="button" className={newOrder.payment === 'Cartao' ? 'is-active' : ''} onClick={() => setNewOrder({ ...newOrder, payment: 'Cartao' })}>[ R ] Cartao</button>
-                  <button type="button" className={newOrder.payment === 'Entrega' ? 'is-active' : ''} onClick={() => setNewOrder({ ...newOrder, payment: 'Entrega' })}>[ E ] Entrega</button>
-                  <button type="button" className={newOrder.payment === 'CPF/CNPJ' ? 'is-active' : ''} onClick={() => setNewOrder({ ...newOrder, payment: 'CPF/CNPJ' })}>[ T ] CPF/CNPJ</button>
+                <div className="payment-grid payment-grid--primary">
+                  <button data-testid="open-payment-panel" disabled={!hasOrderItems} type="button" className="is-active" onClick={openOrderPaymentPanel}>[ P ] {newOrder.payment}</button>
+                  <button data-testid="open-delivery-panel" disabled={!hasOrderItems} type="button" className={newOrder.fulfillment === 'delivery' ? 'is-active' : ''} onClick={openOrderDeliveryPanel}>[ E ] {getOrderFulfillmentLabel(newOrder.fulfillment)}</button>
+                </div>
+
+                <div className="payment-grid payment-grid--secondary">
+                  <button data-testid="open-document-panel" disabled={!hasOrderItems} type="button" className={Boolean(newOrder.document.trim()) ? 'is-active' : ''} onClick={openOrderDocumentPanel}>[ T ] CPF/CNPJ</button>
+                  <button data-testid="open-adjustment-panel" disabled={!hasOrderItems} type="button" className={hasOrderAdjustments ? 'is-active' : ''} onClick={openOrderAdjustmentPanel}>[ Y ] Ajustar R$</button>
+                </div>
+
+                <div className="pos-inline-summary-stack">
+                  <div className="pos-inline-summary">
+                    <span>Pagamento</span>
+                    <strong>{newOrder.payment}</strong>
+                  </div>
+
+                  <div className="pos-inline-summary">
+                    <span>{newOrder.fulfillment === 'delivery' ? 'Endereco de entrega' : 'Forma de entrega'}</span>
+                    <strong data-testid="order-address-summary">{orderAddressPreview}</strong>
+                  </div>
+
+                  {newOrder.document.trim() ? (
+                    <div className="pos-inline-summary">
+                      <span>CPF/CNPJ</span>
+                      <strong>{newOrder.document}</strong>
+                    </div>
+                  ) : null}
+
+                  {hasOrderAdjustments ? (
+                    <div className="pos-inline-summary">
+                      <span>Ajuste aplicado</span>
+                      <strong>
+                        {[
+                          orderBreakdown.discountAmount > 0 ? `Desconto ${formatCurrency(orderBreakdown.discountAmount)}` : '',
+                          orderBreakdown.surchargeAmount > 0 ? `Acrescimo ${formatCurrency(orderBreakdown.surchargeAmount)}` : '',
+                        ].filter(Boolean).join(' | ')}
+                      </strong>
+                    </div>
+                  ) : null}
                 </div>
 
                 <footer className="pos-submit-row">
@@ -3365,12 +8417,315 @@ function App() {
                 </footer>
               </aside>
             </form>
+
+            {orderPanel === 'payment' ? (
+              <OrderUtilitySheet title="Forma de pagamento" onClose={() => setOrderPanel(null)}>
+                <div className="order-choice-list">
+                  {ORDER_PAYMENT_OPTIONS.map((option) => (
+                    <button
+                      className={`order-choice ${paymentDraft === option.id ? 'is-active' : ''}`.trim()}
+                      key={option.id}
+                      type="button"
+                      onClick={() => applyOrderPayment(option.id)}
+                    >
+                      <span className="order-choice__icon">
+                        <Icon name={option.icon} size={20} />
+                      </span>
+                      <span className="order-choice__content">
+                        <strong>[ {option.hotkey} ] {option.label}</strong>
+                        <small>{option.description}</small>
+                      </span>
+                      <Icon name="arrow" size={16} />
+                    </button>
+                  ))}
+                </div>
+              </OrderUtilitySheet>
+            ) : null}
+
+            {orderPanel === 'delivery' ? (
+              <OrderUtilitySheet
+                title="Forma de entrega"
+                onClose={() => setOrderPanel(null)}
+                footer={
+                  <Button variant="primary" onClick={applyOrderDelivery}>[ ENTER ] Aplicar forma de entrega</Button>
+                }
+              >
+                <div className="order-sheet-stack">
+                  <div className="delivery-sheet__tabs">
+                    {ORDER_FULFILLMENT_OPTIONS.map((option) => (
+                      <button
+                        className={deliveryTabDraft === option.id ? 'is-active' : ''}
+                        key={option.id}
+                        type="button"
+                        onClick={() => setDeliveryTabDraft(option.id)}
+                      >
+                        [ {option.hotkey} ] {option.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {deliveryTabDraft === 'delivery' ? (
+                    <>
+                      <div className="delivery-sheet__actions">
+                        <strong>Endereco de entrega:</strong>
+                        <div>
+                          <button type="button" onClick={startNewOrderAddress}>[ N ] Novo</button>
+                          <button type="button" onClick={startEditOrderAddress}>[ Q ] Editar</button>
+                          <button type="button" onClick={deleteOrderAddressSelection}>[ W ] Excluir</button>
+                        </div>
+                      </div>
+
+                      {orderAddresses.length > 0 ? (
+                        <div className="delivery-address-list">
+                          {orderAddresses.map((address) => (
+                            <button
+                              className={`delivery-address-card ${selectedAddressDraftId === address.id ? 'is-active' : ''}`.trim()}
+                              key={address.id}
+                              type="button"
+                              onClick={() => setSelectedAddressDraftId(address.id)}
+                            >
+                              <span className="delivery-address-card__top">
+                                <strong>{formatOrderAddress(address)}</strong>
+                                <StatusBadge tone={address.deliveryAvailable ? 'success' : 'warning'}>
+                                  {address.deliveryAvailable ? 'Atende' : 'Verificar'}
+                                </StatusBadge>
+                              </span>
+                              <small>{getDeliveryAddressSummary(address)}</small>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="delivery-address-empty">
+                          <strong>Nenhum endereco cadastrado.</strong>
+                          <button type="button" onClick={startNewOrderAddress}>[ N ] Novo endereco</button>
+                        </div>
+                      )}
+
+                    <label className="delivery-fee-field">
+                        <span>[ V ] Taxa aplicada pela zona</span>
+                        <input
+                          data-testid="delivery-fee"
+                          inputMode="decimal"
+                          value={deliveryFeeDraft}
+                          onChange={(event) => setDeliveryFeeDraft(event.target.value)}
+                          placeholder="0,00"
+                          readOnly={Boolean(orderAddresses.find((address) => address.id === selectedAddressDraftId)?.deliveryAvailable)}
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <div className="delivery-address-empty">
+                      <strong>{deliveryTabDraft === 'pickup' ? 'Retirada no local' : 'Consumir no local'}</strong>
+                      <p>{deliveryTabDraft === 'pickup' ? 'O pedido sera separado para retirada no balcao.' : 'O pedido sera marcado para consumo no local.'}</p>
+                    </div>
+                  )}
+                </div>
+              </OrderUtilitySheet>
+            ) : null}
+
+            {orderPanel === 'deliveryAddress' ? (
+              <OrderUtilitySheet
+                title="Forma de entrega"
+                onClose={() => setOrderPanel('delivery')}
+                footer={
+                  <>
+                    <Button onClick={() => setOrderPanel('delivery')}>[ ESC ] Cancelar</Button>
+                    <Button variant="primary" form="delivery-address-form" type="submit">[ ENTER ] Salvar</Button>
+                  </>
+                }
+              >
+                <div className="order-sheet-stack">
+                  <div className="delivery-sheet__tabs">
+                    {ORDER_FULFILLMENT_OPTIONS.map((option) => (
+                      <button
+                        className={option.id === 'delivery' ? 'is-active' : ''}
+                        key={option.id}
+                        type="button"
+                        disabled={option.id !== 'delivery'}
+                      >
+                        [ {option.hotkey} ] {option.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <form className="order-address-form" id="delivery-address-form" onSubmit={saveOrderAddress}>
+                    <label className="field order-address-form__full">
+                      <span>CEP</span>
+                      <div className="address-lookup-row">
+                        <input data-testid="delivery-cep" value={deliveryAddressForm.cep} onChange={(event) => updateDeliveryAddressField('cep', event.target.value)} placeholder="17.120-007" />
+                        <button type="button" onClick={lookupCepForDeliveryAddress}>Buscar CEP</button>
+                      </div>
+                    </label>
+                    <label className="field order-address-form__full">
+                      <span>Rua *</span>
+                      <input data-testid="new-address" value={deliveryAddressForm.street} onChange={(event) => updateDeliveryAddressField('street', event.target.value)} placeholder="Rua 15 de novembro" />
+                    </label>
+                    <label className="field">
+                      <span>Numero *</span>
+                      <input data-testid="delivery-number" value={deliveryAddressForm.number} onChange={(event) => updateDeliveryAddressField('number', event.target.value)} placeholder="941" />
+                    </label>
+                    <label className="field">
+                      <span>Complemento</span>
+                      <input data-testid="delivery-complement" value={deliveryAddressForm.complement} onChange={(event) => updateDeliveryAddressField('complement', event.target.value)} placeholder="Em frente a padaria" />
+                    </label>
+                    <label className="field">
+                      <span>Bairro *</span>
+                      <input data-testid="delivery-district" value={deliveryAddressForm.district} onChange={(event) => updateDeliveryAddressField('district', event.target.value)} placeholder="Centro" />
+                    </label>
+                    <label className="field">
+                      <span>Cidade *</span>
+                      <input data-testid="delivery-city" value={deliveryAddressForm.city} onChange={(event) => updateDeliveryAddressField('city', event.target.value)} placeholder="Penha - SC" />
+                    </label>
+
+                    <div className="delivery-check-panel order-address-form__full">
+                      <div className="location-action-row">
+                        <button type="button" onClick={useCurrentLocationForDeliveryAddress}>Usar localizacao atual</button>
+                        <button
+                          className={deliveryAddressMapMode === 'pick' ? 'is-active' : ''}
+                          type="button"
+                          onClick={toggleDeliveryAddressMapPicking}
+                        >
+                          {deliveryAddressMapMode === 'pick' ? 'Cancelar marcacao' : 'Colocar ponto no mapa'}
+                        </button>
+                        <button type="button" onClick={() => verifyDeliveryAddressForm()}>Verificar mapa e taxa</button>
+                      </div>
+                      <span className={`delivery-check-panel__status delivery-check-panel__status--${deliveryAddressLookup.status}`}>
+                        {deliveryAddressLookup.message || 'A taxa sera calculada pela zona cadastrada.'}
+                      </span>
+                    </div>
+
+                    <div className="order-address-form__full">
+                      <div className="delivery-map-card delivery-map-card--wide">
+                        <OsmDeliveryMap
+                          address={getAddressCoordinates(deliveryAddressForm) ? deliveryAddressForm : null}
+                          center={getDeliveryMapCenter({ storeProfile, zones: deliveryZones, address: deliveryAddressForm })}
+                          onMapClick={deliveryAddressMapMode === 'pick' ? handleDeliveryAddressMapPick : undefined}
+                          storeProfile={storeProfile}
+                          title="Mapa do endereco de entrega"
+                          zones={deliveryZones}
+                          zoom={14}
+                        />
+                        {deliveryAddressMapMode === 'pick' ? (
+                          <small className="delivery-zone-editor__hint">Clique no mapa para posicionar o endereco com precisao.</small>
+                        ) : null}
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </OrderUtilitySheet>
+            ) : null}
+
+            {orderPanel === 'adjustment' ? (
+              <OrderUtilitySheet
+                title="Ajustar valor do pedido"
+                onClose={() => setOrderPanel(null)}
+                footer={
+                  <>
+                    <Button onClick={() => setOrderPanel(null)}>[ ESC ] Cancelar</Button>
+                    <Button variant="primary" onClick={applyOrderAdjustment}>[ ENTER ] Aplicar ajuste</Button>
+                  </>
+                }
+              >
+                <div className="order-sheet-stack">
+                  <section className="adjustment-card">
+                    <header className="adjustment-card__header">
+                      <strong>Desconto</strong>
+                      <small>Aplicado sem anular o acrescimo.</small>
+                    </header>
+
+                    <div className="adjustment-type-list">
+                      <label>
+                        <input checked={adjustmentDraft.discountType === 'fixed'} name="discount-type" type="radio" onChange={() => setAdjustmentDraft({ ...adjustmentDraft, discountType: 'fixed' })} />
+                        <span>Valor fixo (R$)</span>
+                      </label>
+                      <label>
+                        <input checked={adjustmentDraft.discountType === 'percent'} name="discount-type" type="radio" onChange={() => setAdjustmentDraft({ ...adjustmentDraft, discountType: 'percent' })} />
+                        <span>Percentual (%)</span>
+                      </label>
+                    </div>
+
+                    <label className="delivery-fee-field">
+                      <span>Valor do desconto</span>
+                      <input
+                        data-testid="discount-input"
+                        inputMode="decimal"
+                        value={adjustmentDraft.discountValue}
+                        onChange={(event) => setAdjustmentDraft({ ...adjustmentDraft, discountValue: event.target.value })}
+                        placeholder={adjustmentDraft.discountType === 'percent' ? 'Ex. 10' : 'Ex. 5,00'}
+                      />
+                    </label>
+                  </section>
+
+                  <section className="adjustment-card">
+                    <header className="adjustment-card__header">
+                      <strong>Acrescimo</strong>
+                      <small>Permanece junto com o desconto, quando houver.</small>
+                    </header>
+
+                    <div className="adjustment-type-list">
+                      <label>
+                        <input checked={adjustmentDraft.surchargeType === 'fixed'} name="surcharge-type" type="radio" onChange={() => setAdjustmentDraft({ ...adjustmentDraft, surchargeType: 'fixed' })} />
+                        <span>Valor fixo (R$)</span>
+                      </label>
+                      <label>
+                        <input checked={adjustmentDraft.surchargeType === 'percent'} name="surcharge-type" type="radio" onChange={() => setAdjustmentDraft({ ...adjustmentDraft, surchargeType: 'percent' })} />
+                        <span>Percentual (%)</span>
+                      </label>
+                    </div>
+
+                    <label className="delivery-fee-field">
+                      <span>Valor do acrescimo</span>
+                      <input
+                        data-testid="surcharge-input"
+                        inputMode="decimal"
+                        value={adjustmentDraft.surchargeValue}
+                        onChange={(event) => setAdjustmentDraft({ ...adjustmentDraft, surchargeValue: event.target.value })}
+                        placeholder={adjustmentDraft.surchargeType === 'percent' ? 'Ex. 10' : 'Ex. 5,00'}
+                      />
+                    </label>
+                  </section>
+
+                  <div className="pos-inline-summary">
+                    <span>Resultado do ajuste</span>
+                    <strong>
+                      {[
+                        getOrderDiscountAmount(orderSubtotal, adjustmentDraft) > 0 ? `Desconto ${formatCurrency(getOrderDiscountAmount(orderSubtotal, adjustmentDraft))}` : '',
+                        getOrderSurchargeAmount(orderSubtotal, adjustmentDraft) > 0 ? `Acrescimo ${formatCurrency(getOrderSurchargeAmount(orderSubtotal, adjustmentDraft))}` : '',
+                      ].filter(Boolean).join(' | ') || 'Sem ajuste'}
+                    </strong>
+                  </div>
+                </div>
+              </OrderUtilitySheet>
+            ) : null}
+
+            {orderPanel === 'document' ? (
+              <OrderUtilitySheet
+                title="CPF/CNPJ"
+                onClose={() => setOrderPanel(null)}
+                footer={
+                  <>
+                    <Button onClick={() => setOrderPanel(null)}>[ ESC ] Cancelar</Button>
+                    <Button variant="primary" onClick={applyOrderDocument}>[ ENTER ] Salvar</Button>
+                  </>
+                }
+              >
+                <div className="order-sheet-stack">
+                  <label className="delivery-fee-field">
+                    <span>Digite o CPF/CNPJ:</span>
+                    <input value={documentDraft} onChange={(event) => setDocumentDraft(event.target.value)} placeholder="Digite aqui" />
+                  </label>
+                </div>
+              </OrderUtilitySheet>
+            ) : null}
           </section>
         </div>
       )
     }
 
     if (modal.type === 'editOrder') {
+      const editSubtotal = parseCurrencyInput(orderForm.subtotal)
+      const editBreakdown = getOrderFinancialBreakdown(editSubtotal, orderForm)
+
       return (
         <Modal
           title={`Editar pedido #${payload.id}`}
@@ -3390,22 +8745,76 @@ function App() {
             <Field label="Telefone">
               <input value={orderForm.phone} onChange={(event) => setOrderForm({ ...orderForm, phone: event.target.value })} />
             </Field>
-            <Field label="Canal">
-              <select value={orderForm.channel} onChange={(event) => setOrderForm({ ...orderForm, channel: event.target.value })}>
-                <option value="pickup">Balcao</option>
-                <option value="delivery">Delivery</option>
+            <Field label="Forma de entrega">
+              <select
+                value={orderForm.fulfillment}
+                onChange={(event) => {
+                  const fulfillment = event.target.value
+                  const shouldResetAddress = ['Retirada no balcao', 'Consumir no local'].includes(orderForm.address)
+
+                  setOrderForm({
+                    ...orderForm,
+                    channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
+                    fulfillment,
+                    deliveryFee: fulfillment === 'delivery' ? orderForm.deliveryFee : '0,00',
+                    payment: fulfillment === 'dinein'
+                      ? orderForm.payment
+                      : orderForm.payment === 'Mesa'
+                        ? 'Cartao'
+                        : orderForm.payment,
+                    address: fulfillment === 'delivery'
+                      ? (shouldResetAddress ? '' : orderForm.address)
+                      : fulfillment === 'dinein'
+                        ? (orderForm.address && orderForm.address !== 'Retirada no balcao' ? orderForm.address : 'Consumir no local')
+                        : 'Retirada no balcao',
+                  })
+                }}
+              >
+                <option value="pickup">Retirar no local</option>
+                <option value="delivery">Entrega (delivery)</option>
+                <option value="dinein">Consumir no local</option>
               </select>
             </Field>
             <Field label="Pagamento">
               <select value={orderForm.payment} onChange={(event) => setOrderForm({ ...orderForm, payment: event.target.value })}>
-                <option>Pix</option>
                 <option>Cartao</option>
                 <option>Dinheiro</option>
-                <option>Mesa</option>
+                <option>Dividir</option>
+                {orderForm.fulfillment === 'dinein' ? <option>Mesa</option> : null}
               </select>
             </Field>
-            <Field label="Total">
-              <input value={orderForm.total} onChange={(event) => setOrderForm({ ...orderForm, total: event.target.value })} />
+            <Field label="Subtotal">
+              <input data-testid="edit-subtotal" value={orderForm.subtotal} onChange={(event) => setOrderForm({ ...orderForm, subtotal: event.target.value })} placeholder="59,90" />
+            </Field>
+            <Field label="Taxa de entrega">
+              <input value={orderForm.deliveryFee} disabled={orderForm.fulfillment !== 'delivery'} onChange={(event) => setOrderForm({ ...orderForm, deliveryFee: event.target.value })} placeholder="0,00" />
+            </Field>
+            <Field label="CPF/CNPJ">
+              <input value={orderForm.document} onChange={(event) => setOrderForm({ ...orderForm, document: event.target.value })} placeholder="Opcional" />
+            </Field>
+            <Field label="Endereco / mesa">
+              <input value={orderForm.address} onChange={(event) => setOrderForm({ ...orderForm, address: event.target.value })} placeholder={orderForm.fulfillment === 'delivery' ? 'Rua, numero e referencia' : orderForm.fulfillment === 'dinein' ? 'Mesa ou identificacao' : 'Retirada no balcao'} />
+            </Field>
+            <Field label="Tipo de desconto">
+              <select value={orderForm.discountType} onChange={(event) => setOrderForm({ ...orderForm, discountType: event.target.value })}>
+                <option value="fixed">Valor fixo</option>
+                <option value="percent">Percentual</option>
+              </select>
+            </Field>
+            <Field label="Desconto">
+              <input value={orderForm.discountValue} onChange={(event) => setOrderForm({ ...orderForm, discountValue: event.target.value })} placeholder={orderForm.discountType === 'percent' ? '10' : '5,00'} />
+            </Field>
+            <Field label="Tipo de acrescimo">
+              <select value={orderForm.surchargeType} onChange={(event) => setOrderForm({ ...orderForm, surchargeType: event.target.value })}>
+                <option value="fixed">Valor fixo</option>
+                <option value="percent">Percentual</option>
+              </select>
+            </Field>
+            <Field label="Acrescimo">
+              <input value={orderForm.surchargeValue} onChange={(event) => setOrderForm({ ...orderForm, surchargeValue: event.target.value })} placeholder={orderForm.surchargeType === 'percent' ? '10' : '5,00'} />
+            </Field>
+            <Field label="Total final">
+              <input value={formatCurrencyInput(editBreakdown.total)} readOnly />
             </Field>
             <Field label="Itens">
               <input value={orderForm.items} onChange={(event) => setOrderForm({ ...orderForm, items: event.target.value })} />
@@ -3510,6 +8919,63 @@ function App() {
                 <option value="no">Pausado</option>
               </select>
             </Field>
+            <Field label="Maximo de sabores">
+              <input
+                min="1"
+                type="number"
+                value={productForm.maxFlavors}
+                onChange={(event) => setProductForm({ ...productForm, maxFlavors: event.target.value })}
+              />
+            </Field>
+            <Field label="Disponivel das">
+              <input
+                type="time"
+                value={productForm.availableFrom}
+                onChange={(event) => setProductForm({ ...productForm, availableFrom: event.target.value })}
+              />
+            </Field>
+            <Field label="Ate">
+              <input
+                type="time"
+                value={productForm.availableTo}
+                onChange={(event) => setProductForm({ ...productForm, availableTo: event.target.value })}
+              />
+            </Field>
+          </form>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'newFlavor' || modal.type === 'editFlavor') {
+      const isEdit = modal.type === 'editFlavor'
+      const flavorOwner = payload?.product
+      const flavorEntity = getFlavorEntityLabel(flavorOwner, false)
+
+      return (
+        <Modal
+          title={isEdit ? `Editar ${flavorEntity}` : `Novo ${flavorEntity}`}
+          subtitle={flavorOwner ? `${flavorOwner.name} - ${isComboProduct(flavorOwner) ? 'configuracao de combo' : 'configuracao de sabores'}` : 'Cadastro local do cardapio.'}
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={closeModal}>Cancelar</Button>
+              <Button variant="primary" form="flavor-form" type="submit">{isEdit ? 'Salvar' : 'Criar'}</Button>
+            </>
+          }
+        >
+          <form className="form-grid" id="flavor-form" onSubmit={(event) => saveFlavor(event, payload.productId, payload.flavor?.id || null)}>
+            <Field label={isComboProduct(flavorOwner) ? 'Nome do subsabor' : 'Nome do sabor'}>
+              <input value={flavorForm.name} onChange={(event) => setFlavorForm({ ...flavorForm, name: event.target.value })} placeholder={isComboProduct(flavorOwner) ? 'Ex: Pizza BBQ do combo' : 'Ex: Sabor especial'} />
+            </Field>
+            <Field label="Valor do sabor">
+              <input value={flavorForm.price} onChange={(event) => setFlavorForm({ ...flavorForm, price: event.target.value })} placeholder="0,00" />
+            </Field>
+            <Field label="Status">
+              <select value={flavorForm.active ? 'yes' : 'no'} onChange={(event) => setFlavorForm({ ...flavorForm, active: event.target.value === 'yes' })}>
+                <option value="yes">Ativo</option>
+                <option value="no">Pausado</option>
+              </select>
+            </Field>
           </form>
         </Modal>
       )
@@ -3558,10 +9024,12 @@ function App() {
     }
 
     if (modal.type === 'deleteCategory') {
+      const hasFallbackCategory = categories.some((category) => category.id !== payload.id)
+
       return (
         <Modal
           title={`Apagar ${payload.name}`}
-          subtitle="Os produtos dessa categoria serao realocados para outra secao."
+          subtitle={hasFallbackCategory ? 'Os produtos dessa categoria serao realocados para outra secao.' : 'Se esta for a ultima categoria, os itens vinculados tambem serao apagados.'}
           onClose={closeModal}
           footer={<><Button onClick={closeModal}>Cancelar</Button><Button variant="danger" onClick={() => deleteCategory(payload.id)}>Apagar categoria</Button></>}
         >
@@ -3936,6 +9404,12 @@ function App() {
     }
 
     if (modal.type === 'integrationHelp') {
+      const setupStatus = [
+        { id: 'menu', title: 'Cardapio e QR', done: products.filter((product) => product.active).length > 0 },
+        { id: 'channels', title: 'Marketplaces e social', done: integrations.some((integration) => integration.active) },
+        { id: 'cash', title: 'Pagamento e caixa', done: cashOpen || finance.length > 0 },
+      ]
+
       return (
         <Modal
           title="Ajuda de integracoes"
@@ -3944,6 +9418,15 @@ function App() {
           footer={<><Button onClick={closeModal}>Fechar</Button><Button variant="primary" onClick={exportAppBackup}>Exportar backup</Button></>}
         >
           <div className="stack-list">
+            {setupStatus.map((step) => (
+              <article className="list-row" key={step.id}>
+                <span>
+                  <strong>{step.title}</strong>
+                  <small>{step.done ? 'Pronto para demonstracao' : 'Ainda precisa de setup visual'}</small>
+                </span>
+                <StatusBadge tone={step.done ? 'success' : 'warning'}>{step.done ? 'OK' : 'Pendente'}</StatusBadge>
+              </article>
+            ))}
             {integrations.map((integration) => (
               <article className="list-row" key={integration.id}>
                 <span>
@@ -3959,6 +9442,11 @@ function App() {
     }
 
     if (modal.type === 'cash') {
+      const paidEntries = finance.filter((item) => item.status === 'Pago')
+      const cashEntries = orders.filter((order) => order.payment === 'Dinheiro').reduce((sum, order) => sum + order.total, 0)
+      const cardEntries = orders.filter((order) => order.payment === 'Cartao').reduce((sum, order) => sum + order.total, 0)
+      const splitEntries = orders.filter((order) => order.payment === 'Dividir').reduce((sum, order) => sum + order.total, 0)
+
       return (
         <Modal
           title="Caixa da loja"
@@ -3980,10 +9468,40 @@ function App() {
             </>
           }
         >
-          <div className="modal-summary">
-            <span>Status atual</span>
-            <strong>{cashOpen ? 'Aberto para vendas' : 'Fechado para conferencia'}</strong>
-            <p>Pedidos e recebimentos continuam mockados no front.</p>
+          <div className="stack-list">
+            <div className="modal-summary">
+              <span>Status atual</span>
+              <strong>{cashOpen ? 'Aberto para vendas' : 'Fechado para conferencia'}</strong>
+              <p>Visual de abertura, conferencia por pagamento e fechamento do turno.</p>
+            </div>
+            <article className="list-row">
+              <span>
+                <strong>Dinheiro no caixa</strong>
+                <small>Estimativa do turno presencial</small>
+              </span>
+              <b>{formatCurrency(cashEntries)}</b>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Pagamento dividido</strong>
+                <small>Pedidos combinando mais de uma forma de pagamento</small>
+              </span>
+              <b>{formatCurrency(splitEntries)}</b>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Cartao processado</strong>
+                <small>Conferencia de operadora no fechamento</small>
+              </span>
+              <b>{formatCurrency(cardEntries)}</b>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Lancamentos pagos</strong>
+                <small>{paidEntries.length} registro(s) prontos para conciliacao</small>
+              </span>
+              <b>{formatCurrency(paidEntries.reduce((sum, item) => sum + item.amount, 0))}</b>
+            </article>
           </div>
         </Modal>
       )
@@ -4128,6 +9646,60 @@ function App() {
       )
     }
 
+    if (modal.type === 'storeStatus') {
+      return (
+        <Modal
+          title="Status da loja"
+          subtitle="Controle separado do caixa para abrir ou fechar o atendimento."
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={closeModal}>Fechar janela</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setStoreOpen((current) => !current)
+                  notify(storeOpen ? 'Loja fechada para novos pedidos.' : 'Loja aberta para atendimento.')
+                  closeModal()
+                }}
+              >
+                {storeOpen ? 'Fechar loja' : 'Abrir loja'}
+              </Button>
+            </>
+          }
+        >
+          <div className="stack-list">
+            <div className="modal-summary">
+              <span>Status atual</span>
+              <strong>{storeOpen ? 'Recebendo pedidos' : 'Loja pausada'}</strong>
+              <p>Use este controle para ligar ou desligar a operacao sem alterar o caixa.</p>
+            </div>
+            <article className="list-row">
+              <span>
+                <strong>Horario configurado</strong>
+                <small>{storeProfile.schedule}</small>
+              </span>
+              <StatusBadge tone={storeOpen ? 'success' : 'danger'}>{storeOpen ? 'Aberta' : 'Fechada'}</StatusBadge>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Canal principal</strong>
+                <small>{storeProfile.phone} - {storeProfile.city}</small>
+              </span>
+              <small>{storeProfile.owner}</small>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Caixa</strong>
+                <small>Continua separado do status da loja.</small>
+              </span>
+              <StatusBadge tone={cashOpen ? 'success' : 'warning'}>{cashOpen ? 'Caixa aberto' : 'Caixa fechado'}</StatusBadge>
+            </article>
+          </div>
+        </Modal>
+      )
+    }
+
     if (modal.type === 'assignDelivery') {
       return (
         <Modal title={`Atribuir entrega #${payload.id}`} subtitle={payload.address} onClose={closeModal}>
@@ -4147,12 +9719,181 @@ function App() {
     }
 
     if (modal.type === 'deliveryMap') {
+      const mappedRoutes = orders
+        .filter((order) => order.channel === 'delivery' && order.status !== 'completed')
+        .map((order, index) => ({
+          ...order,
+          route: `Rota ${String.fromCharCode(65 + index)}`,
+          eta: getOrderEta(order),
+        }))
+
       return (
-        <Modal title="Mapa de entregas" subtitle="Visualizacao simulada para as rotas abertas." onClose={closeModal}>
-          <div className="fake-map">
-            <span>Loja</span>
-            <span>Rota A</span>
-            <span>Rota B</span>
+        <Modal title="Mapa de entregas" subtitle="Rotas abertas e enderecos verificados." onClose={closeModal}>
+          <div className="stack-list">
+            <DeliveryRouteMap routes={mappedRoutes} storeProfile={storeProfile} zones={deliveryZones} />
+            {mappedRoutes.map((route) => (
+              <article className="list-row" key={route.id}>
+                <span>
+                  <strong>{route.route} - #{route.id}</strong>
+                  <small>{route.customer} - {route.deliveryZoneName || 'Sem zona'} - {route.courier || 'Sem entregador'} - ETA {route.eta}</small>
+                </span>
+                <SourceBadge source={getOrderSource(route)} />
+              </article>
+            ))}
+          </div>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'deliveryZones') {
+      return (
+        <Modal
+          title="Zonas de entrega"
+          subtitle="Regioes atendidas e taxa calculada automaticamente."
+          onClose={closeModal}
+          footer={<Button variant="primary" onClick={() => openModal('newDeliveryZone')}>Nova zona</Button>}
+        >
+          <div className="stack-list">
+            {deliveryZones.map((zone) => (
+              <article className="list-row delivery-zone-row" key={zone.id}>
+                <span>
+                  <strong><i className="delivery-zone-color" style={{ backgroundColor: zone.color || DELIVERY_ZONE_COLORS[0] }} />{zone.name}</strong>
+                  <small>{formatCurrency(parseCurrencyInput(zone.fee))} - {zone.polygon.length - 1} ponto(s)</small>
+                </span>
+                <StatusBadge tone={zone.active ? 'success' : 'muted'}>{zone.active ? 'Ativa' : 'Off'}</StatusBadge>
+                <Button onClick={() => toggleDeliveryZone(zone.id)}>{zone.active ? 'Pausar' : 'Ativar'}</Button>
+                <Button onClick={() => openModal('editDeliveryZone', zone)}>Editar</Button>
+                <Button variant="danger" onClick={() => openModal('deleteDeliveryZone', zone)}>Apagar</Button>
+              </article>
+            ))}
+          </div>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'newDeliveryZone' || modal.type === 'editDeliveryZone') {
+      const isEdit = modal.type === 'editDeliveryZone'
+      const zoneCenter = isEdit && payload
+        ? getDeliveryMapCenter({ storeProfile, zones: [payload] })
+        : getStoreCoordinates(storeProfile)
+      const visibleZones = deliveryZones.filter((zone) => zone.id !== editingDeliveryZoneId)
+
+      return (
+        <Modal
+          title={isEdit ? `Editar ${payload.name}` : 'Nova zona de entrega'}
+          subtitle={deliveryZoneStep === 1 ? 'Defina nome, taxa e cor da area.' : 'Clique no mapa para marcar os pontos da area.'}
+          onClose={() => setModal({ type: 'deliveryZones', payload: null })}
+          footer={
+            deliveryZoneStep === 1 ? (
+              <>
+                <Button onClick={() => setModal({ type: 'deliveryZones', payload: null })}>Cancelar</Button>
+                <Button variant="primary" onClick={() => setDeliveryZoneStep(2)}>Avancar para o mapa</Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setDeliveryZoneStep(1)}>Voltar</Button>
+                <Button variant="primary" onClick={() => saveDeliveryZone(isEdit ? payload.id : null)}>Salvar zona</Button>
+              </>
+            )
+          }
+        >
+          {deliveryZoneStep === 1 ? (
+            <div className="form-grid">
+              <Field label="Nome da zona">
+                <input value={deliveryZoneForm.name} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, name: event.target.value })} placeholder="Centro" />
+              </Field>
+              <Field label="Taxa">
+                <input inputMode="decimal" value={deliveryZoneForm.fee} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, fee: event.target.value })} placeholder="5,00" />
+              </Field>
+              <Field label="Status">
+                <select value={deliveryZoneForm.active} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, active: event.target.value })}>
+                  <option value="yes">Ativa</option>
+                  <option value="no">Off</option>
+                </select>
+              </Field>
+              <label className="field">
+                <span>Cor</span>
+                <div className="color-swatch-row">
+                  {DELIVERY_ZONE_COLORS.map((color) => (
+                    <button
+                      className={deliveryZoneForm.color === color ? 'is-active' : ''}
+                      key={color}
+                      style={{ backgroundColor: color }}
+                      type="button"
+                      onClick={() => setDeliveryZoneForm({ ...deliveryZoneForm, color })}
+                    />
+                  ))}
+                </div>
+              </label>
+            </div>
+          ) : (
+            <div className="delivery-zone-editor">
+              <div className="delivery-zone-editor__toolbar">
+                <div className="delivery-zone-editor__status">
+                  <strong>{deliveryZonePoints.length} ponto(s) marcados</strong>
+                  <small>
+                    {selectedDeliveryZonePointIndex === null
+                      ? 'Clique em um ponto para selecionar e arraste para ajustar.'
+                      : `Ponto ${selectedDeliveryZonePointIndex + 1} selecionado.`}
+                  </small>
+                </div>
+                <div>
+                  <Button
+                    onClick={() => {
+                      setSelectedDeliveryZonePointIndex(null)
+                      setDeliveryZonePoints((current) => current.slice(0, -1))
+                    }}
+                  >
+                    Desfazer ponto
+                  </Button>
+                  <Button onClick={trimDeliveryZoneFromSelectedPoint}>Cortar daqui</Button>
+                  <Button onClick={removeSelectedDeliveryZonePoint}>Remover ponto</Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      setSelectedDeliveryZonePointIndex(null)
+                      setDeliveryZonePoints([])
+                    }}
+                  >
+                    Limpar area
+                  </Button>
+                </div>
+              </div>
+              <OsmDeliveryMap
+                center={zoneCenter}
+                editingZoneId={editingDeliveryZoneId || ''}
+                editorPoints={deliveryZonePoints}
+                onMapClick={(point) => {
+                  setSelectedDeliveryZonePointIndex(null)
+                  setDeliveryZonePoints((current) => [...current, point])
+                }}
+                onMoveEditorPoint={updateDeliveryZonePoint}
+                onSelectEditorPoint={setSelectedDeliveryZonePointIndex}
+                selectedEditorPointIndex={selectedDeliveryZonePointIndex}
+                storeProfile={storeProfile}
+                title="Editor de zona de entrega"
+                zones={visibleZones}
+                zoom={14}
+              />
+              <small className="delivery-zone-editor__hint">Clique para criar novos pontos. Clique em um ponto existente para selecionar, arraste para corrigir e use "Cortar daqui" para continuar o desenho a partir do meio.</small>
+            </div>
+          )}
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'deleteDeliveryZone') {
+      return (
+        <Modal
+          title={`Apagar ${payload.name}`}
+          subtitle="Enderecos novos deixam de usar esta regiao."
+          onClose={() => setModal({ type: 'deliveryZones', payload: null })}
+          footer={<><Button onClick={() => setModal({ type: 'deliveryZones', payload: null })}>Cancelar</Button><Button variant="danger" onClick={() => deleteDeliveryZone(payload.id)}>Apagar zona</Button></>}
+        >
+          <div className="modal-summary">
+            <span>Zona</span>
+            <strong>{payload.name}</strong>
+            <p>Taxa atual: {formatCurrency(parseCurrencyInput(payload.fee))}</p>
           </div>
         </Modal>
       )
@@ -4258,36 +9999,120 @@ function App() {
       )
     }
 
-    if (modal.type === 'editCartItem') {
+    if (modal.type === 'configureCartItem' || modal.type === 'editCartItem') {
+      const product = products.find((item) => item.id === payload.productId)
+
+      if (!product) {
+        return (
+          <Modal
+            title="Item indisponivel"
+            subtitle="O produto nao esta mais disponivel para este pedido."
+            onClose={reopenOrderEditor}
+            footer={<Button onClick={reopenOrderEditor}>Voltar</Button>}
+          >
+            <div className="empty-modal">Produto nao encontrado no cardapio.</div>
+          </Modal>
+        )
+      }
+
+      const isEdit = modal.type === 'editCartItem'
+      const activeFlavors = getActiveProductFlavors(product)
+      const selectedFlavorCount = cartItemForm.flavorIds.length
+      const flavorEntity = getFlavorEntityLabel(product, true)
+      const unitPrice = getCartItemUnitPrice(product, cartItemForm.flavorIds)
+
       return (
         <Modal
-          title={`Editar ${payload.name}`}
-          subtitle="Ajuste a quantidade deste item no pedido."
+          title={isEdit ? `Editar ${product.name}` : `Adicionar ${product.name}`}
+          subtitle={activeFlavors.length > 0 ? `Escolha de 1 a ${product.maxFlavors} ${flavorEntity}.` : 'Ajuste a quantidade deste item no pedido.'}
           onClose={reopenOrderEditor}
-          footer={<><Button onClick={reopenOrderEditor}>Cancelar</Button><Button variant="primary" onClick={() => { changeOrderCartQuantity(payload.id, payload.qty + 1); reopenOrderEditor() }}>+1 unidade</Button></>}
+          footer={
+            <>
+              <Button onClick={reopenOrderEditor}>Cancelar</Button>
+              <Button variant="primary" form="cart-item-form" type="submit">{isEdit ? 'Salvar item' : 'Adicionar ao pedido'}</Button>
+            </>
+          }
         >
-          <div className="modal-summary">
-            <span>Quantidade atual</span>
-            <strong>{payload.qty}</strong>
-            <p>{formatCurrency(payload.price)} por unidade.</p>
-            <div className="modal-actions">
-              <Button onClick={() => { changeOrderCartQuantity(payload.id, payload.qty - 1); reopenOrderEditor() }}>-1 unidade</Button>
-              <Button variant="danger" onClick={() => { removeOrderCart(payload.id); reopenOrderEditor() }}>Remover item</Button>
+          <form className="stack-list" id="cart-item-form" onSubmit={saveOrderCartItem}>
+            <div className="modal-summary">
+              <span>Item</span>
+              <strong>{product.name}</strong>
+              <p>{formatCurrency(unitPrice)} por unidade.</p>
             </div>
-          </div>
+
+            {activeFlavors.length > 0 ? (
+              <section className="cart-config">
+                <header className="cart-config__header">
+                  <strong>{isComboProduct(product) ? 'Escolha os subsabores' : 'Escolha os sabores'}</strong>
+                  <small>{selectedFlavorCount} selecionado(s) de no maximo {product.maxFlavors}</small>
+                </header>
+                <div className="cart-config__list">
+                  {activeFlavors.map((flavor) => {
+                    const isSelected = cartItemForm.flavorIds.includes(flavor.id)
+
+                    return (
+                      <button
+                        className={`cart-config__option ${isSelected ? 'is-active' : ''}`.trim()}
+                        data-testid={`cart-flavor-${flavor.id}`}
+                        key={flavor.id}
+                        type="button"
+                        onClick={() => toggleCartItemFlavor(flavor.id, product.maxFlavors, product)}
+                      >
+                        <span>
+                          <strong>{flavor.name}</strong>
+                          <small>{flavor.price > 0 ? `+${formatCurrency(flavor.price)}` : 'Sem adicional'}</small>
+                        </span>
+                        <b>{isSelected ? 'Selecionado' : 'Selecionar'}</b>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            <Field label="Quantidade">
+              <input
+                data-testid="cart-item-qty"
+                min="1"
+                type="number"
+                value={cartItemForm.qty}
+                onChange={(event) => setCartItemForm({ ...cartItemForm, qty: event.target.value })}
+              />
+            </Field>
+
+            {isEdit ? (
+              <div className="modal-actions">
+                <Button variant="danger" onClick={() => { removeOrderCart(payload.id); reopenOrderEditor() }}>Remover item</Button>
+              </div>
+            ) : null}
+          </form>
         </Modal>
       )
     }
 
     if (modal.type === 'orderDetails') {
+      const normalizedOrder = normalizeOrderRecord(payload)
+      const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
+
       return (
         <Modal title={`Pedido #${payload.id}`} subtitle={payload.customer} onClose={closeModal}>
           <div className="order-detail">
-            <div><span>Contato</span><strong>{payload.phone}</strong></div>
-            <div><span>Entrega</span><strong>{payload.address}</strong></div>
-            <div><span>Pagamento</span><strong>{payload.payment} - {formatCurrency(payload.total)}</strong></div>
-            <div><span>Itens</span><strong>{payload.items.join(', ')}</strong></div>
-            <div><span>Observacao</span><strong>{payload.note}</strong></div>
+            <div><span>Origem</span><strong>{getOrderSource(normalizedOrder)}</strong></div>
+            <div><span>Status</span><strong>{getOrderStageLabel(normalizedOrder.status || 'analysis')} - ETA {getOrderEta(normalizedOrder)}</strong></div>
+            <div><span>Contato</span><strong>{normalizedOrder.phone}</strong></div>
+            <div><span>Forma de entrega</span><strong>{getOrderFulfillmentLabel(normalizedOrder.fulfillment)}</strong></div>
+            <div><span>Endereco / referencia</span><strong>{normalizedOrder.address}</strong></div>
+            {normalizedOrder.deliveryZoneName ? <div><span>Zona</span><strong>{normalizedOrder.deliveryZoneName}</strong></div> : null}
+            <div><span>Pagamento</span><strong>{normalizedOrder.payment}</strong></div>
+            <div><span>Subtotal</span><strong>{formatCurrency(financialBreakdown.subtotal)}</strong></div>
+            <div><span>Entrega</span><strong>{financialBreakdown.deliveryFee > 0 ? formatCurrency(financialBreakdown.deliveryFee) : 'Gratis'}</strong></div>
+            <div><span>Desconto</span><strong>{financialBreakdown.discountAmount > 0 ? formatCurrency(financialBreakdown.discountAmount) : 'R$ 0,00'}</strong></div>
+            <div><span>Acrescimo</span><strong>{financialBreakdown.surchargeAmount > 0 ? formatCurrency(financialBreakdown.surchargeAmount) : 'R$ 0,00'}</strong></div>
+            <div><span>Total</span><strong>{formatCurrency(financialBreakdown.total)}</strong></div>
+            {normalizedOrder.document ? <div><span>CPF/CNPJ</span><strong>{normalizedOrder.document}</strong></div> : null}
+            <div><span>Itens</span><strong>{normalizedOrder.items.join(', ')}</strong></div>
+            <div><span>Observacao</span><strong>{normalizedOrder.note}</strong></div>
+            <DeliveryAddressMap address={normalizedOrder} title={`Mapa do pedido ${payload.id}`} />
           </div>
         </Modal>
       )
@@ -4328,13 +10153,23 @@ function App() {
     }
 
     if (modal.type === 'invoice') {
+      const normalizedOrder = normalizeOrderRecord(payload)
+      const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
+
       return (
         <Modal title={`Nota fiscal #${payload.id}`} subtitle="Pre-visualizacao fake da NF." onClose={closeModal}>
           <div className="invoice-preview">
             <strong>TBT PIZZAS PENHA</strong>
-            <span>Cliente: {payload.customer}</span>
-            <span>Itens: {payload.items.join(', ')}</span>
-            <span>Total: {formatCurrency(payload.total)}</span>
+            <span>Cliente: {normalizedOrder.customer}</span>
+            <span>Entrega: {getOrderFulfillmentLabel(normalizedOrder.fulfillment)}</span>
+            <span>Pagamento: {normalizedOrder.payment}</span>
+            {normalizedOrder.document ? <span>CPF/CNPJ: {normalizedOrder.document}</span> : null}
+            <span>Itens: {normalizedOrder.items.join(', ')}</span>
+            <span>Subtotal: {formatCurrency(financialBreakdown.subtotal)}</span>
+            <span>Entrega: {financialBreakdown.deliveryFee > 0 ? formatCurrency(financialBreakdown.deliveryFee) : 'Gratis'}</span>
+            <span>Desconto: {financialBreakdown.discountAmount > 0 ? formatCurrency(financialBreakdown.discountAmount) : 'R$ 0,00'}</span>
+            <span>Acrescimo: {financialBreakdown.surchargeAmount > 0 ? formatCurrency(financialBreakdown.surchargeAmount) : 'R$ 0,00'}</span>
+            <span>Total: {formatCurrency(financialBreakdown.total)}</span>
             <Button
               variant="primary"
               onClick={() => {
@@ -4435,44 +10270,42 @@ function App() {
       return (
         <Modal
           title="Dados da loja"
-          subtitle="Perfil comercial usado em todo o front."
+          subtitle="Cadastro comercial, fiscal, operacional e geolocalizacao da loja."
           onClose={closeModal}
-          footer={<><Button onClick={closeModal}>Cancelar</Button><Button variant="primary" form="store-form" type="submit">Salvar loja</Button></>}
+          footer={
+            <>
+              <Button variant="danger" onClick={() => openModal('deleteStore')}>Apagar loja</Button>
+              <Button onClick={closeModal}>Cancelar</Button>
+              <Button variant="primary" form="store-form" type="submit">Salvar loja</Button>
+            </>
+          }
         >
-          <form className="form-grid" id="store-form" onSubmit={saveStoreProfile}>
-            <Field label="Nome da loja">
-              <input value={storeForm.name} onChange={(event) => setStoreForm({ ...storeForm, name: event.target.value })} />
-            </Field>
-            <Field label="Responsavel">
-              <input value={storeForm.owner} onChange={(event) => setStoreForm({ ...storeForm, owner: event.target.value })} />
-            </Field>
-            <Field label="Telefone">
-              <input value={storeForm.phone} onChange={(event) => setStoreForm({ ...storeForm, phone: event.target.value })} />
-            </Field>
-            <Field label="Email">
-              <input value={storeForm.email} onChange={(event) => setStoreForm({ ...storeForm, email: event.target.value })} />
-            </Field>
-            <Field label="CNPJ">
-              <input value={storeForm.taxId} onChange={(event) => setStoreForm({ ...storeForm, taxId: event.target.value })} />
-            </Field>
-            <Field label="Cidade">
-              <input value={storeForm.city} onChange={(event) => setStoreForm({ ...storeForm, city: event.target.value })} />
-            </Field>
-            <Field label="Endereco">
-              <input value={storeForm.address} onChange={(event) => setStoreForm({ ...storeForm, address: event.target.value })} />
-            </Field>
-            <Field label="Horario">
-              <input value={storeForm.schedule} onChange={(event) => setStoreForm({ ...storeForm, schedule: event.target.value })} />
-            </Field>
-            <Field label="Taxa de entrega">
-              <input value={storeForm.serviceFee} onChange={(event) => setStoreForm({ ...storeForm, serviceFee: event.target.value })} />
-            </Field>
-            <Field label="Raio de entrega (km)">
-              <input value={storeForm.deliveryRadius} onChange={(event) => setStoreForm({ ...storeForm, deliveryRadius: event.target.value })} />
-            </Field>
-            <Field label="Observacao">
-              <textarea value={storeForm.note} onChange={(event) => setStoreForm({ ...storeForm, note: event.target.value })} />
-            </Field>
+          <form id="store-form" onSubmit={saveStoreProfile}>
+            <StoreProfileForm
+              mapMode={storeMapMode}
+              mapSlot={(
+                <>
+                  <OsmDeliveryMap
+                    center={getStoreCoordinates(storeForm)}
+                    onMapClick={storeMapMode === 'pick' ? handleStoreMapPick : undefined}
+                    storeProfile={storeForm}
+                    title="Mapa da loja"
+                    zones={deliveryZones}
+                    zoom={14}
+                  />
+                  {storeMapMode === 'pick' ? <small className="delivery-zone-editor__hint">Clique no mapa para posicionar a loja.</small> : null}
+                </>
+              )}
+              mapStatus={storeAddressLookup.message || (storeForm.lat && storeForm.lng ? `Mapa usando ${formatCoordinate(storeForm.lat)}, ${formatCoordinate(storeForm.lng)}` : 'Localize a loja para centralizar as areas de entrega.')}
+              mapTone={storeAddressLookup.status}
+              onChange={handleStoreFormChange}
+              onToggleMapPicking={toggleStoreMapPicking}
+              onUseCurrentLocation={useCurrentLocationForStore}
+              onVerifyAddress={verifyStoreAddress}
+              showHero={false}
+              showMapTools
+              value={storeForm}
+            />
           </form>
         </Modal>
       )
@@ -4489,9 +10322,16 @@ function App() {
             <article className="list-row">
               <span>
                 <strong>Loja</strong>
-                <small>{storeProfile.name} - {storeProfile.city}</small>
+                <small>{storeProfile.name || 'Sem cadastro'} - {storeProfile.city || 'Cidade nao definida'}</small>
               </span>
               <Button onClick={() => openModal('store')}>Editar</Button>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Apagar loja</strong>
+                <small>Remove o cadastro local e volta para a tela inicial de criacao.</small>
+              </span>
+              <Button variant="danger" onClick={() => openModal('deleteStore')}>Apagar</Button>
             </article>
             <article className="list-row">
               <span>
@@ -4523,6 +10363,30 @@ function App() {
             </article>
             {dataImportError ? <div className="empty-modal">{dataImportError}</div> : null}
           </div>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'deleteStore') {
+      return (
+        <Modal
+          title="Apagar loja"
+          subtitle="Essa acao remove o cadastro local e devolve o app para o primeiro acesso."
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={closeModal}>Cancelar</Button>
+              <Button variant="danger" form="delete-store-form" type="submit">Apagar loja</Button>
+            </>
+          }
+        >
+          <StoreDeletePrompt
+            onConfirm={() => {
+              deleteStoreProfile()
+              closeModal()
+            }}
+            storeName={storeProfile.name || 'Minha Loja'}
+          />
         </Modal>
       )
     }
@@ -4696,17 +10560,32 @@ function App() {
     )
   }
 
+  if (!currentStoreUser || !isStoreReady) {
+    return (
+      <StoreAccess
+        storeProfile={storeProfile}
+        users={storeUsers}
+        onCreateStore={completeStoreOnboarding}
+        onLogin={loginStoreUser}
+      />
+    )
+  }
+
   return (
     <main className="app-frame">
-      <TopBar onOpenModal={openModal} notificationCount={notificationCount} />
+      <TopBar
+        currentStoreUser={currentStoreUser}
+        notificationCount={notificationCount}
+        onLogout={logoutStoreUser}
+        onOpenModal={openModal}
+      />
 
       <div className="workspace">
         <Sidebar
           activeNav={activeNav}
+          storeOpen={storeOpen}
           cashOpen={cashOpen}
-          navQuery={navQuery}
           storeProfile={storeProfile}
-          onNavQuery={setNavQuery}
           onOpenModal={openModal}
           onSetActiveNav={setActiveNav}
         />
@@ -4729,7 +10608,7 @@ function App() {
             onOpenPassword={() => openModal('password')}
           />
 
-          <Metrics orders={orders} cashOpen={cashOpen} />
+          {activeNav === 'menu' ? null : <Metrics orders={orders} storeOpen={storeOpen} />}
 
           {renderWorkArea()}
         </section>

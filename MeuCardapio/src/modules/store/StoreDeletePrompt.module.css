@@ -1,0 +1,51 @@
+.panel {
+  display: grid;
+  gap: 16px;
+}
+
+.warning {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid #efcbc4;
+  border-radius: 18px;
+  background: #fff5f2;
+}
+
+.warning strong {
+  color: #9e3f34;
+}
+
+.warning p,
+.field span {
+  color: #6b7c81;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.field input {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #d5dde2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #24363c;
+  font: inherit;
+}
+
+.error {
+  padding: 12px 14px;
+  border: 1px solid #efc9c2;
+  border-radius: 16px;
+  background: #fff4f2;
+  color: #b4483b;
+  font-size: 13px;
+}
