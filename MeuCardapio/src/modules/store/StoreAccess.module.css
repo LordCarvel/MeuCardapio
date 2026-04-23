@@ -157,6 +157,83 @@
   color: #6d7d82;
 }
 
+.directory {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid #dde5e2;
+  border-radius: 22px;
+  background: #f9fbf9;
+}
+
+.directoryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.directoryHeader p {
+  margin: 0 0 4px;
+  color: #688087;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.directoryHeader h3 {
+  margin: 0;
+  color: #1f3137;
+  font-size: 20px;
+}
+
+.directoryAction,
+.backButton {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #d0d9de;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #224047;
+  font: inherit;
+  font-weight: 800;
+}
+
+.storeList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storeCard {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid #d8e0de;
+  border-radius: 18px;
+  background: #ffffff;
+  color: #23363c;
+  font: inherit;
+  text-align: left;
+}
+
+.storeCard strong {
+  color: #1d3137;
+  font-size: 15px;
+}
+
+.storeCard span,
+.storeCard small {
+  color: #64767d;
+}
+
+.storeCardActive {
+  border-color: #248a72;
+  background: #eef8f4;
+  box-shadow: inset 0 0 0 1px rgba(36, 138, 114, 0.2);
+}
+
 .form,
 .onboardingForm {
   display: grid;
@@ -254,6 +331,24 @@
   font-size: 13px;
 }
 
+.emptyState {
+  display: grid;
+  gap: 6px;
+  padding: 20px;
+  border: 1px dashed #c9d6d8;
+  border-radius: 18px;
+  background: #fbfcfb;
+}
+
+.emptyState strong {
+  color: #20343a;
+}
+
+.emptyState span {
+  color: #6d7e84;
+  font-size: 13px;
+}
+
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;
@@ -289,6 +384,10 @@
   }
 
   .ownerGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .storeList {
     grid-template-columns: 1fr;
   }
 }

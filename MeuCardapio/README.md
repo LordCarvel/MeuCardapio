@@ -1,6 +1,6 @@
 # MeuCardapio Ops
 
-Painel front-end para operacao local de pedidos, cardapio, entregas, loja, usuarios e configuracoes. Nesta etapa os dados ficam no navegador via `localStorage`.
+Painel front-end para operacao local de pedidos, cardapio, entregas, loja, usuarios e configuracoes. Nesta etapa os dados ficam no navegador via `localStorage`, em um workspace que pode guardar varias lojas/perfis locais.
 
 ## Rodar Local
 
@@ -16,7 +16,7 @@ No primeiro acesso, o app abre o onboarding da loja para cadastrar:
 - parametros iniciais de atendimento
 - usuario dono da operacao
 
-Depois disso, o login passa a usar o usuario criado no onboarding.
+Depois disso, o login passa a usar o usuario criado no onboarding. Cada perfil representa uma loja diferente dentro do MeuCardapio e precisa ser selecionado antes de abrir o painel principal.
 
 ## Build
 
@@ -57,4 +57,4 @@ src/
   App.css
 ```
 
-O dominio de loja/autenticacao foi separado em `src/modules/store`. O `App.jsx` ainda concentra a aplicacao legada e os proximos recortes naturais continuam sendo `orders`, `delivery`, `menu`, `settings` e `reports`.
+O dominio de loja/autenticacao foi separado em `src/modules/store`, incluindo onboarding, autenticacao e workspace multi-loja. O `App.jsx` ainda concentra a aplicacao legada e os proximos recortes naturais continuam sendo `orders`, `delivery`, `menu`, `settings` e `reports`.

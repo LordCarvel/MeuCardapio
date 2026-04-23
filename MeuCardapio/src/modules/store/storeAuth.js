@@ -53,12 +53,13 @@ export function createStoreUser(users = [], userInput = {}, nowDateTime) {
   }
 }
 
-export function buildStoreSession(user, nowDateTime) {
+export function buildStoreSession(user, nowDateTime, storeId = '') {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
+    storeId,
     loggedAt: nowDateTime(),
   }
 }

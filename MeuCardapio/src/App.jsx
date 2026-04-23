@@ -12,6 +12,7 @@ import {
 import {
   buildStoreAddressForGeocoding,
   createEmptyStoreProfile,
+  getStoreInitials,
   isStoreConfigured,
   normalizeStoreProfile,
 } from './modules/store/storeProfile'
@@ -1815,74 +1816,186 @@ function createDefaultAppData() {
   })
 }
 
-function loadPersistedAppData() {
+function normalizeAppSnapshot(snapshot = {}) {
   const defaults = createDefaultAppData()
+  const parsed = snapshot ?? {}
+
+  return {
+    ...defaults,
+    ...parsed,
+    orders: Array.isArray(parsed.orders)
+      ? parsed.orders.map((order) => normalizeOrderRecord(order))
+      : defaults.orders,
+    blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
+    settings: { ...defaults.settings, ...(parsed.settings ?? {}) },
+    chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : defaults.chatMessages,
+    categories: Array.isArray(parsed.categories) ? parsed.categories : defaults.categories,
+    products: Array.isArray(parsed.products)
+      ? parsed.products.map((product) => normalizeProduct(product, defaults.categories[0]?.name || 'Pizzas'))
+      : defaults.products,
+    tables: Array.isArray(parsed.tables) ? parsed.tables : defaults.tables,
+    couriers: Array.isArray(parsed.couriers) ? parsed.couriers : defaults.couriers,
+    channels: Array.isArray(parsed.channels) ? parsed.channels : defaults.channels,
+    recoveries: Array.isArray(parsed.recoveries) ? parsed.recoveries : defaults.recoveries,
+    coupons: Array.isArray(parsed.coupons) ? parsed.coupons : defaults.coupons,
+    inventory: Array.isArray(parsed.inventory) ? parsed.inventory : defaults.inventory,
+    finance: Array.isArray(parsed.finance) ? parsed.finance : defaults.finance,
+    invoices: Array.isArray(parsed.invoices) ? parsed.invoices : defaults.invoices,
+    integrations: Array.isArray(parsed.integrations) ? parsed.integrations : defaults.integrations,
+    qrCodes: Array.isArray(parsed.qrCodes) ? parsed.qrCodes : defaults.qrCodes,
+    orderAddresses: Array.isArray(parsed.orderAddresses)
+      ? parsed.orderAddresses.map(normalizeOrderAddress)
+      : defaults.orderAddresses,
+    deliveryZones: Array.isArray(parsed.deliveryZones)
+      ? parsed.deliveryZones.map(normalizeDeliveryZone)
+      : defaults.deliveryZones,
+    storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(parsed.storeProfile ?? {}) }),
+    printerConfig: {
+      ...defaults.printerConfig,
+      ...(parsed.printerConfig ?? {}),
+      queue: Array.isArray(parsed.printerConfig?.queue) ? parsed.printerConfig.queue : defaults.printerConfig.queue,
+    },
+    security: { ...defaults.security, ...(parsed.security ?? {}) },
+    storeUsers: Array.isArray(parsed.storeUsers)
+      ? parsed.storeUsers.map(normalizeStoreUser)
+      : defaults.storeUsers,
+    currentStoreUser: parsed.currentStoreUser || defaults.currentStoreUser,
+    botConfig: {
+      ...defaults.botConfig,
+      ...(parsed.botConfig ?? {}),
+      faq: Array.isArray(parsed.botConfig?.faq) ? parsed.botConfig.faq : defaults.botConfig.faq,
+    },
+    kdsConfig: { ...defaults.kdsConfig, ...(parsed.kdsConfig ?? {}) },
+    orderDrafts: Array.isArray(parsed.orderDrafts) ? parsed.orderDrafts : defaults.orderDrafts,
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : defaults.suggestions,
+    eventLog: Array.isArray(parsed.eventLog) ? parsed.eventLog : defaults.eventLog,
+  }
+}
+
+function createStoreRecord({ profile, owner }, index = 0) {
+  const baseSnapshot = normalizeAppSnapshot(createDefaultAppData())
+  const nextProfile = normalizeStoreProfile({
+    ...profile,
+    owner: profile.owner || owner.name,
+    email: profile.email || owner.email,
+    configuredAt: nowDateTime(),
+  })
+  const result = createStoreUserRecord([], owner, nowDateTime)
+
+  if (result.ok === false) {
+    return result
+  }
+
+  return {
+    ok: true,
+    store: {
+      id: `store-${Date.now()}-${index}`,
+      snapshot: {
+        ...baseSnapshot,
+        storeProfile: nextProfile,
+        storeUsers: result.users,
+        security: {
+          ...baseSnapshot.security,
+          operator: nextProfile.owner || baseSnapshot.security.operator,
+          email: nextProfile.supportEmail || nextProfile.email || result.user.email,
+        },
+        currentStoreUser: null,
+      },
+    },
+    user: result.user,
+  }
+}
+
+function normalizeStoreRecord(record = {}, index = 0) {
+  const normalizedSnapshot = normalizeAppSnapshot(record.snapshot ?? record)
+
+  return {
+    id: record.id || `store-${Date.now()}-${index}`,
+    snapshot: {
+      ...normalizedSnapshot,
+      currentStoreUser: null,
+    },
+  }
+}
+
+function hasConfiguredStoreRecord(record) {
+  const snapshot = normalizeAppSnapshot(record?.snapshot ?? record)
+
+  return isStoreConfigured(snapshot.storeProfile) || snapshot.storeUsers.length > 0
+}
+
+function loadPersistedWorkspaceFromRaw(parsed) {
+  const emptyWorkspace = {
+    stores: [],
+    activeStoreId: null,
+    currentStoreUser: null,
+    activeSnapshot: createDefaultAppData(),
+  }
+
+  if (Array.isArray(parsed?.stores)) {
+    const stores = parsed.stores
+      .map((store, index) => normalizeStoreRecord(store, index))
+      .filter(hasConfiguredStoreRecord)
+    const activeStoreId = stores.some((store) => store.id === parsed.activeStoreId)
+      ? parsed.activeStoreId
+      : stores[0]?.id || null
+    const activeSnapshot = stores.find((store) => store.id === activeStoreId)?.snapshot || createDefaultAppData()
+    const currentStoreUser = parsed.currentStoreUser && stores.some((store) => store.id === parsed.currentStoreUser.storeId)
+      ? parsed.currentStoreUser
+      : null
+
+    return {
+      stores,
+      activeStoreId,
+      currentStoreUser,
+      activeSnapshot,
+    }
+  }
+
+  const legacySnapshot = normalizeAppSnapshot(parsed)
+
+  if (!hasConfiguredStoreRecord(legacySnapshot)) {
+    return emptyWorkspace
+  }
+
+  const legacyStore = normalizeStoreRecord({
+    id: `store-${Date.now()}-legacy`,
+    snapshot: legacySnapshot,
+  })
+  const currentStoreUser = parsed.currentStoreUser
+    ? { ...parsed.currentStoreUser, storeId: legacyStore.id }
+    : null
+
+  return {
+    stores: [legacyStore],
+    activeStoreId: legacyStore.id,
+    currentStoreUser,
+    activeSnapshot: legacyStore.snapshot,
+  }
+}
+
+function loadPersistedWorkspace() {
+  const emptyWorkspace = {
+    stores: [],
+    activeStoreId: null,
+    currentStoreUser: null,
+    activeSnapshot: createDefaultAppData(),
+  }
 
   if (typeof window === 'undefined') {
-    return defaults
+    return emptyWorkspace
   }
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
 
     if (!raw) {
-      return defaults
+      return emptyWorkspace
     }
 
-    const parsed = JSON.parse(raw)
-
-    return {
-      ...defaults,
-      ...parsed,
-      orders: Array.isArray(parsed.orders)
-        ? parsed.orders.map((order) => normalizeOrderRecord(order))
-        : defaults.orders,
-      blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
-      settings: { ...defaults.settings, ...(parsed.settings ?? {}) },
-      chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : defaults.chatMessages,
-      categories: Array.isArray(parsed.categories) ? parsed.categories : defaults.categories,
-      products: Array.isArray(parsed.products)
-        ? parsed.products.map((product) => normalizeProduct(product, defaults.categories[0]?.name || 'Pizzas'))
-        : defaults.products,
-      tables: Array.isArray(parsed.tables) ? parsed.tables : defaults.tables,
-      couriers: Array.isArray(parsed.couriers) ? parsed.couriers : defaults.couriers,
-      channels: Array.isArray(parsed.channels) ? parsed.channels : defaults.channels,
-      recoveries: Array.isArray(parsed.recoveries) ? parsed.recoveries : defaults.recoveries,
-      coupons: Array.isArray(parsed.coupons) ? parsed.coupons : defaults.coupons,
-      inventory: Array.isArray(parsed.inventory) ? parsed.inventory : defaults.inventory,
-      finance: Array.isArray(parsed.finance) ? parsed.finance : defaults.finance,
-      invoices: Array.isArray(parsed.invoices) ? parsed.invoices : defaults.invoices,
-      integrations: Array.isArray(parsed.integrations) ? parsed.integrations : defaults.integrations,
-      qrCodes: Array.isArray(parsed.qrCodes) ? parsed.qrCodes : defaults.qrCodes,
-      orderAddresses: Array.isArray(parsed.orderAddresses)
-        ? parsed.orderAddresses.map(normalizeOrderAddress)
-        : defaults.orderAddresses,
-      deliveryZones: Array.isArray(parsed.deliveryZones)
-        ? parsed.deliveryZones.map(normalizeDeliveryZone)
-        : defaults.deliveryZones,
-      storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(parsed.storeProfile ?? {}) }),
-      printerConfig: {
-        ...defaults.printerConfig,
-        ...(parsed.printerConfig ?? {}),
-        queue: Array.isArray(parsed.printerConfig?.queue) ? parsed.printerConfig.queue : defaults.printerConfig.queue,
-      },
-      security: { ...defaults.security, ...(parsed.security ?? {}) },
-      storeUsers: Array.isArray(parsed.storeUsers)
-        ? parsed.storeUsers.map(normalizeStoreUser)
-        : defaults.storeUsers,
-      currentStoreUser: parsed.currentStoreUser || defaults.currentStoreUser,
-      botConfig: {
-        ...defaults.botConfig,
-        ...(parsed.botConfig ?? {}),
-        faq: Array.isArray(parsed.botConfig?.faq) ? parsed.botConfig.faq : defaults.botConfig.faq,
-      },
-      kdsConfig: { ...defaults.kdsConfig, ...(parsed.kdsConfig ?? {}) },
-      orderDrafts: Array.isArray(parsed.orderDrafts) ? parsed.orderDrafts : defaults.orderDrafts,
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : defaults.suggestions,
-      eventLog: Array.isArray(parsed.eventLog) ? parsed.eventLog : defaults.eventLog,
-    }
+    return loadPersistedWorkspaceFromRaw(JSON.parse(raw))
   } catch {
-    return defaults
+    return emptyWorkspace
   }
 }
 
@@ -2523,10 +2636,10 @@ function DeliveryRouteMap({ routes, storeProfile, zones }) {
   )
 }
 
-function StoreBadge() {
+function StoreBadge({ label = 'MC' }) {
   return (
     <span className="store-badge" aria-hidden="true">
-      <span>TP</span>
+      <span>{label}</span>
     </span>
   )
 }
@@ -2542,9 +2655,9 @@ function Sidebar({
   return (
     <aside className="sidebar" aria-label="Navegacao principal">
       <button className="store-profile" data-testid="store-profile" type="button" onClick={() => onOpenModal('store')}>
-        <StoreBadge />
+        <StoreBadge label={getStoreInitials(storeProfile)} />
         <span>
-          <strong>{storeProfile.name}</strong>
+          <strong>{storeProfile.name || 'Nova loja'}</strong>
           <small>{storeOpen ? 'Loja aberta agora' : 'Loja fechada para pedidos'}</small>
         </span>
       </button>
@@ -2588,8 +2701,8 @@ function Sidebar({
       <button className="upgrade-card" data-testid="open-register" type="button" onClick={() => onOpenModal('register')}>
         <Icon name="bolt" size={22} />
         <span>
-          <strong>Cadastro comercial</strong>
-          <small>Complete os dados para vender melhor</small>
+          <strong>Perfis de loja</strong>
+          <small>Crie e troque operacoes do SaaS</small>
         </span>
       </button>
     </aside>
@@ -4792,16 +4905,20 @@ function IntegrationsSection({ integrations, onToggleIntegration, onOpenModal })
 }
 
 function App() {
-  const initialDataRef = useRef(null)
+  const initialWorkspaceRef = useRef(null)
 
-  if (!initialDataRef.current) {
-    initialDataRef.current = loadPersistedAppData()
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = loadPersistedWorkspace()
   }
 
-  const initialData = initialDataRef.current
+  const initialWorkspace = initialWorkspaceRef.current
+  const initialData = initialWorkspace.activeSnapshot
   const importInputRef = useRef(null)
   const geocodeCacheRef = useRef(new Map())
   const nominatimLastRequestRef = useRef(0)
+  const [stores, setStores] = useState(initialWorkspace.stores)
+  const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
+  const [storeAccessMode, setStoreAccessMode] = useState(initialWorkspace.activeStoreId ? 'login' : 'onboarding')
 
   const [orders, setOrders] = useState(initialData.orders)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
@@ -4890,7 +5007,7 @@ function App() {
   })
   const [security, setSecurity] = useState(initialData.security)
   const [storeUsers, setStoreUsers] = useState(initialData.storeUsers)
-  const [currentStoreUser, setCurrentStoreUser] = useState(initialData.currentStoreUser)
+  const [currentStoreUser, setCurrentStoreUser] = useState(initialWorkspace.currentStoreUser)
   const [passwordForm, setPasswordForm] = useState(blankPassword)
   const [botConfig, setBotConfig] = useState(initialData.botConfig)
   const [botForm, setBotForm] = useState(initialData.botConfig)
@@ -4910,7 +5027,8 @@ function App() {
   const activeTitle = navItems.find((item) => item.id === activeNav)?.label ?? 'Pedidos'
   const lowStockCount = inventory.filter((item) => item.quantity <= item.min).length
   const notificationCount = Math.min(9, blockedOrders.length + lowStockCount)
-  const isStoreReady = isStoreConfigured(storeProfile) && storeUsers.length > 0
+  const isStoreReady = Boolean(activeStoreId) && isStoreConfigured(storeProfile) && storeUsers.length > 0
+  const hasValidStoreSession = currentStoreUser?.storeId === activeStoreId
 
   useEffect(() => {
     const nextCoordinates = formatDeliveryZoneCoordinates(deliveryZonePoints)
@@ -4938,7 +5056,7 @@ function App() {
     storeFormRef.current = storeForm
   }, [storeForm])
 
-  const persistedSnapshot = useMemo(() => ({
+  const currentStoreSnapshot = useMemo(() => ({
     orders,
     activeNav,
     storeOpen,
@@ -4965,7 +5083,6 @@ function App() {
     printerConfig,
     security,
     storeUsers,
-    currentStoreUser,
     botConfig,
     kdsConfig,
     orderDrafts,
@@ -4998,7 +5115,6 @@ function App() {
     printerConfig,
     security,
     storeUsers,
-    currentStoreUser,
     botConfig,
     kdsConfig,
     orderDrafts,
@@ -5006,9 +5122,41 @@ function App() {
     eventLog,
   ])
 
+  const resolvedStores = useMemo(() => (
+    stores.map((store) => (
+      store.id === activeStoreId
+        ? {
+            ...store,
+            snapshot: {
+              ...currentStoreSnapshot,
+              currentStoreUser: null,
+            },
+          }
+        : store
+    ))
+  ), [activeStoreId, currentStoreSnapshot, stores])
+
+  const storeDirectory = useMemo(() => (
+    resolvedStores.map((store) => ({
+      id: store.id,
+      name: store.snapshot.storeProfile.name || 'Nova loja',
+      category: store.snapshot.storeProfile.category || 'Categoria nao definida',
+      city: store.snapshot.storeProfile.city || 'Cidade nao definida',
+      owner: store.snapshot.storeProfile.owner || '',
+      userCount: store.snapshot.storeUsers.length,
+      isActive: store.id === activeStoreId,
+    }))
+  ), [activeStoreId, resolvedStores])
+
+  const workspaceSnapshot = useMemo(() => ({
+    stores: resolvedStores,
+    activeStoreId,
+    currentStoreUser,
+  }), [resolvedStores, activeStoreId, currentStoreUser])
+
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedSnapshot))
-  }, [persistedSnapshot])
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceSnapshot))
+  }, [workspaceSnapshot])
 
   useEffect(() => {
     if (!orderCart.some((item) => item.id === selectedCartItemId)) {
@@ -5306,100 +5454,48 @@ function App() {
   }
 
   function loginStoreUser(credentials) {
+    if (!activeStoreId) {
+      return { ok: false, message: 'Selecione uma loja antes de entrar.' }
+    }
+
     const result = authenticateStoreUser(storeUsers, credentials)
 
     if (result.ok === false) {
       return result
     }
 
-    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime))
+    setStoreAccessMode('login')
+    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, activeStoreId))
     setToast(`Bem-vindo, ${result.user.name}.`)
     return { ok: true }
   }
 
   function logoutStoreUser() {
     setCurrentStoreUser(null)
+    setStoreAccessMode('login')
     setToast('Sessao encerrada.')
   }
 
   function completeStoreOnboarding({ profile, owner }) {
-    const nextProfile = normalizeStoreProfile({
-      ...profile,
-      owner: profile.owner || owner.name,
-      email: profile.email || owner.email,
-      configuredAt: nowDateTime(),
-    })
-    const result = createStoreUserRecord([], owner, nowDateTime)
+    const result = createStoreRecord({ profile, owner }, resolvedStores.length)
 
     if (result.ok === false) {
       return result
     }
 
-    setStoreProfile(nextProfile)
-    setStoreForm(nextProfile)
-    storeFormRef.current = nextProfile
-    setStoreUsers(result.users)
-    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime))
-    setSecurity((current) => ({
-      ...current,
-      operator: nextProfile.owner || current.operator,
-      email: nextProfile.supportEmail || nextProfile.email || result.user.email,
-    }))
-    setToast(`Loja ${nextProfile.name} criada.`)
+    const nextStores = [...resolvedStores, result.store]
+    setStores(nextStores)
+    setActiveStoreId(result.store.id)
+    setStoreAccessMode('login')
+    applySnapshot(result.store.snapshot, 'Loja carregada.')
+    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, result.store.id))
+    setToast(`Loja ${result.store.snapshot.storeProfile.name} criada.`)
     notify('Cadastro comercial concluido.')
     return { ok: true }
   }
 
-  function applySnapshot(snapshot) {
-    const defaults = createDefaultAppData()
-    const merged = {
-      ...defaults,
-      ...snapshot,
-      orders: Array.isArray(snapshot.orders) ? snapshot.orders : defaults.orders,
-      blockedOrders: Array.isArray(snapshot.blockedOrders) ? snapshot.blockedOrders : defaults.blockedOrders,
-      settings: { ...defaults.settings, ...(snapshot.settings ?? {}) },
-      chatMessages: Array.isArray(snapshot.chatMessages) ? snapshot.chatMessages : defaults.chatMessages,
-      categories: Array.isArray(snapshot.categories) ? snapshot.categories : defaults.categories,
-      products: Array.isArray(snapshot.products)
-        ? snapshot.products.map((product) => normalizeProduct(product, defaults.categories[0]?.name || 'Pizzas'))
-        : defaults.products,
-      tables: Array.isArray(snapshot.tables) ? snapshot.tables : defaults.tables,
-      couriers: Array.isArray(snapshot.couriers) ? snapshot.couriers : defaults.couriers,
-      channels: Array.isArray(snapshot.channels) ? snapshot.channels : defaults.channels,
-      recoveries: Array.isArray(snapshot.recoveries) ? snapshot.recoveries : defaults.recoveries,
-      coupons: Array.isArray(snapshot.coupons) ? snapshot.coupons : defaults.coupons,
-      inventory: Array.isArray(snapshot.inventory) ? snapshot.inventory : defaults.inventory,
-      finance: Array.isArray(snapshot.finance) ? snapshot.finance : defaults.finance,
-      invoices: Array.isArray(snapshot.invoices) ? snapshot.invoices : defaults.invoices,
-      integrations: Array.isArray(snapshot.integrations) ? snapshot.integrations : defaults.integrations,
-      qrCodes: Array.isArray(snapshot.qrCodes) ? snapshot.qrCodes : defaults.qrCodes,
-      orderAddresses: Array.isArray(snapshot.orderAddresses)
-        ? snapshot.orderAddresses.map(normalizeOrderAddress)
-        : defaults.orderAddresses,
-      deliveryZones: Array.isArray(snapshot.deliveryZones)
-        ? snapshot.deliveryZones.map(normalizeDeliveryZone)
-        : defaults.deliveryZones,
-      storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(snapshot.storeProfile ?? {}) }),
-      printerConfig: {
-        ...defaults.printerConfig,
-        ...(snapshot.printerConfig ?? {}),
-        queue: Array.isArray(snapshot.printerConfig?.queue) ? snapshot.printerConfig.queue : defaults.printerConfig.queue,
-      },
-      security: { ...defaults.security, ...(snapshot.security ?? {}) },
-      storeUsers: Array.isArray(snapshot.storeUsers)
-        ? snapshot.storeUsers.map(normalizeStoreUser)
-        : defaults.storeUsers,
-      currentStoreUser: snapshot.currentStoreUser || defaults.currentStoreUser,
-      botConfig: {
-        ...defaults.botConfig,
-        ...(snapshot.botConfig ?? {}),
-        faq: Array.isArray(snapshot.botConfig?.faq) ? snapshot.botConfig.faq : defaults.botConfig.faq,
-      },
-      kdsConfig: { ...defaults.kdsConfig, ...(snapshot.kdsConfig ?? {}) },
-      orderDrafts: Array.isArray(snapshot.orderDrafts) ? snapshot.orderDrafts : defaults.orderDrafts,
-      suggestions: Array.isArray(snapshot.suggestions) ? snapshot.suggestions : defaults.suggestions,
-      eventLog: Array.isArray(snapshot.eventLog) ? snapshot.eventLog : defaults.eventLog,
-    }
+  function applySnapshot(snapshot, toastMessage = 'Backup carregado localmente.') {
+    const merged = normalizeAppSnapshot(snapshot)
 
     setOrders(merged.orders)
     setActiveNav(merged.activeNav)
@@ -5434,7 +5530,6 @@ function App() {
     })
     setSecurity(merged.security)
     setStoreUsers(merged.storeUsers)
-    setCurrentStoreUser(merged.currentStoreUser)
     setBotConfig(merged.botConfig)
     setBotForm(merged.botConfig)
     setKdsConfig(merged.kdsConfig)
@@ -5454,13 +5549,46 @@ function App() {
     setNewOrder(blankOrder)
     setModal(null)
     setDataImportError('')
-    setToast('Backup carregado localmente.')
+    setStoreAddressLookup({ status: 'idle', message: '' })
+    setStoreMapMode('view')
+    setToast(toastMessage)
+  }
+
+  function applyWorkspace(workspace, toastMessage = 'Backup carregado localmente.') {
+    setStores(workspace.stores)
+    setActiveStoreId(workspace.activeStoreId)
+    setStoreAccessMode(workspace.activeStoreId ? 'login' : 'onboarding')
+    applySnapshot(workspace.activeSnapshot, toastMessage)
+    setCurrentStoreUser(workspace.currentStoreUser)
+  }
+
+  function startStoreOnboarding() {
+    setCurrentStoreUser(null)
+    setStoreAccessMode('onboarding')
+    closeModal()
+  }
+
+  function cancelStoreOnboarding() {
+    setStoreAccessMode('login')
+  }
+
+  function selectStoreProfile(storeId) {
+    const selectedStore = resolvedStores.find((store) => store.id === storeId)
+
+    if (!selectedStore) {
+      return
+    }
+
+    setActiveStoreId(storeId)
+    setStoreAccessMode('login')
+    setCurrentStoreUser(null)
+    applySnapshot(selectedStore.snapshot, 'Loja carregada.')
   }
 
   function exportAppBackup() {
     downloadTextFile(
       `meucardapio-backup-${new Date().toISOString().slice(0, 10)}.json`,
-      JSON.stringify(persistedSnapshot, null, 2),
+      JSON.stringify(workspaceSnapshot, null, 2),
     )
     notify('Backup JSON exportado.')
   }
@@ -5489,7 +5617,7 @@ function App() {
     try {
       const content = await file.text()
       const parsed = JSON.parse(content)
-      applySnapshot(parsed)
+      applyWorkspace(loadPersistedWorkspaceFromRaw(parsed), 'Workspace carregado localmente.')
       notify('Backup importado com sucesso.')
     } catch {
       setDataImportError('Nao foi possivel importar este arquivo.')
@@ -5503,24 +5631,24 @@ function App() {
       ...createDefaultAppData(),
       storeProfile,
       storeUsers,
-      currentStoreUser,
       security,
       printerConfig,
       botConfig,
       kdsConfig,
-    })
+    }, 'Base local redefinida para o estado inicial.')
     notify('Base local redefinida para o estado inicial.')
   }
 
   function deleteStoreProfile() {
-    const defaults = createDefaultAppData()
-    applySnapshot({
-      ...defaults,
-      storeProfile: normalizeStoreProfile(createEmptyStoreProfile()),
-      storeUsers: [],
-      currentStoreUser: null,
-      security: defaults.security,
-    })
+    const remainingStores = resolvedStores.filter((store) => store.id !== activeStoreId)
+    const nextActiveStoreId = remainingStores[0]?.id || null
+    const nextActiveSnapshot = remainingStores[0]?.snapshot || createDefaultAppData()
+
+    setStores(remainingStores)
+    setActiveStoreId(nextActiveStoreId)
+    setCurrentStoreUser(null)
+    setStoreAccessMode(nextActiveStoreId ? 'login' : 'onboarding')
+    applySnapshot(nextActiveSnapshot, nextActiveStoreId ? 'Loja carregada.' : 'Workspace pronto para cadastrar uma nova loja.')
     notify('Cadastro da loja removido deste navegador.', 'warning')
   }
 
@@ -9211,7 +9339,7 @@ function App() {
       return (
         <Modal title={`NFC-e ${payload.orderId}`} subtitle={payload.status} onClose={closeModal}>
           <div className="invoice-preview">
-            <strong>TBT PIZZAS PENHA</strong>
+            <strong>{storeProfile.name || 'MeuCardapio'}</strong>
             <span>Cliente: {payload.customer}</span>
             <span>Total: {formatCurrency(payload.amount)}</span>
             <span>Status: {payload.status}</span>
@@ -10159,7 +10287,7 @@ function App() {
       return (
         <Modal title={`Nota fiscal #${payload.id}`} subtitle="Pre-visualizacao fake da NF." onClose={closeModal}>
           <div className="invoice-preview">
-            <strong>TBT PIZZAS PENHA</strong>
+            <strong>{storeProfile.name || 'MeuCardapio'}</strong>
             <span>Cliente: {normalizedOrder.customer}</span>
             <span>Entrega: {getOrderFulfillmentLabel(normalizedOrder.fulfillment)}</span>
             <span>Pagamento: {normalizedOrder.payment}</span>
@@ -10314,29 +10442,51 @@ function App() {
     if (modal.type === 'register' || modal.type === 'reports') {
       return (
         <Modal
-          title={modal.type === 'register' ? 'Cadastro comercial' : 'Central de dados'}
-          subtitle="Backup, importacao, exportacao e reinicio da base local."
+          title={modal.type === 'register' ? 'Perfis de loja' : 'Central de dados'}
+          subtitle="Workspace multi-loja, backup, importacao, exportacao e reinicio da base local."
           onClose={closeModal}
         >
           <div className="stack-list">
+            {storeDirectory.map((store) => (
+              <article className="list-row" key={store.id}>
+                <span>
+                  <strong>{store.name}</strong>
+                  <small>{store.category} - {store.city}</small>
+                </span>
+                <Button onClick={() => {
+                  selectStoreProfile(store.id)
+                  closeModal()
+                }}
+                >
+                  {store.isActive ? 'Abrir login' : 'Trocar'}
+                </Button>
+              </article>
+            ))}
             <article className="list-row">
               <span>
-                <strong>Loja</strong>
+                <strong>Nova loja</strong>
+                <small>Cria outro perfil comercial sem sobrescrever a loja atual.</small>
+              </span>
+              <Button onClick={startStoreOnboarding}>Criar perfil</Button>
+            </article>
+            <article className="list-row">
+              <span>
+                <strong>Loja atual</strong>
                 <small>{storeProfile.name || 'Sem cadastro'} - {storeProfile.city || 'Cidade nao definida'}</small>
               </span>
               <Button onClick={() => openModal('store')}>Editar</Button>
             </article>
             <article className="list-row">
               <span>
-                <strong>Apagar loja</strong>
-                <small>Remove o cadastro local e volta para a tela inicial de criacao.</small>
+                <strong>Apagar loja atual</strong>
+                <small>Remove apenas o perfil ativo e preserva os outros perfis do workspace.</small>
               </span>
               <Button variant="danger" onClick={() => openModal('deleteStore')}>Apagar</Button>
             </article>
             <article className="list-row">
               <span>
                 <strong>Exportar JSON</strong>
-                <small>Salva toda a operacao local em um arquivo.</small>
+                <small>Salva todo o workspace com todas as lojas locais em um arquivo.</small>
               </span>
               <Button variant="primary" onClick={exportAppBackup}>Exportar</Button>
             </article>
@@ -10560,13 +10710,20 @@ function App() {
     )
   }
 
-  if (!currentStoreUser || !isStoreReady) {
+  if (!hasValidStoreSession || !isStoreReady) {
     return (
       <StoreAccess
-        storeProfile={storeProfile}
-        users={storeUsers}
+        key={`${storeAccessMode}-${activeStoreId || 'new'}`}
+        mode={storeAccessMode}
+        onCancelOnboarding={cancelStoreOnboarding}
         onCreateStore={completeStoreOnboarding}
         onLogin={loginStoreUser}
+        onSelectStore={selectStoreProfile}
+        onStartOnboarding={startStoreOnboarding}
+        selectedStoreId={activeStoreId || ''}
+        storeProfile={storeAccessMode === 'onboarding' ? createEmptyStoreProfile() : storeProfile}
+        stores={storeDirectory}
+        users={storeAccessMode === 'onboarding' ? [] : storeUsers}
       />
     )
   }

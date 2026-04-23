@@ -37,10 +37,35 @@ function SummaryItem({ label, value }) {
   )
 }
 
-export function StoreAccess({ storeProfile, users = [], onLogin, onCreateStore }) {
+function StoreCard({ store, selected, onClick }) {
+  return (
+    <button
+      className={`${styles.storeCard} ${selected ? styles.storeCardActive : ''}`.trim()}
+      type="button"
+      onClick={onClick}
+    >
+      <strong>{store.name}</strong>
+      <span>{store.category} | {store.city || 'Cidade nao definida'}</span>
+      <small>{store.userCount} usuario(s) | {store.owner || 'Responsavel nao definido'}</small>
+    </button>
+  )
+}
+
+export function StoreAccess({
+  mode = 'login',
+  selectedStoreId = '',
+  stores = [],
+  storeProfile,
+  users = [],
+  onSelectStore,
+  onStartOnboarding,
+  onCancelOnboarding,
+  onLogin,
+  onCreateStore,
+}) {
   const normalizedStore = normalizeStoreProfile(storeProfile)
-  const canLogin = isStoreConfigured(normalizedStore) && users.length > 0
-  const mode = canLogin ? 'login' : 'onboarding'
+  const isOnboarding = mode === 'onboarding'
+  const canLogin = Boolean(selectedStoreId) && isStoreConfigured(normalizedStore) && users.length > 0
   const [loginForm, setLoginForm] = useState({
     ...blankLoginForm,
     email: users[0]?.email || '',
@@ -122,71 +147,113 @@ export function StoreAccess({ storeProfile, users = [], onLogin, onCreateStore }
           </div>
 
           <p className={styles.lead}>
-            {canLogin
-              ? 'Entre com o usuario principal ou com uma conta ja criada para acessar a operacao.'
-              : 'Configure dados comerciais, endereco, canais de venda e o primeiro acesso da operacao.'}
+            {isOnboarding
+              ? 'Cadastre uma nova loja com perfil completo antes de liberar o painel principal.'
+              : 'Escolha uma loja do workspace e entre com o usuario daquela operacao.'}
           </p>
 
           <div className={styles.summary}>
+            <SummaryItem label="Perfis" value={`${stores.length} loja(s)`} />
             <SummaryItem label="Categoria" value={profileForm.category || 'Nao informada'} />
             <SummaryItem label="Atendimento" value={describeStoreServiceModes(profileForm) || 'Selecione os canais'} />
             <SummaryItem label="Cidade" value={profileForm.city || 'Defina a cidade da operacao'} />
-            <SummaryItem label="Horario" value={profileForm.schedule || 'Nao configurado'} />
           </div>
 
           <div className={styles.checklist}>
-            <strong>O que precisa ficar pronto</strong>
+            <strong>{isOnboarding ? 'Antes de liberar a loja' : 'Como funciona o acesso'}</strong>
             <ul>
-              <li>Dados fiscais e nome fantasia da loja.</li>
-              <li>Endereco operacional e canais de atendimento.</li>
-              <li>Parametros iniciais de entrega e retirada.</li>
-              <li>Acesso do primeiro responsavel da loja.</li>
+              {isOnboarding ? <li>Dados fiscais e nome fantasia da loja.</li> : <li>Cada perfil representa uma loja diferente dentro do MeuCardapio.</li>}
+              {isOnboarding ? <li>Endereco operacional e canais de atendimento.</li> : <li>O painel principal so abre depois de selecionar e autenticar uma loja.</li>}
+              {isOnboarding ? <li>Parametros iniciais de entrega e retirada.</li> : <li>Voce pode criar novas lojas sem sobrescrever as ja existentes.</li>}
+              {isOnboarding ? <li>Acesso do primeiro responsavel da loja.</li> : <li>Cada loja mantem seus usuarios e sua base local separadamente.</li>}
             </ul>
           </div>
         </aside>
 
         <section className={styles.panel}>
-          {mode === 'login' ? (
+          {stores.length > 0 ? (
+            <section className={styles.directory}>
+              <header className={styles.directoryHeader}>
+                <div>
+                  <p>Perfis de loja</p>
+                  <h3>Workspace local</h3>
+                </div>
+                {!isOnboarding ? (
+                  <button className={styles.directoryAction} type="button" onClick={onStartOnboarding}>
+                    Nova loja
+                  </button>
+                ) : null}
+              </header>
+              <div className={styles.storeList}>
+                {stores.map((store) => (
+                  <StoreCard
+                    key={store.id}
+                    onClick={() => onSelectStore?.(store.id)}
+                    selected={!isOnboarding && store.id === selectedStoreId}
+                    store={store}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {!isOnboarding ? (
             <>
               <header className={styles.panelHeader}>
-                <p>Loja configurada</p>
-                <h2>Entrar na operacao</h2>
-                <span>{normalizedStore.name} | {normalizedStore.city}</span>
+                <p>Acesso por loja</p>
+                <h2>{canLogin ? 'Entrar na operacao' : 'Selecione um perfil'}</h2>
+                <span>
+                  {canLogin
+                    ? `${normalizedStore.name} | ${normalizedStore.city}`
+                    : 'Escolha uma loja acima ou crie uma nova para continuar.'}
+                </span>
               </header>
 
-              <form className={styles.form} data-testid="store-login-form" onSubmit={submitLogin}>
-                <label>
-                  <span>Email</span>
-                  <input
-                    autoComplete="username"
-                    data-testid="store-login-email"
-                    value={loginForm.email}
-                    onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Senha</span>
-                  <input
-                    autoComplete="current-password"
-                    data-testid="store-login-password"
-                    type="password"
-                    value={loginForm.password}
-                    onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
-                  />
-                </label>
-                {error ? <strong className={styles.error}>{error}</strong> : null}
-                <button data-testid="store-login-submit" type="submit">Entrar na loja</button>
-              </form>
+              {canLogin ? (
+                <form className={styles.form} data-testid="store-login-form" onSubmit={submitLogin}>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      autoComplete="username"
+                      data-testid="store-login-email"
+                      value={loginForm.email}
+                      onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Senha</span>
+                    <input
+                      autoComplete="current-password"
+                      data-testid="store-login-password"
+                      type="password"
+                      value={loginForm.password}
+                      onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
+                    />
+                  </label>
+                  {error ? <strong className={styles.error}>{error}</strong> : null}
+                  <button data-testid="store-login-submit" type="submit">Entrar na loja</button>
+                </form>
+              ) : (
+                <div className={styles.emptyState}>
+                  <strong>Nenhuma loja selecionada</strong>
+                  <span>Escolha um perfil existente ou use o botao "Nova loja" para iniciar um cadastro.</span>
+                </div>
+              )}
             </>
           ) : (
             <>
               <header className={styles.panelHeader}>
-                <p>Primeiro acesso</p>
-                <h2>Crie o perfil real da loja</h2>
-                <span>Esse cadastro passa a alimentar o painel, o cardapio e o fluxo operacional.</span>
+                <p>Novo perfil de loja</p>
+                <h2>Crie uma operacao completa antes do painel</h2>
+                <span>O MeuCardapio trata cada perfil como uma loja independente dentro do workspace.</span>
               </header>
 
               <form className={styles.onboardingForm} data-testid="store-onboarding-form" onSubmit={submitOnboarding}>
+                {stores.length > 0 ? (
+                  <button className={styles.backButton} type="button" onClick={onCancelOnboarding}>
+                    Voltar para os perfis
+                  </button>
+                ) : null}
                 <StoreProfileForm value={profileForm} onChange={setProfileForm} />
 
                 <section className={styles.ownerCard}>
