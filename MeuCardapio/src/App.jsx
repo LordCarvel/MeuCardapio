@@ -392,7 +392,7 @@ const initialPrinterConfig = {
 }
 
 const initialSecurity = {
-  operator: 'Operacao',
+  operator: 'Conta principal',
   email: 'seguranca@meucardapio.local',
   twoFactor: true,
   sessionMinutes: 45,
@@ -1906,6 +1906,54 @@ function createStoreRecord({ profile, owner }, index = 0) {
   }
 }
 
+function createDemoStoreRecord(index = 0) {
+  return createStoreRecord({
+    profile: {
+      tradeName: 'Loja Demo MeuCardapio',
+      legalName: 'Loja Demo MeuCardapio LTDA',
+      owner: 'Conta Demo',
+      manager: 'Gerente Demo',
+      phone: '(11) 99999-0000',
+      whatsapp: '(11) 99999-0000',
+      email: 'contato@demo.meucardapio.local',
+      supportEmail: 'suporte@demo.meucardapio.local',
+      taxId: '12.345.678/0001-90',
+      stateRegistration: '123456789',
+      category: 'Restaurante',
+      description: 'Ambiente demonstrativo do MeuCardapio para explorar pedidos, atendimento, delivery e PDV.',
+      cep: '88385-000',
+      street: 'Avenida Demo',
+      number: '123',
+      district: 'Centro',
+      cityName: 'Penha',
+      state: 'SC',
+      schedule: '11:00 - 23:00',
+      minimumOrder: '25,00',
+      serviceFee: '5,00',
+      deliveryRadius: '8',
+      averagePrepTime: '30',
+      deliveryLeadTime: '45',
+      serviceModes: {
+        delivery: true,
+        pickup: true,
+        dineIn: true,
+      },
+      website: 'https://meucardapio.app/demo',
+      instagram: '@meucardapio.demo',
+      note: 'Loja local criada automaticamente para demonstracao do produto.',
+      lat: String(DEFAULT_MAP_COORDINATES.lat),
+      lng: String(DEFAULT_MAP_COORDINATES.lng),
+      mapLabel: 'Loja demo centralizada no mapa',
+      verifiedAt: nowDateTime(),
+    },
+    owner: {
+      name: 'Conta Demo',
+      email: 'demo@meucardapio.local',
+      password: 'demo123',
+    },
+  }, index)
+}
+
 function normalizeStoreRecord(record = {}, index = 0) {
   const normalizedSnapshot = normalizeAppSnapshot(record.snapshot ?? record)
 
@@ -2701,8 +2749,8 @@ function Sidebar({
       <button className="upgrade-card" data-testid="open-register" type="button" onClick={() => onOpenModal('register')}>
         <Icon name="bolt" size={22} />
         <span>
-          <strong>Perfis de loja</strong>
-          <small>Crie e troque operacoes do SaaS</small>
+          <strong>Conta e dados</strong>
+          <small>Cadastro, backup e ambiente demo</small>
         </span>
       </button>
     </aside>
@@ -2715,8 +2763,8 @@ function TopBar({ currentStoreUser, onLogout, onOpenModal, notificationCount }) 
       <div className="brand">
         <span className="brand__mark">MC</span>
         <span>
-          <strong>MeuCardapio Ops</strong>
-          <small>Painel operacional</small>
+          <strong>MeuCardapio</strong>
+          <small>PDV e gestao para restaurantes</small>
         </span>
       </div>
 
@@ -4918,7 +4966,6 @@ function App() {
   const nominatimLastRequestRef = useRef(0)
   const [stores, setStores] = useState(initialWorkspace.stores)
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
-  const [storeAccessMode, setStoreAccessMode] = useState(initialWorkspace.activeStoreId ? 'login' : 'onboarding')
 
   const [orders, setOrders] = useState(initialData.orders)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
@@ -5135,18 +5182,6 @@ function App() {
         : store
     ))
   ), [activeStoreId, currentStoreSnapshot, stores])
-
-  const storeDirectory = useMemo(() => (
-    resolvedStores.map((store) => ({
-      id: store.id,
-      name: store.snapshot.storeProfile.name || 'Nova loja',
-      category: store.snapshot.storeProfile.category || 'Categoria nao definida',
-      city: store.snapshot.storeProfile.city || 'Cidade nao definida',
-      owner: store.snapshot.storeProfile.owner || '',
-      userCount: store.snapshot.storeUsers.length,
-      isActive: store.id === activeStoreId,
-    }))
-  ), [activeStoreId, resolvedStores])
 
   const workspaceSnapshot = useMemo(() => ({
     stores: resolvedStores,
@@ -5455,7 +5490,7 @@ function App() {
 
   function loginStoreUser(credentials) {
     if (!activeStoreId) {
-      return { ok: false, message: 'Selecione uma loja antes de entrar.' }
+      return { ok: false, message: 'Use a chave demo ou clique em Testar demo para carregar um ambiente local.' }
     }
 
     const result = authenticateStoreUser(storeUsers, credentials)
@@ -5464,7 +5499,6 @@ function App() {
       return result
     }
 
-    setStoreAccessMode('login')
     setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, activeStoreId))
     setToast(`Bem-vindo, ${result.user.name}.`)
     return { ok: true }
@@ -5472,12 +5506,41 @@ function App() {
 
   function logoutStoreUser() {
     setCurrentStoreUser(null)
-    setStoreAccessMode('login')
     setToast('Sessao encerrada.')
   }
 
-  function completeStoreOnboarding({ profile, owner }) {
-    const result = createStoreRecord({ profile, owner }, resolvedStores.length)
+  function openDemoStore({ source = 'demoButton', accessKey = '' } = {}) {
+    const normalizedKey = String(accessKey || '').trim().toLowerCase()
+    const usingAccessKey = source === 'accessKey'
+
+    if (usingAccessKey && normalizedKey && normalizedKey !== 'demo') {
+      return { ok: false, message: 'Nesta versao local, use a chave demo.' }
+    }
+
+    const existingDemoStore = resolvedStores.find((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))
+    const openExistingDemo = (store) => {
+      const result = authenticateStoreUser(store.snapshot.storeUsers, {
+        email: 'demo@meucardapio.local',
+        password: 'demo123',
+      })
+
+      if (result.ok === false) {
+        return result
+      }
+
+      setActiveStoreId(store.id)
+      applySnapshot(store.snapshot, 'Ambiente demo carregado.')
+      setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, store.id))
+      setToast('Demo iniciado.')
+      notify('Ambiente demo carregado.')
+      return { ok: true }
+    }
+
+    if (existingDemoStore) {
+      return openExistingDemo(existingDemoStore)
+    }
+
+    const result = createDemoStoreRecord(resolvedStores.length)
 
     if (result.ok === false) {
       return result
@@ -5486,11 +5549,10 @@ function App() {
     const nextStores = [...resolvedStores, result.store]
     setStores(nextStores)
     setActiveStoreId(result.store.id)
-    setStoreAccessMode('login')
-    applySnapshot(result.store.snapshot, 'Loja carregada.')
+    applySnapshot(result.store.snapshot, 'Ambiente demo carregado.')
     setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, result.store.id))
-    setToast(`Loja ${result.store.snapshot.storeProfile.name} criada.`)
-    notify('Cadastro comercial concluido.')
+    setToast('Demo iniciado.')
+    notify('Loja demo criada localmente.')
     return { ok: true }
   }
 
@@ -5557,32 +5619,8 @@ function App() {
   function applyWorkspace(workspace, toastMessage = 'Backup carregado localmente.') {
     setStores(workspace.stores)
     setActiveStoreId(workspace.activeStoreId)
-    setStoreAccessMode(workspace.activeStoreId ? 'login' : 'onboarding')
     applySnapshot(workspace.activeSnapshot, toastMessage)
     setCurrentStoreUser(workspace.currentStoreUser)
-  }
-
-  function startStoreOnboarding() {
-    setCurrentStoreUser(null)
-    setStoreAccessMode('onboarding')
-    closeModal()
-  }
-
-  function cancelStoreOnboarding() {
-    setStoreAccessMode('login')
-  }
-
-  function selectStoreProfile(storeId) {
-    const selectedStore = resolvedStores.find((store) => store.id === storeId)
-
-    if (!selectedStore) {
-      return
-    }
-
-    setActiveStoreId(storeId)
-    setStoreAccessMode('login')
-    setCurrentStoreUser(null)
-    applySnapshot(selectedStore.snapshot, 'Loja carregada.')
   }
 
   function exportAppBackup() {
@@ -5617,7 +5655,7 @@ function App() {
     try {
       const content = await file.text()
       const parsed = JSON.parse(content)
-      applyWorkspace(loadPersistedWorkspaceFromRaw(parsed), 'Workspace carregado localmente.')
+      applyWorkspace(loadPersistedWorkspaceFromRaw(parsed), 'Backup carregado localmente.')
       notify('Backup importado com sucesso.')
     } catch {
       setDataImportError('Nao foi possivel importar este arquivo.')
@@ -5647,8 +5685,7 @@ function App() {
     setStores(remainingStores)
     setActiveStoreId(nextActiveStoreId)
     setCurrentStoreUser(null)
-    setStoreAccessMode(nextActiveStoreId ? 'login' : 'onboarding')
-    applySnapshot(nextActiveSnapshot, nextActiveStoreId ? 'Loja carregada.' : 'Workspace pronto para cadastrar uma nova loja.')
+    applySnapshot(nextActiveSnapshot, nextActiveStoreId ? 'Loja carregada.' : 'Acesso redefinido.')
     notify('Cadastro da loja removido deste navegador.', 'warning')
   }
 
@@ -10398,7 +10435,7 @@ function App() {
       return (
         <Modal
           title="Dados da loja"
-          subtitle="Cadastro comercial, fiscal, operacional e geolocalizacao da loja."
+          subtitle="Cadastro comercial, fiscal, atendimento e localizacao da loja."
           onClose={closeModal}
           footer={
             <>
@@ -10442,32 +10479,17 @@ function App() {
     if (modal.type === 'register' || modal.type === 'reports') {
       return (
         <Modal
-          title={modal.type === 'register' ? 'Perfis de loja' : 'Central de dados'}
-          subtitle="Workspace multi-loja, backup, importacao, exportacao e reinicio da base local."
+          title={modal.type === 'register' ? 'Conta e loja' : 'Central de dados'}
+          subtitle="Dados da loja ativa, backup, importacao, exportacao e reinicio da base local."
           onClose={closeModal}
         >
           <div className="stack-list">
-            {storeDirectory.map((store) => (
-              <article className="list-row" key={store.id}>
-                <span>
-                  <strong>{store.name}</strong>
-                  <small>{store.category} - {store.city}</small>
-                </span>
-                <Button onClick={() => {
-                  selectStoreProfile(store.id)
-                  closeModal()
-                }}
-                >
-                  {store.isActive ? 'Abrir login' : 'Trocar'}
-                </Button>
-              </article>
-            ))}
             <article className="list-row">
               <span>
-                <strong>Nova loja</strong>
-                <small>Cria outro perfil comercial sem sobrescrever a loja atual.</small>
+                <strong>Ambiente demo</strong>
+                <small>Reabre a loja demonstrativa local com um clique.</small>
               </span>
-              <Button onClick={startStoreOnboarding}>Criar perfil</Button>
+              <Button onClick={openDemoStore}>Testar demo</Button>
             </article>
             <article className="list-row">
               <span>
@@ -10479,14 +10501,14 @@ function App() {
             <article className="list-row">
               <span>
                 <strong>Apagar loja atual</strong>
-                <small>Remove apenas o perfil ativo e preserva os outros perfis do workspace.</small>
+                <small>Remove o ambiente ativo deste navegador.</small>
               </span>
               <Button variant="danger" onClick={() => openModal('deleteStore')}>Apagar</Button>
             </article>
             <article className="list-row">
               <span>
                 <strong>Exportar JSON</strong>
-                <small>Salva todo o workspace com todas as lojas locais em um arquivo.</small>
+                <small>Salva os dados locais desta instalacao em um arquivo.</small>
               </span>
               <Button variant="primary" onClick={exportAppBackup}>Exportar</Button>
             </article>
@@ -10680,7 +10702,7 @@ function App() {
       automations: ['Automacoes', 'Configure aceite automatico, alertas e impressao.'],
       printer: ['Impressora', 'Teste de conexao e fila local de pedidos.'],
       store: ['Dados da loja', 'Perfil comercial usado neste prototipo.'],
-      register: ['Cadastro comercial', 'Fluxo fake de atualizacao de cadastro.'],
+      register: ['Conta e loja', 'Backup, demo e configuracoes locais desta conta.'],
       password: ['Atualizar seguranca', 'Formulario visual sem alteracao real de senha.'],
       reports: ['Relatorios', 'Resumo local dos pedidos em memoria.'],
     }
@@ -10713,17 +10735,11 @@ function App() {
   if (!hasValidStoreSession || !isStoreReady) {
     return (
       <StoreAccess
-        key={`${storeAccessMode}-${activeStoreId || 'new'}`}
-        mode={storeAccessMode}
-        onCancelOnboarding={cancelStoreOnboarding}
-        onCreateStore={completeStoreOnboarding}
+        key={activeStoreId || 'access'}
+        demoAvailable={resolvedStores.some((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))}
         onLogin={loginStoreUser}
-        onSelectStore={selectStoreProfile}
-        onStartOnboarding={startStoreOnboarding}
-        selectedStoreId={activeStoreId || ''}
-        storeProfile={storeAccessMode === 'onboarding' ? createEmptyStoreProfile() : storeProfile}
-        stores={storeDirectory}
-        users={storeAccessMode === 'onboarding' ? [] : storeUsers}
+        onUseDemo={openDemoStore}
+        users={storeUsers}
       />
     )
   }

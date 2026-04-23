@@ -52,7 +52,7 @@ export function StoreProfileForm({
         <div className={styles.hero}>
           <div>
             <p>Cadastro comercial</p>
-            <h2>{value.name || 'Configure a sua operacao'}</h2>
+            <h2>{value.name || 'Configure a sua loja'}</h2>
           </div>
           <strong>{describeStoreServiceModes(value) || 'Selecione como a loja vai vender'}</strong>
         </div>
@@ -61,7 +61,7 @@ export function StoreProfileForm({
       <Section
         eyebrow="Identidade"
         title="Dados comerciais"
-        description="Informacoes que aparecem no painel, no cardapio digital e na operacao diaria."
+        description="Informacoes que aparecem no painel, no cardapio digital e no atendimento diario."
       >
         <Field label="Nome fantasia">
           <input data-testid="store-trade-name" required value={value.tradeName} onChange={handleFieldChange('tradeName')} />
@@ -95,7 +95,7 @@ export function StoreProfileForm({
         <Field label="Responsavel principal">
           <input data-testid="store-owner" required value={value.owner} onChange={handleFieldChange('owner')} />
         </Field>
-        <Field label="Gerente operacional">
+        <Field label="Responsavel da unidade">
           <input value={value.manager} onChange={handleFieldChange('manager')} />
         </Field>
         <Field label="Telefone principal">
@@ -120,7 +120,7 @@ export function StoreProfileForm({
 
       <Section
         eyebrow="Endereco"
-        title="Local da operacao"
+        title="Local da loja"
         description="Endereco usado para entrega, retirada, geolocalizacao e configuracao da area atendida."
       >
         <Field label="CEP">
@@ -147,9 +147,9 @@ export function StoreProfileForm({
       </Section>
 
       <Section
-        eyebrow="Operacao"
-        title="Como a loja vende"
-        description="Parametros iniciais de atendimento para delivery, retirada e consumo no local."
+        eyebrow="Atendimento"
+        title="Como a loja atende"
+        description="Parametros iniciais de venda para delivery, retirada e consumo no local."
       >
         <div className={`${styles.field} ${styles.fieldWide}`.trim()}>
           <span>Canais de atendimento</span>
@@ -193,7 +193,7 @@ export function StoreProfileForm({
         <Section
           eyebrow="Mapa"
           title="Geolocalizacao da loja"
-          description="Use o mapa para centralizar zonas de entrega, roteirizacao e visualizacao operacional."
+          description="Use o mapa para centralizar zonas de entrega, roteirizacao e visualizacao da loja."
         >
           <div className={`${styles.mapActions} ${styles.fieldWide}`.trim()}>
             <button type="button" onClick={onVerifyAddress}>Localizar no mapa</button>

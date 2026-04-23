@@ -271,32 +271,18 @@ async function main() {
         })()
       `)
       await cdp.send('Page.reload')
-      await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="store-onboarding-form"]')`, 'app recarregado', 15000)
+      await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="start-demo"]')`, 'app recarregado', 15000)
     }
 
-    const createStoreIfNeeded = async () => {
-      const needsOnboarding = await evaluate(`Boolean(document.querySelector('[data-testid="store-onboarding-form"]'))`)
+    const startDemoIfNeeded = async () => {
+      const needsDemo = await evaluate(`Boolean(document.querySelector('[data-testid="start-demo"]'))`)
 
-      if (!needsOnboarding) {
+      if (!needsDemo) {
         return
       }
 
-      await setValue('[data-testid="store-trade-name"]', 'Smoke Pizza')
-      await setValue('[data-testid="store-owner"]', 'Responsavel Smoke')
-      await setValue('[data-testid="store-phone"]', '(47) 9 9000-0001')
-      await setValue('[data-testid="store-email"]', 'smoke@meucardapio.local')
-      await setValue('[data-testid="store-tax-id"]', '47.123.456/0001-99')
-      await setValue('[data-testid="store-street"]', 'Rua Smoke')
-      await setValue('[data-testid="store-number"]', '123')
-      await setValue('[data-testid="store-city"]', 'Penha')
-      await setValue('[data-testid="store-state"]', 'SC')
-      await setValue('[data-testid="store-schedule"]', '18:00 - 23:30')
-      await setValue('[data-testid="store-access-name"]', 'Admin Smoke')
-      await setValue('[data-testid="store-access-email"]', 'admin@meucardapio.local')
-      await setValue('[data-testid="store-access-password"]', 'admin123')
-      await setValue('[data-testid="store-access-confirm"]', 'admin123')
-      await click('[data-testid="store-onboarding-submit"]')
-      await waitFor(`document.querySelector('.app-frame')`, 'cadastro inicial da loja', 15000)
+      await click('[data-testid="start-demo"]')
+      await waitFor(`document.querySelector('.app-frame')`, 'demo iniciado', 15000)
     }
 
     const loginIfNeeded = async () => {
@@ -306,18 +292,18 @@ async function main() {
         return
       }
 
-      await setValue('[data-testid="store-login-email"]', 'admin@meucardapio.local')
-      await setValue('[data-testid="store-login-password"]', 'admin123')
+      await setValue('[data-testid="store-login-email"]', 'demo@meucardapio.local')
+      await setValue('[data-testid="store-login-password"]', 'demo123')
       await click('[data-testid="store-login-submit"]')
       await waitFor(`document.querySelector('.app-frame')`, 'login da loja', 10000)
     }
 
     const enterApp = async () => {
-      await createStoreIfNeeded()
+      await startDemoIfNeeded()
       await loginIfNeeded()
     }
 
-    await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="store-onboarding-form"]')`, 'app carregado', 10000)
+    await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="start-demo"]')`, 'app carregado', 10000)
     await enterApp()
     await clearLocalData()
     await enterApp()
@@ -338,17 +324,17 @@ async function main() {
 
     await click('[data-testid="store-profile"]')
     await waitFor(`document.body.innerText.includes('Dados da loja')`, 'modal loja')
-    await setValue('[data-testid="store-trade-name"]', 'Operacao Smoke')
+    await setValue('[data-testid="store-trade-name"]', 'Loja Smoke')
     await click('button[form="store-form"]')
     await waitFor(`
       (() => {
         const profile = document.querySelector('[data-testid="store-profile"]');
-        return profile ? profile.innerText.includes('Operacao Smoke') : false;
+        return profile ? profile.innerText.includes('Loja Smoke') : false;
       })()
     `, 'loja atualizada')
 
     await click('[data-testid="open-register"]')
-    await waitFor(`document.body.innerText.includes('Cadastro comercial')`, 'cadastro comercial')
+    await waitFor(`document.body.innerText.includes('Conta e loja')`, 'conta e loja')
     await closeModal()
 
     await click('[data-testid="open-automations"]')
@@ -861,7 +847,7 @@ async function main() {
     await closeModal()
 
     await click('[data-testid="open-register"]')
-    await waitFor(`document.body.innerText.includes('Cadastro comercial')`, 'cadastro para reset')
+    await waitFor(`document.body.innerText.includes('Conta e loja')`, 'conta e loja para reset')
     await clickByText('Resetar', '.modal .btn')
     await waitFor(toastHas('Base local redefinida para o estado inicial.'), 'reset local')
     await waitFor(`document.querySelectorAll('.stage-card').length === 3`, 'volta aos pedidos apos reset')
