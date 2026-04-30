@@ -112,6 +112,40 @@ store_users
 app_logs
 ```
 
+### 1.5 Avisos de RLS no Supabase
+
+Se o Supabase mostrar erros como `RLS Disabled in Public` ou `Sensitive Columns Exposed`, isso significa que as tabelas do schema `public` estao expostas para a API REST do proprio Supabase.
+
+Neste projeto, o front nao acessa o Supabase diretamente. O caminho correto e:
+
+```text
+Front GitHub Pages -> API Render -> PostgreSQL Supabase
+```
+
+Por isso, as tabelas devem ficar fechadas para acesso publico direto. A migration abaixo ja faz isso para projetos novos ou no proximo deploy da API:
+
+```text
+MeuCardapio/backend/src/main/resources/db/migration/V2__enable_supabase_rls.sql
+```
+
+Se voce quiser corrigir imediatamente pelo painel do Supabase, abra `SQL Editor` e rode:
+
+```sql
+alter table if exists public.flyway_schema_history enable row level security;
+alter table if exists public.stores enable row level security;
+alter table if exists public.store_users enable row level security;
+alter table if exists public.categories enable row level security;
+alter table if exists public.products enable row level security;
+alter table if exists public.orders enable row level security;
+alter table if exists public.order_items enable row level security;
+alter table if exists public.app_logs enable row level security;
+
+revoke all on all tables in schema public from anon;
+revoke all on all tables in schema public from authenticated;
+```
+
+Depois disso, rode novamente o linter do Supabase. A API no Render deve continuar funcionando porque ela conecta pelo usuario PostgreSQL configurado em `DATABASE_USERNAME`, nao pelo acesso anonimo do Supabase.
+
 ## 2. Render: backend Spring Boot
 
 O Render deve hospedar somente a API. O front nao sobe no Render.
