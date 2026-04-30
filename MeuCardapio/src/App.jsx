@@ -8,6 +8,8 @@ import {
   checkBackendHealth,
   createBackendLog,
   createBackendOrder,
+  createBackendStore,
+  createBackendStoreUser,
   deleteBackendOrder,
   loadBackendWorkspace,
   updateBackendOrder,
@@ -6972,6 +6974,103 @@ function App() {
     }
   }
 
+  async function createOnlineStoreAccount(account) {
+    const email = String(account.email || '').trim().toLowerCase()
+    const password = String(account.password || '')
+
+    if (!email || password.length < 6) {
+      return { ok: false, message: 'Informe email e senha com pelo menos 6 caracteres.' }
+    }
+
+    try {
+      const backendStore = await createBackendStore({
+        tradeName: account.tradeName,
+        ownerName: account.ownerName,
+        email,
+        phone: account.phone,
+        taxId: account.taxId,
+        category: account.category || 'Restaurante',
+        street: account.street,
+        number: account.number,
+        district: '',
+        cityName: account.cityName,
+        state: account.state || 'SC',
+        schedule: account.schedule,
+        minimumOrder: 0,
+        deliveryRadiusKm: 5,
+      })
+
+      const backendUser = await createBackendStoreUser(backendStore.id, {
+        name: account.ownerName,
+        email,
+        password,
+        role: 'owner',
+      })
+
+      const localStore = createStoreRecord({
+        profile: {
+          tradeName: backendStore.tradeName,
+          owner: backendStore.ownerName,
+          phone: backendStore.phone,
+          whatsapp: backendStore.phone,
+          email: backendStore.email,
+          taxId: backendStore.taxId,
+          category: backendStore.category,
+          street: backendStore.street || account.street,
+          number: backendStore.number || account.number,
+          district: backendStore.district || '',
+          cityName: backendStore.cityName || account.cityName,
+          state: backendStore.state || account.state || 'SC',
+          schedule: backendStore.schedule || account.schedule,
+          minimumOrder: formatCurrencyInput(backendStore.minimumOrder || 0),
+          deliveryRadius: String(backendStore.deliveryRadiusKm || 5),
+        },
+        owner: {
+          name: backendUser.name || account.ownerName,
+          email: backendUser.email || email,
+          password,
+        },
+      }, resolvedStores.length)
+
+      if (localStore.ok === false) {
+        return localStore
+      }
+
+      const nextStore = {
+        ...localStore.store,
+        id: backendStore.id,
+        snapshot: {
+          ...localStore.store.snapshot,
+          pilotSync: normalizePilotSync({
+            ...localStore.store.snapshot.pilotSync,
+            enabled: true,
+            status: 'online',
+            storeId: backendStore.id,
+            storeName: backendStore.tradeName,
+            lastCheckedAt: nowDateTime(),
+            message: 'Conta criada e vinculada a API.',
+          }),
+        },
+      }
+      const nextStores = [...resolvedStores, nextStore]
+
+      setStores(nextStores)
+      setActiveStoreId(nextStore.id)
+      applySnapshot(nextStore.snapshot, 'Conta criada.')
+      setPilotSync(nextStore.snapshot.pilotSync)
+      setCurrentStoreUser(buildStoreSession(localStore.user, nowDateTime, nextStore.id))
+      setToast(`Bem-vindo, ${localStore.user.name}.`)
+      notify('Conta criada no backend e painel aberto.')
+
+      return { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : 'Nao foi possivel criar a conta agora.',
+      }
+    }
+  }
+
   function loginStoreUser(credentials) {
     if (!activeStoreId) {
       return { ok: false, message: 'Use a chave demo ou clique em Testar demo para carregar um ambiente local.' }
@@ -12979,6 +13078,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       <StoreAccess
         key={activeStoreId || 'access'}
         demoAvailable={resolvedStores.some((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))}
+        onCreateAccount={createOnlineStoreAccount}
         onLogin={loginStoreUser}
         onUseDemo={openDemoStore}
         users={storeUsers}

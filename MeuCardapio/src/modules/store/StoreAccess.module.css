@@ -128,7 +128,8 @@
   font-weight: 800;
 }
 
-.form input {
+.form input,
+.form select {
   width: 100%;
   min-height: 46px;
   padding: 0 14px;
@@ -137,6 +138,33 @@
   background: #ffffff;
   color: #17303e;
   font: inherit;
+}
+
+.modeTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #dbe5ec;
+  border-radius: 14px;
+  background: #f3f8fb;
+}
+
+.modeTabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #637987;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.modeTabs .modeTabActive {
+  background: #ffffff;
+  color: #0d5eab;
+  box-shadow: 0 8px 18px rgba(31, 79, 112, 0.1);
 }
 
 .primaryButton,
@@ -150,8 +178,8 @@
 
 .primaryButton {
   border: 1px solid #d5dde4;
-  background: #dfe6ef;
-  color: #7f95a7;
+  background: #0d5eab;
+  color: #ffffff;
 }
 
 .outlineButton {
@@ -166,6 +194,13 @@
   border: 1px solid #0d5eab;
   background: linear-gradient(135deg, #137de4, #0d5eab);
   color: #ffffff;
+}
+
+.primaryButton:disabled,
+.outlineButton:disabled,
+.demoButton:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .divider {

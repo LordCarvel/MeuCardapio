@@ -6,25 +6,53 @@ const blankLoginForm = {
   password: '',
 }
 
+const blankSignupForm = {
+  tradeName: '',
+  ownerName: '',
+  email: '',
+  phone: '',
+  taxId: '',
+  category: 'Restaurante',
+  street: '',
+  number: '',
+  cityName: '',
+  state: 'SC',
+  schedule: '',
+  password: '',
+  confirmPassword: '',
+}
+
 export function StoreAccess({
   demoAvailable = false,
   users = [],
+  onCreateAccount,
   onLogin,
   onUseDemo,
 }) {
+  const [mode, setMode] = useState('login')
   const [accessKey, setAccessKey] = useState('')
   const [loginForm, setLoginForm] = useState({
     ...blankLoginForm,
     email: users[0]?.email || '',
   })
+  const [signupForm, setSignupForm] = useState(blankSignupForm)
   const [error, setError] = useState('')
+  const [status, setStatus] = useState('idle')
 
-  function submitLogin(event) {
+  const busy = status === 'submitting'
+
+  function updateSignup(field, value) {
+    setSignupForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function submitLogin(event) {
     event.preventDefault()
-    const result = onLogin?.({
+    setStatus('submitting')
+    const result = await onLogin?.({
       email: loginForm.email.trim(),
       password: loginForm.password,
     })
+    setStatus('idle')
 
     if (result?.ok === false) {
       setError(result.message || 'Login invalido.')
@@ -34,12 +62,14 @@ export function StoreAccess({
     setError('')
   }
 
-  function submitAccessKey(event) {
+  async function submitAccessKey(event) {
     event.preventDefault()
-    const result = onUseDemo?.({
+    setStatus('submitting')
+    const result = await onUseDemo?.({
       source: 'accessKey',
       accessKey: accessKey.trim(),
     })
+    setStatus('idle')
 
     if (result?.ok === false) {
       setError(result.message || 'Chave invalida.')
@@ -49,14 +79,54 @@ export function StoreAccess({
     setError('')
   }
 
-  function startDemo() {
-    const result = onUseDemo?.({
+  async function startDemo() {
+    setStatus('submitting')
+    const result = await onUseDemo?.({
       source: 'demoButton',
       accessKey: 'demo',
     })
+    setStatus('idle')
 
     if (result?.ok === false) {
       setError(result.message || 'Nao foi possivel abrir o demo.')
+      return
+    }
+
+    setError('')
+  }
+
+  async function submitSignup(event) {
+    event.preventDefault()
+
+    if (signupForm.password.length < 6) {
+      setError('A senha precisa ter pelo menos 6 caracteres.')
+      return
+    }
+
+    if (signupForm.password !== signupForm.confirmPassword) {
+      setError('Confirme a senha com o mesmo valor.')
+      return
+    }
+
+    setStatus('submitting')
+    const result = await onCreateAccount?.({
+      tradeName: signupForm.tradeName.trim(),
+      ownerName: signupForm.ownerName.trim(),
+      email: signupForm.email.trim(),
+      phone: signupForm.phone.trim(),
+      taxId: signupForm.taxId.trim(),
+      category: signupForm.category,
+      street: signupForm.street.trim(),
+      number: signupForm.number.trim(),
+      cityName: signupForm.cityName.trim(),
+      state: signupForm.state.trim().toUpperCase(),
+      schedule: signupForm.schedule.trim(),
+      password: signupForm.password,
+    })
+    setStatus('idle')
+
+    if (result?.ok === false) {
+      setError(result.message || 'Nao foi possivel criar a conta.')
       return
     }
 
@@ -83,54 +153,137 @@ export function StoreAccess({
             </span>
           </header>
 
-          <form className={styles.form} onSubmit={submitAccessKey}>
-            <label>
-              <span>Chave de acesso</span>
-              <input
-                data-testid="access-key-input"
-                placeholder="Sua chave de acesso"
-                value={accessKey}
-                onChange={(event) => setAccessKey(event.target.value)}
-              />
-            </label>
-            <button className={styles.outlineButton} data-testid="access-key-submit" type="submit">
-              Entrar com chave de acesso
-            </button>
-          </form>
-
-          <div className={styles.divider}>
-            <span>ou</span>
-          </div>
-
-          <form className={styles.form} data-testid="store-login-form" onSubmit={submitLogin}>
-            <label>
-              <span>E-mail</span>
-              <input
-                autoComplete="username"
-                data-testid="store-login-email"
-                placeholder="Seu e-mail"
-                value={loginForm.email}
-                onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })}
-              />
-            </label>
-            <label>
-              <span>Senha</span>
-              <input
-                autoComplete="current-password"
-                data-testid="store-login-password"
-                placeholder="Sua senha"
-                type="password"
-                value={loginForm.password}
-                onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
-              />
-            </label>
-
-            {error ? <strong className={styles.error}>{error}</strong> : null}
-
-            <button className={styles.primaryButton} data-testid="store-login-submit" type="submit">
+          <div className={styles.modeTabs} role="tablist" aria-label="Acesso">
+            <button className={mode === 'login' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('login'); setError('') }}>
               Entrar
             </button>
-          </form>
+            <button className={mode === 'signup' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('signup'); setError('') }}>
+              Criar conta
+            </button>
+          </div>
+
+          {mode === 'login' ? (
+            <>
+              <form className={styles.form} onSubmit={submitAccessKey}>
+                <label>
+                  <span>Chave de acesso</span>
+                  <input
+                    data-testid="access-key-input"
+                    placeholder="Sua chave de acesso"
+                    value={accessKey}
+                    onChange={(event) => setAccessKey(event.target.value)}
+                  />
+                </label>
+                <button className={styles.outlineButton} data-testid="access-key-submit" disabled={busy} type="submit">
+                  Entrar com chave de acesso
+                </button>
+              </form>
+
+              <div className={styles.divider}>
+                <span>ou</span>
+              </div>
+
+              <form className={styles.form} data-testid="store-login-form" onSubmit={submitLogin}>
+                <label>
+                  <span>E-mail</span>
+                  <input
+                    autoComplete="username"
+                    data-testid="store-login-email"
+                    placeholder="Seu e-mail"
+                    value={loginForm.email}
+                    onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Senha</span>
+                  <input
+                    autoComplete="current-password"
+                    data-testid="store-login-password"
+                    placeholder="Sua senha"
+                    type="password"
+                    value={loginForm.password}
+                    onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
+                  />
+                </label>
+
+                {error ? <strong className={styles.error}>{error}</strong> : null}
+
+                <button className={styles.primaryButton} data-testid="store-login-submit" disabled={busy} type="submit">
+                  Entrar
+                </button>
+              </form>
+            </>
+          ) : (
+            <form className={styles.form} data-testid="store-signup-form" onSubmit={submitSignup}>
+              <label>
+                <span>Nome da loja</span>
+                <input required value={signupForm.tradeName} onChange={(event) => updateSignup('tradeName', event.target.value)} />
+              </label>
+              <label>
+                <span>Seu nome</span>
+                <input required value={signupForm.ownerName} onChange={(event) => updateSignup('ownerName', event.target.value)} />
+              </label>
+              <label>
+                <span>E-mail</span>
+                <input autoComplete="username" required type="email" value={signupForm.email} onChange={(event) => updateSignup('email', event.target.value)} />
+              </label>
+              <label>
+                <span>Telefone</span>
+                <input required value={signupForm.phone} onChange={(event) => updateSignup('phone', event.target.value)} />
+              </label>
+              <label>
+                <span>CNPJ ou CPF</span>
+                <input required value={signupForm.taxId} onChange={(event) => updateSignup('taxId', event.target.value)} />
+              </label>
+              <label>
+                <span>Categoria</span>
+                <select value={signupForm.category} onChange={(event) => updateSignup('category', event.target.value)}>
+                  <option value="Restaurante">Restaurante</option>
+                  <option value="Pizzaria">Pizzaria</option>
+                  <option value="Hamburgueria">Hamburgueria</option>
+                  <option value="Lanchonete">Lanchonete</option>
+                  <option value="Marmitaria">Marmitaria</option>
+                  <option value="Cafeteria">Cafeteria</option>
+                  <option value="Confeitaria">Confeitaria</option>
+                  <option value="Acaiteria">Acaiteria</option>
+                </select>
+              </label>
+              <label>
+                <span>Rua</span>
+                <input required value={signupForm.street} onChange={(event) => updateSignup('street', event.target.value)} />
+              </label>
+              <label>
+                <span>Numero</span>
+                <input required value={signupForm.number} onChange={(event) => updateSignup('number', event.target.value)} />
+              </label>
+              <label>
+                <span>Cidade</span>
+                <input required value={signupForm.cityName} onChange={(event) => updateSignup('cityName', event.target.value)} />
+              </label>
+              <label>
+                <span>UF</span>
+                <input maxLength="2" required value={signupForm.state} onChange={(event) => updateSignup('state', event.target.value.toUpperCase())} />
+              </label>
+              <label>
+                <span>Horario</span>
+                <input required placeholder="Ex: 18:00 - 23:30" value={signupForm.schedule} onChange={(event) => updateSignup('schedule', event.target.value)} />
+              </label>
+              <label>
+                <span>Senha</span>
+                <input autoComplete="new-password" required type="password" value={signupForm.password} onChange={(event) => updateSignup('password', event.target.value)} />
+              </label>
+              <label>
+                <span>Confirmar senha</span>
+                <input autoComplete="new-password" required type="password" value={signupForm.confirmPassword} onChange={(event) => updateSignup('confirmPassword', event.target.value)} />
+              </label>
+
+              {error ? <strong className={styles.error}>{error}</strong> : null}
+
+              <button className={styles.primaryButton} disabled={busy} type="submit">
+                {busy ? 'Criando conta...' : 'Criar conta'}
+              </button>
+            </form>
+          )}
 
           <div className={styles.demoBox}>
             <div>
