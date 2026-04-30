@@ -131,7 +131,6 @@ MeuCardapio/backend/src/main/resources/db/migration/V2__enable_supabase_rls.sql
 Se voce quiser corrigir imediatamente pelo painel do Supabase, abra `SQL Editor` e rode:
 
 ```sql
-alter table if exists public.flyway_schema_history enable row level security;
 alter table if exists public.stores enable row level security;
 alter table if exists public.store_users enable row level security;
 alter table if exists public.categories enable row level security;
