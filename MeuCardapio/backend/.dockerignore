@@ -1,0 +1,6 @@
+target/
+.m2/
+data/
+*.log
+*.err.log
+HELP.md

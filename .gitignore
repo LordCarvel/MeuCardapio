@@ -1,0 +1,6 @@
+.idea/
+data/
+*.log
+*.err.log
+*.trace.db
+*.mv.db

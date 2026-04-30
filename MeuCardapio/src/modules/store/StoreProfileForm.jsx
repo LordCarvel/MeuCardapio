@@ -30,6 +30,16 @@ function Field({ label, hint, wide = false, children }) {
   )
 }
 
+function formatCurrencyTypingInput(value) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+
+  if (!digits) {
+    return ''
+  }
+
+  return (Number(digits) / 100).toFixed(2).replace('.', ',')
+}
+
 export function StoreProfileForm({
   value,
   onChange,
@@ -44,6 +54,7 @@ export function StoreProfileForm({
   mapSlot = null,
 }) {
   const handleFieldChange = (field) => (event) => onChange(updateStoreProfile(value, field, event.target.value))
+  const handleCurrencyFieldChange = (field) => (event) => onChange(updateStoreProfile(value, field, formatCurrencyTypingInput(event.target.value)))
   const handleServiceModeChange = (mode) => (event) => onChange(updateStoreServiceMode(value, mode, event.target.checked))
 
   return (
@@ -176,10 +187,10 @@ export function StoreProfileForm({
           <input inputMode="numeric" value={value.deliveryLeadTime} onChange={handleFieldChange('deliveryLeadTime')} />
         </Field>
         <Field label="Taxa base de entrega">
-          <input value={value.serviceFee} onChange={handleFieldChange('serviceFee')} />
+          <input inputMode="decimal" value={value.serviceFee} onChange={handleCurrencyFieldChange('serviceFee')} />
         </Field>
         <Field label="Pedido minimo">
-          <input value={value.minimumOrder} onChange={handleFieldChange('minimumOrder')} />
+          <input inputMode="decimal" value={value.minimumOrder} onChange={handleCurrencyFieldChange('minimumOrder')} />
         </Field>
         <Field label="Raio de entrega (km)">
           <input inputMode="decimal" value={value.deliveryRadius} onChange={handleFieldChange('deliveryRadius')} />

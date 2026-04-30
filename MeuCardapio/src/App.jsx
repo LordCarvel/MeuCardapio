@@ -2,6 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { StoreAccess } from './modules/store/StoreAccess'
 import { StoreDeletePrompt } from './modules/store/StoreDeletePrompt'
 import { StoreProfileForm } from './modules/store/StoreProfileForm'
+import { BackendDiagnostics } from './modules/backend/BackendDiagnostics'
+import {
+  API_BASE_URL,
+  checkBackendHealth,
+  createBackendLog,
+  createBackendOrder,
+  deleteBackendOrder,
+  loadBackendWorkspace,
+  updateBackendOrder,
+  updateBackendOrderStatus,
+} from './modules/backend/backendApi'
 import { STORAGE_KEY } from './modules/storage/browserStorage'
 import {
   authenticateStoreUser,
@@ -83,7 +94,6 @@ const navItems = [
   { id: 'kds', icon: 'check', label: 'Cozinha KDS' },
   { id: 'delivery', icon: 'bike', label: 'Entregas' },
   { id: 'marketing', icon: 'bolt', label: 'Marketing' },
-  { id: 'inventory', icon: 'bag', label: 'Estoque' },
   { id: 'finance', icon: 'card', label: 'Financeiro' },
   { id: 'fiscal', icon: 'printer', label: 'Fiscal' },
   { id: 'integrations', icon: 'settings', label: 'Integracoes' },
@@ -223,11 +233,11 @@ const initialCategories = [
 ]
 
 const initialProducts = [
-  { id: 'prod-1', name: 'Pizza grande', category: 'Pizzas', price: 54.9, active: true, stock: 18, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Pizza grande' }) },
-  { id: 'prod-2', name: 'Calzone', category: 'Pizzas', price: 38.9, active: true, stock: 11, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Calzone' }) },
-  { id: 'prod-3', name: 'Combo familia', category: 'Combos', price: 89.9, active: true, stock: 7 },
-  { id: 'prod-4', name: 'Refrigerante 2L', category: 'Bebidas', price: 13.9, active: true, stock: 24 },
-  { id: 'prod-5', name: 'Brownie', category: 'Sobremesas', price: 15.9, active: false, stock: 5 },
+  { id: 'prod-1', name: 'Pizza grande', category: 'Pizzas', price: 54.9, active: true, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Pizza grande' }) },
+  { id: 'prod-2', name: 'Calzone', category: 'Pizzas', price: 38.9, active: true, addonGroups: getDefaultAddonGroupTemplates({ category: 'Pizzas', name: 'Calzone' }) },
+  { id: 'prod-3', name: 'Combo familia', category: 'Combos', price: 89.9, active: true },
+  { id: 'prod-4', name: 'Refrigerante 2L', category: 'Bebidas', price: 13.9, active: true },
+  { id: 'prod-5', name: 'Brownie', category: 'Sobremesas', price: 15.9, active: false },
 ]
 
 const initialTables = [
@@ -308,13 +318,17 @@ const initialQrCodes = [
 const blankProduct = {
   name: '',
   category: 'Pizzas',
+  extraCategories: [],
   price: '',
-  stock: '10',
-  active: true,
   maxFlavors: '2',
   availableFrom: '18:00',
   availableTo: '23:30',
   availableDays: WEEK_DAY_OPTIONS.map((day) => day.id),
+}
+
+const blankImportProducts = {
+  sourceCategory: '',
+  productIds: [],
 }
 
 const blankFlavor = {
@@ -353,7 +367,7 @@ const blankStock = {
   unit: 'un',
   quantity: '1',
   min: '1',
-  cost: '0',
+  cost: '0,00',
 }
 
 const blankFinance = {
@@ -378,16 +392,65 @@ const initialSettings = {
   lowStockAlert: true,
 }
 
+const initialPilotSync = {
+  enabled: false,
+  autoSyncOrders: true,
+  syncOnStatusChange: true,
+  status: 'idle',
+  storeId: '',
+  storeName: '',
+  lastCheckedAt: '',
+  lastSyncedAt: '',
+  message: 'Modo piloto ainda nao conectado.',
+}
+
 const initialStoreProfile = createEmptyStoreProfile()
+
+const PRINTER_PAPER_OPTIONS = [
+  { id: '58mm', label: 'Bobina 58mm', widthMm: 58 },
+  { id: '80mm', label: 'Bobina 80mm', widthMm: 80 },
+  { id: 'A4', label: 'Folha A4', widthMm: 210 },
+]
+
+const PRINTER_FONT_OPTIONS = [
+  { id: 'mono', label: 'Monoespacada', family: '"Courier New", Consolas, monospace' },
+  { id: 'system', label: 'Sistema', family: 'Arial, Helvetica, sans-serif' },
+  { id: 'condensed', label: 'Compacta', family: '"Arial Narrow", Arial, sans-serif' },
+]
+
+const PRINTER_DENSITY_OPTIONS = [
+  { id: 'compact', label: 'Compacta', lineHeight: 1.12 },
+  { id: 'normal', label: 'Normal', lineHeight: 1.25 },
+  { id: 'wide', label: 'Espacada', lineHeight: 1.38 },
+]
+
+const PRINTER_DARKNESS_OPTIONS = [
+  { id: 'normal', label: 'Normal', level: 12 },
+  { id: 'strong', label: 'Forte', level: 26 },
+  { id: 'extra', label: 'Extra escuro', level: 52 },
+  { id: 'maximum', label: 'Maximo', level: 78 },
+]
 
 const initialPrinterConfig = {
   connected: true,
   deviceName: 'POS-80 Cozinha',
   copies: 1,
   paper: '80mm',
+  fontFamily: 'mono',
+  fontSize: 12,
+  marginMm: 3,
+  density: 'normal',
+  darkness: 'strong',
+  darknessLevel: 24,
+  cutPaper: true,
+  showStoreHeader: true,
+  showCustomerPhone: true,
+  showFinancials: true,
+  showNotes: true,
+  printMode: 'browser',
   queue: [
-    { id: 'job-1', label: 'Pedido #8335', type: 'Pedido', status: 'Pronto' },
-    { id: 'job-2', label: 'Mapa de mesas', type: 'Relatorio', status: 'Pendente' },
+    { id: 'job-1', label: 'Pedido #8335', type: 'Pedido', status: 'Pronto', createdAt: '18:45' },
+    { id: 'job-2', label: 'Mapa de mesas', type: 'Relatorio', status: 'Pendente', createdAt: '18:40' },
   ],
 }
 
@@ -637,6 +700,16 @@ function parseCurrencyInput(value) {
 
 function formatCurrencyInput(value) {
   return formatNumber(Number(value) || 0)
+}
+
+function formatCurrencyTypingInput(value) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+
+  if (!digits) {
+    return ''
+  }
+
+  return formatCurrencyInput(Number(digits) / 100)
 }
 
 function formatNumber(value) {
@@ -1220,9 +1293,8 @@ function productToForm(product) {
   return {
     name: product.name,
     category: product.category,
-    price: String(product.price).replace('.', ','),
-    stock: String(product.stock),
-    active: product.active,
+    extraCategories: Array.isArray(product.extraCategories) ? product.extraCategories : [],
+    price: formatCurrencyInput(product.price),
     maxFlavors: String(product.maxFlavors ?? 2),
     availableFrom: product.availableFrom || '18:00',
     availableTo: product.availableTo || '23:30',
@@ -1233,7 +1305,7 @@ function productToForm(product) {
 function flavorToForm(flavor) {
   return {
     name: flavor?.name || '',
-    price: String(flavor?.price ?? 0).replace('.', ','),
+    price: formatCurrencyInput(flavor?.price ?? 0),
     active: flavor?.active !== false,
   }
 }
@@ -1471,6 +1543,14 @@ function normalizeProductAddonGroup(group, index = 0) {
 
 function normalizeProduct(product, fallbackCategory = 'Pizzas') {
   const defaultDays = getAllWeekDays()
+  const category = product?.category || fallbackCategory
+  const extraCategories = Array.isArray(product?.extraCategories)
+    ? [...new Set(product.extraCategories.filter((extraCategory) => extraCategory && extraCategory !== category))]
+    : []
+  const displayCategories = [category, ...extraCategories]
+  const exhaustedCategories = Array.isArray(product?.exhaustedCategories)
+    ? [...new Set(product.exhaustedCategories.filter((exhaustedCategory) => displayCategories.includes(exhaustedCategory)))]
+    : product?.active === false ? displayCategories : []
   const initialFlavors = Array.isArray(product?.flavors)
     ? product.flavors.map(normalizeProductFlavor)
     : getDefaultFlavorTemplates(product ?? {})
@@ -1481,10 +1561,11 @@ function normalizeProduct(product, fallbackCategory = 'Pizzas') {
   return {
     id: product?.id,
     name: product?.name || 'Produto sem nome',
-    category: product?.category || fallbackCategory,
+    category,
+    extraCategories,
+    exhaustedCategories,
     price: Number(product?.price) || 0,
-    stock: Number(product?.stock) || 0,
-    active: product?.active !== false,
+    active: displayCategories.some((displayCategory) => !exhaustedCategories.includes(displayCategory)),
     maxFlavors: Math.max(1, Number(product?.maxFlavors) || getDefaultMaxFlavors(product ?? {})),
     availableFrom: product?.availableFrom || '18:00',
     availableTo: product?.availableTo || '23:30',
@@ -1494,6 +1575,28 @@ function normalizeProduct(product, fallbackCategory = 'Pizzas') {
     flavors: initialFlavors,
     addonGroups: initialAddonGroups,
   }
+}
+
+function getProductDisplayCategories(product) {
+  return [product.category, ...(Array.isArray(product.extraCategories) ? product.extraCategories : [])]
+    .filter(Boolean)
+    .filter((category, index, list) => list.indexOf(category) === index)
+}
+
+function productAppearsInCategory(product, categoryName) {
+  return getProductDisplayCategories(product).includes(categoryName)
+}
+
+function isProductExhaustedInCategory(product, categoryName) {
+  return Array.isArray(product?.exhaustedCategories) && product.exhaustedCategories.includes(categoryName)
+}
+
+function isProductAvailableInCategory(product, categoryName) {
+  return productAppearsInCategory(product, categoryName) && !isProductExhaustedInCategory(product, categoryName)
+}
+
+function isProductAvailable(product) {
+  return getProductDisplayCategories(product).some((categoryName) => isProductAvailableInCategory(product, categoryName))
 }
 
 function getActiveProductFlavors(product) {
@@ -1721,6 +1824,26 @@ function getOrderCartItemLabel(item) {
     : `${item.qty}x ${item.name}`
 }
 
+function getOrderCartPrintItem(item) {
+  const addonDetails = Array.isArray(item?.addonEntries)
+    ? item.addonEntries.flatMap((entry) => (
+      Array.isArray(entry.optionNames) && entry.optionNames.length > 0
+        ? entry.optionNames
+        : String(entry.label || '').split(',').map((option) => option.trim()).filter(Boolean)
+    ))
+    : []
+
+  return {
+    qty: item?.qty || 1,
+    name: item?.name || 'Item do pedido',
+    details: [
+      ...(Array.isArray(item?.flavorNames) ? item.flavorNames : []),
+      ...addonDetails,
+    ].filter(Boolean),
+    price: (Number(item?.price) || 0) * (Number(item?.qty) || 1),
+  }
+}
+
 function getProductAvailabilityLabel(product) {
   const activeDays = Array.isArray(product.availableDays) ? product.availableDays : []
 
@@ -1775,6 +1898,119 @@ function nowDateTime() {
   })
 }
 
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value)
+
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+
+  return Math.min(max, Math.max(min, parsed))
+}
+
+function normalizePrintJob(job = {}, index = 0) {
+  return {
+    id: job.id || `job-${Date.now()}-${index}`,
+    label: job.label || 'Impressao',
+    type: job.type || 'Pedido',
+    status: job.status || 'Pendente',
+    createdAt: job.createdAt || nowDateTime(),
+    printedAt: job.printedAt || '',
+    printer: job.printer || '',
+    document: job.document || null,
+  }
+}
+
+function normalizePrinterConfig(config = {}) {
+  const merged = { ...initialPrinterConfig, ...(config ?? {}) }
+  const paper = PRINTER_PAPER_OPTIONS.some((option) => option.id === merged.paper) ? merged.paper : initialPrinterConfig.paper
+  const fontFamily = PRINTER_FONT_OPTIONS.some((option) => option.id === merged.fontFamily) ? merged.fontFamily : initialPrinterConfig.fontFamily
+  const density = PRINTER_DENSITY_OPTIONS.some((option) => option.id === merged.density) ? merged.density : initialPrinterConfig.density
+  const darkness = PRINTER_DARKNESS_OPTIONS.some((option) => option.id === merged.darkness) ? merged.darkness : initialPrinterConfig.darkness
+  const fallbackDarknessLevel = PRINTER_DARKNESS_OPTIONS.find((option) => option.id === darkness)?.level ?? initialPrinterConfig.darknessLevel
+
+  return {
+    ...merged,
+    connected: merged.connected !== false,
+    deviceName: String(merged.deviceName || initialPrinterConfig.deviceName),
+    copies: clampNumber(merged.copies, 1, 5, initialPrinterConfig.copies),
+    paper,
+    fontFamily,
+    fontSize: clampNumber(merged.fontSize, 9, 18, initialPrinterConfig.fontSize),
+    marginMm: clampNumber(merged.marginMm, 0, 12, initialPrinterConfig.marginMm),
+    density,
+    darkness,
+    darknessLevel: clampNumber(merged.darknessLevel ?? fallbackDarknessLevel, 0, 100, initialPrinterConfig.darknessLevel),
+    cutPaper: merged.cutPaper !== false,
+    showStoreHeader: merged.showStoreHeader !== false,
+    showCustomerPhone: merged.showCustomerPhone !== false,
+    showFinancials: merged.showFinancials !== false,
+    showNotes: merged.showNotes !== false,
+    printMode: merged.printMode || 'browser',
+    queue: Array.isArray(merged.queue) ? merged.queue.map(normalizePrintJob).slice(0, 30) : [],
+  }
+}
+
+function normalizePilotSync(config = {}) {
+  const merged = { ...initialPilotSync, ...(config ?? {}) }
+  const validStatuses = ['idle', 'checking', 'online', 'syncing', 'offline', 'error']
+
+  return {
+    enabled: merged.enabled === true,
+    autoSyncOrders: merged.autoSyncOrders !== false,
+    syncOnStatusChange: merged.syncOnStatusChange !== false,
+    status: validStatuses.includes(merged.status) ? merged.status : initialPilotSync.status,
+    storeId: String(merged.storeId || ''),
+    storeName: String(merged.storeName || ''),
+    lastCheckedAt: String(merged.lastCheckedAt || ''),
+    lastSyncedAt: String(merged.lastSyncedAt || ''),
+    message: String(merged.message || initialPilotSync.message),
+  }
+}
+
+function printerConfigToForm(config = {}) {
+  const normalized = normalizePrinterConfig(config)
+
+  return {
+    deviceName: normalized.deviceName,
+    copies: String(normalized.copies),
+    paper: normalized.paper,
+    connected: normalized.connected ? 'yes' : 'no',
+    fontFamily: normalized.fontFamily,
+    fontSize: String(normalized.fontSize),
+    marginMm: String(normalized.marginMm),
+    density: normalized.density,
+    darkness: normalized.darkness,
+    darknessLevel: String(normalized.darknessLevel),
+    cutPaper: normalized.cutPaper ? 'yes' : 'no',
+    showStoreHeader: normalized.showStoreHeader ? 'yes' : 'no',
+    showCustomerPhone: normalized.showCustomerPhone ? 'yes' : 'no',
+    showFinancials: normalized.showFinancials ? 'yes' : 'no',
+    showNotes: normalized.showNotes ? 'yes' : 'no',
+  }
+}
+
+function printerFormToConfig(form = {}, current = initialPrinterConfig) {
+  return normalizePrinterConfig({
+    ...current,
+    deviceName: form.deviceName || current.deviceName,
+    copies: Number(form.copies),
+    paper: form.paper,
+    connected: form.connected === 'yes',
+    fontFamily: form.fontFamily,
+    fontSize: Number(form.fontSize),
+    marginMm: Number(form.marginMm),
+    density: form.density,
+    darkness: form.darkness,
+    darknessLevel: Number(form.darknessLevel),
+    cutPaper: form.cutPaper === 'yes',
+    showStoreHeader: form.showStoreHeader === 'yes',
+    showCustomerPhone: form.showCustomerPhone === 'yes',
+    showFinancials: form.showFinancials === 'yes',
+    showNotes: form.showNotes === 'yes',
+  })
+}
+
 function createDefaultAppData() {
   return cloneData({
     orders: initialOrders.map((order) => ({
@@ -1804,7 +2040,8 @@ function createDefaultAppData() {
     orderAddresses: initialOrderAddresses,
     deliveryZones: initialDeliveryZones.map(normalizeDeliveryZone),
     storeProfile: normalizeStoreProfile(initialStoreProfile),
-    printerConfig: initialPrinterConfig,
+    printerConfig: normalizePrinterConfig(initialPrinterConfig),
+    pilotSync: normalizePilotSync(initialPilotSync),
     security: initialSecurity,
     storeUsers: initialStoreUsers.map(normalizeStoreUser),
     currentStoreUser: null,
@@ -1827,7 +2064,12 @@ function normalizeAppSnapshot(snapshot = {}) {
       ? parsed.orders.map((order) => normalizeOrderRecord(order))
       : defaults.orders,
     blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
-    settings: { ...defaults.settings, ...(parsed.settings ?? {}) },
+    settings: {
+      ...defaults.settings,
+      ...(parsed.settings ?? {}),
+      autoPrint: parsed.settings?.autoPrint ?? parsed.settings?.printer ?? defaults.settings.autoPrint,
+      printer: parsed.settings?.printer ?? parsed.settings?.autoPrint ?? defaults.settings.printer,
+    },
     chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : defaults.chatMessages,
     categories: Array.isArray(parsed.categories) ? parsed.categories : defaults.categories,
     products: Array.isArray(parsed.products)
@@ -1850,11 +2092,12 @@ function normalizeAppSnapshot(snapshot = {}) {
       ? parsed.deliveryZones.map(normalizeDeliveryZone)
       : defaults.deliveryZones,
     storeProfile: normalizeStoreProfile({ ...defaults.storeProfile, ...(parsed.storeProfile ?? {}) }),
-    printerConfig: {
+    printerConfig: normalizePrinterConfig({
       ...defaults.printerConfig,
       ...(parsed.printerConfig ?? {}),
       queue: Array.isArray(parsed.printerConfig?.queue) ? parsed.printerConfig.queue : defaults.printerConfig.queue,
-    },
+    }),
+    pilotSync: normalizePilotSync({ ...defaults.pilotSync, ...(parsed.pilotSync ?? {}) }),
     security: { ...defaults.security, ...(parsed.security ?? {}) },
     storeUsers: Array.isArray(parsed.storeUsers)
       ? parsed.storeUsers.map(normalizeStoreUser)
@@ -2059,6 +2302,651 @@ function downloadTextFile(filename, content, mimeType = 'application/json') {
   URL.revokeObjectURL(url)
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function getPrinterPaperOption(paper) {
+  return PRINTER_PAPER_OPTIONS.find((option) => option.id === paper) || PRINTER_PAPER_OPTIONS[1]
+}
+
+function getPrinterFontOption(fontFamily) {
+  return PRINTER_FONT_OPTIONS.find((option) => option.id === fontFamily) || PRINTER_FONT_OPTIONS[0]
+}
+
+function getPrinterDensityOption(density) {
+  return PRINTER_DENSITY_OPTIONS.find((option) => option.id === density) || PRINTER_DENSITY_OPTIONS[1]
+}
+
+function getPrinterDarknessOption(darknessLevel) {
+  const level = clampNumber(darknessLevel, 0, 100, initialPrinterConfig.darknessLevel)
+  const shadowAmount = level <= 28 ? 0 : ((level - 28) / 72) * 0.22
+  const fontWeight = Math.round(470 + (level * 2.2))
+  const textShadow = shadowAmount <= 0
+    ? 'none'
+    : `${shadowAmount.toFixed(2)}px 0 #000000, -${shadowAmount.toFixed(2)}px 0 #000000`
+
+  return {
+    level,
+    fontWeight,
+    textShadow,
+  }
+}
+
+function getStorePrintAddress(storeProfile = {}) {
+  return [
+    [storeProfile.street, storeProfile.number].filter(Boolean).join(', '),
+    storeProfile.district,
+    storeProfile.city || [storeProfile.cityName, storeProfile.state].filter(Boolean).join(' - '),
+  ].filter(Boolean).join(' - ')
+}
+
+function buildStorePrintHeader(storeProfile = {}) {
+  const storeName = storeProfile.name || storeProfile.tradeName || 'MeuCardapio'
+  const storeAddress = getStorePrintAddress(storeProfile)
+  const contact = storeProfile.whatsapp || storeProfile.phone || storeProfile.supportEmail || storeProfile.email || ''
+
+  return `
+    <header class="receipt-header">
+      <strong>${escapeHtml(storeName)}</strong>
+      ${storeProfile.taxId ? `<span>CNPJ/CPF: ${escapeHtml(storeProfile.taxId)}</span>` : ''}
+      ${storeAddress ? `<span>${escapeHtml(storeAddress)}</span>` : ''}
+      ${contact ? `<span>${escapeHtml(contact)}</span>` : ''}
+    </header>
+  `
+}
+
+function buildReceiptRow(label, value, className = '') {
+  if (value === null || value === undefined || value === '') {
+    return ''
+  }
+
+  const rowClass = ['receipt-row', className].filter(Boolean).join(' ')
+
+  return `
+    <div class="${rowClass}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `
+}
+
+function buildReceiptDivider(className = '') {
+  return `<div class="receipt-divider ${className}"></div>`
+}
+
+function formatReceiptCurrency(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-'
+  }
+
+  return formatCurrency(value).replace(/\u00a0/g, ' ')
+}
+
+function getReceiptModeLabel(order = {}, variant = 'order') {
+  if (variant === 'kitchen') {
+    return 'COZINHA'
+  }
+
+  if (variant === 'dispatch') {
+    return inferOrderFulfillment(order) === 'delivery' ? 'PARA ENTREGA' : 'PARA SAIDA'
+  }
+
+  if (variant === 'fiscal') {
+    return 'NFC-E'
+  }
+
+  if (inferOrderFulfillment(order) === 'delivery') {
+    return 'PARA ENTREGA'
+  }
+
+  if (inferOrderFulfillment(order) === 'dinein') {
+    return 'PARA MESA'
+  }
+
+  return 'PARA RETIRADA'
+}
+
+function getReceiptExpectedWindow(order = {}) {
+  if (order.expectedAt) {
+    return order.expectedAt
+  }
+
+  if (order.status === 'ready') {
+    return 'Pronto'
+  }
+
+  return getOrderEta(order)
+}
+
+function splitReceiptItemLabel(label = '') {
+  const trimmed = String(label || '').trim()
+  const qtyMatch = trimmed.match(/^(\d+)\s*x\s*(.+)$/i)
+  const qty = qtyMatch?.[1] || '1'
+  const itemText = qtyMatch?.[2]?.trim() || trimmed || 'Item do pedido'
+  const detailStartIndex = itemText.endsWith(')') ? itemText.lastIndexOf(' (') : -1
+  const name = detailStartIndex > -1
+    ? itemText.slice(0, detailStartIndex).trim()
+    : itemText
+  const detailsText = detailStartIndex > -1
+    ? itemText.slice(detailStartIndex + 2, -1).trim()
+    : ''
+  const details = detailsText
+    .split(/\s+\|\s+/)
+    .map((detail) => detail.trim())
+    .filter(Boolean)
+    .flatMap((detail) => {
+      const [, detailList] = detail.match(/^(?:Sabores?|Sabor|Adicionais?|Adicional|Borda|Extras?|Complementos?):\s*(.+)$/i) || []
+
+      if (!detailList) {
+        return [detail]
+      }
+
+      return detailList.split(',').map((item) => item.trim()).filter(Boolean)
+    })
+
+  return { qty, name, details, price: null }
+}
+
+function getReceiptItems(order = {}) {
+  if (Array.isArray(order.printItems) && order.printItems.length > 0) {
+    return order.printItems.map((item) => ({
+      qty: item.qty || 1,
+      name: item.name || 'Item do pedido',
+      details: Array.isArray(item.details) ? item.details.filter(Boolean) : [],
+      price: item.price ?? null,
+    }))
+  }
+
+  return (Array.isArray(order.items) ? order.items : []).map(splitReceiptItemLabel)
+}
+
+function buildReceiptItemsHtml(order = {}) {
+  const receiptItems = getReceiptItems(order)
+
+  if (receiptItems.length === 0) {
+    return '<div class="receipt-item"><div class="receipt-item__line"><span>(1) Item nao informado</span><strong>-</strong></div></div>'
+  }
+
+  return receiptItems.map((item, index) => `
+    <div class="receipt-item">
+      ${index > 0 ? '<div class="receipt-item__separator"></div>' : ''}
+      <div class="receipt-item__line">
+        <span>(${escapeHtml(item.qty)}) ${escapeHtml(item.name)}</span>
+        <strong>${item.price === null ? '-' : formatReceiptCurrency(item.price)}</strong>
+      </div>
+      ${item.details.map((detail) => `<div class="receipt-item__detail">(1) ${escapeHtml(detail)} <span>-</span></div>`).join('')}
+    </div>
+  `).join('')
+}
+
+function createPrinterTestOrder() {
+  return normalizeOrderRecord({
+    id: '8459',
+    customer: 'Camila',
+    phone: '(47) 9 8877-0867',
+    channel: 'delivery',
+    fulfillment: 'delivery',
+    source: 'Cardapio Digital',
+    status: 'production',
+    subtotal: 89.98,
+    deliveryFee: '5,00',
+    total: 94.98,
+    payment: 'Cartao (Cartao)',
+    time: nowTime(),
+    expectedAt: '19:27 - 19:37',
+    address: 'Rua Jovino Manoel Francisco, N 842, Casa 2 - Bairro: Armacao, Penha | CEP: 88385-000',
+    customerOrderCount: '02',
+    note: '* Cobrar do cliente *',
+    items: ['1x Frigideira 40cm', '1x Broto Baby 20cm'],
+    printItems: [
+      {
+        qty: 1,
+        name: 'Frigideira 40cm',
+        price: 69.99,
+        details: ['Calabresa com Cebola', 'Frango com Requeijao Cremoso', 'Mussarela', 'Marguerita', 'Borda Sem Recheio'],
+      },
+      {
+        qty: 1,
+        name: 'Broto Baby 20cm',
+        price: 19.99,
+        details: ['Prestigio'],
+      },
+    ],
+  })
+}
+
+function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order') {
+  const normalizedConfig = normalizePrinterConfig(config)
+  const normalizedOrder = normalizeOrderRecord(order)
+  const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
+  const showFinancials = normalizedConfig.showFinancials && variant !== 'kitchen'
+  const storeName = storeProfile.name || storeProfile.tradeName || 'MeuCardapio'
+  const customerAddress = normalizedOrder.address || (normalizedOrder.fulfillment === 'pickup' ? 'Retirada no balcao' : '')
+  const note = normalizedOrder.note && normalizedConfig.showNotes
+    ? `
+      ${buildReceiptDivider()}
+      <section class="receipt-section receipt-note">
+        <strong>${escapeHtml(normalizedOrder.note)}</strong>
+      </section>
+    `
+    : ''
+  const cut = normalizedConfig.cutPaper ? '<div class="receipt-cut">Corte aqui</div>' : ''
+
+  return `
+    <article class="receipt receipt--order">
+      ${buildReceiptDivider('receipt-divider--top')}
+      <section class="receipt-title">
+        <span>${getReceiptModeLabel(normalizedOrder, variant)}</span>
+        <small>${escapeHtml(nowDateTime())}</small>
+        <small>Entrega prevista: <b>${escapeHtml(getReceiptExpectedWindow(normalizedOrder))}</b></small>
+        ${normalizedConfig.showStoreHeader ? `<small>${escapeHtml(storeName)}</small>` : ''}
+      </section>
+      ${buildReceiptDivider()}
+      <section class="receipt-order-number">Pedido ${escapeHtml(normalizedOrder.id)}</section>
+      ${buildReceiptDivider()}
+
+      <section class="receipt-section">
+        <h3>Itens</h3>
+        <div class="receipt-items">${buildReceiptItemsHtml(normalizedOrder)}</div>
+      </section>
+
+      <section class="receipt-section">
+        <h3>Cliente</h3>
+        <p><span>Nome:</span> ${escapeHtml(normalizedOrder.customer || 'Cliente balcao')}</p>
+        ${normalizedConfig.showCustomerPhone ? `<p><span>Telefone:</span> ${escapeHtml(normalizedOrder.phone)}</p>` : ''}
+        ${normalizedOrder.customerOrderCount ? `<p><span>Quantidade de pedidos:</span> ${escapeHtml(normalizedOrder.customerOrderCount)}</p>` : ''}
+        ${customerAddress ? `<p><span>Endereco:</span> ${escapeHtml(customerAddress)}</p>` : ''}
+      </section>
+
+      ${note}
+
+      ${showFinancials ? `
+        <section class="receipt-section">
+          <h3>Pagamento</h3>
+          <p><span>Forma de Pagamento:</span> ${escapeHtml(normalizedOrder.payment)}</p>
+          ${normalizedOrder.document ? `<p><span>CPF/CNPJ:</span> ${escapeHtml(normalizedOrder.document)}</p>` : ''}
+        </section>
+        ${buildReceiptDivider()}
+        <section class="receipt-section receipt-totals">
+          ${buildReceiptRow('Subtotal:', formatReceiptCurrency(financialBreakdown.subtotal))}
+          ${financialBreakdown.deliveryFee > 0 ? buildReceiptRow('Taxa de entrega:', formatReceiptCurrency(financialBreakdown.deliveryFee)) : ''}
+          ${financialBreakdown.discountAmount > 0 ? buildReceiptRow('Desconto:', formatReceiptCurrency(financialBreakdown.discountAmount)) : ''}
+          ${financialBreakdown.surchargeAmount > 0 ? buildReceiptRow('Acrescimo:', formatReceiptCurrency(financialBreakdown.surchargeAmount)) : ''}
+          ${buildReceiptRow('Total:', formatReceiptCurrency(financialBreakdown.total), 'receipt-row--total')}
+        </section>
+      ` : ''}
+
+      ${variant === 'dispatch' && normalizedOrder.courier ? `
+        <section class="receipt-section">
+          ${buildReceiptRow('Entregador', normalizedOrder.courier)}
+        </section>
+      ` : ''}
+
+      ${buildReceiptDivider()}
+      <footer class="receipt-powered">
+        <strong>Powered By: MeuCardapio</strong>
+        <span>Acesse: https://meucardapio.local</span>
+      </footer>
+      ${cut}
+    </article>
+  `
+}
+
+function buildInvoicePrintBody(invoice, order, storeProfile, config = {}) {
+  const fallbackOrder = normalizeOrderRecord(order || {
+    id: invoice.orderId,
+    customer: invoice.customer,
+    phone: '',
+    fulfillment: 'pickup',
+    payment: 'Cartao',
+    subtotal: invoice.amount,
+    total: invoice.amount,
+    address: 'Retirada no balcao',
+    note: `Status fiscal: ${invoice.status}`,
+    items: ['Consumo registrado'],
+  })
+  const invoiceHeader = `
+    <section class="receipt-section receipt-fiscal">
+      ${buildReceiptRow('Documento', invoice.id || `NFC-e ${invoice.orderId}`)}
+      ${buildReceiptRow('Status fiscal', invoice.status || 'Autorizada')}
+    </section>
+  `
+
+  return buildOrderPrintBody({
+    ...fallbackOrder,
+    note: [fallbackOrder.note, `Status fiscal: ${invoice.status || 'Autorizada'}`].filter(Boolean).join(' | '),
+  }, storeProfile, config, 'fiscal').replace('<section class="receipt-section">', `${invoiceHeader}<section class="receipt-section">`)
+}
+
+function buildQrPrintBody(qr, storeProfile, config = {}) {
+  const normalizedConfig = normalizePrinterConfig(config)
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const path = `/cardapio/${qr.url || qr.table || ''}`
+  const fullUrl = `${baseUrl}${path}`
+  const cut = normalizedConfig.cutPaper ? '<div class="receipt-cut">Corte aqui</div>' : ''
+
+  return `
+    <article class="receipt">
+      ${normalizedConfig.showStoreHeader ? buildStorePrintHeader(storeProfile) : ''}
+      <section class="receipt-title">
+        <span>QR DE MESA</span>
+        <strong>${escapeHtml(qr.table || 'Mesa')}</strong>
+        <small>${escapeHtml(nowDateTime())}</small>
+      </section>
+      <section class="receipt-qr">
+        <div class="receipt-qr__code">QR</div>
+        <strong>${escapeHtml(qr.table || 'Mesa')}</strong>
+        <span>${escapeHtml(path)}</span>
+        <small>${escapeHtml(fullUrl)}</small>
+      </section>
+      ${cut}
+    </article>
+  `
+}
+
+function buildGenericPrintBody(label, type, storeProfile, config = {}) {
+  const normalizedConfig = normalizePrinterConfig(config)
+  const cut = normalizedConfig.cutPaper ? '<div class="receipt-cut">Corte aqui</div>' : ''
+
+  return `
+    <article class="receipt">
+      ${normalizedConfig.showStoreHeader ? buildStorePrintHeader(storeProfile) : ''}
+      <section class="receipt-title">
+        <span>${escapeHtml(type || 'IMPRESSAO')}</span>
+        <strong>${escapeHtml(label || 'Documento')}</strong>
+        <small>${escapeHtml(nowDateTime())}</small>
+      </section>
+      <section class="receipt-section">
+        ${buildReceiptRow('Impressora', normalizedConfig.deviceName)}
+        ${buildReceiptRow('Papel', normalizedConfig.paper)}
+        ${buildReceiptRow('Fonte', `${normalizedConfig.fontSize}px`)}
+      </section>
+      ${cut}
+    </article>
+  `
+}
+
+function buildPrintHtml(printDocument, config = {}) {
+  const normalizedConfig = normalizePrinterConfig(config)
+  const paper = getPrinterPaperOption(normalizedConfig.paper)
+  const font = getPrinterFontOption(normalizedConfig.fontFamily)
+  const density = getPrinterDensityOption(normalizedConfig.density)
+  const darkness = getPrinterDarknessOption(normalizedConfig.darknessLevel)
+  const copies = Math.max(1, normalizedConfig.copies)
+  const paperSize = normalizedConfig.paper === 'A4' ? 'A4' : `${paper.widthMm}mm auto`
+  const bodyWidth = normalizedConfig.paper === 'A4' ? '210mm' : `${paper.widthMm}mm`
+  const copyWidth = normalizedConfig.paper === 'A4' ? '190mm' : `${paper.widthMm}mm`
+  const copyHtml = Array.from({ length: copies }, (_, index) => `
+    <section class="receipt-copy">
+      ${copies > 1 ? `<div class="receipt-copy__meta">Via ${index + 1} de ${copies}</div>` : ''}
+      ${printDocument.bodyHtml}
+    </section>
+  `).join('')
+
+  return `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(printDocument.title || printDocument.label || 'Impressao')}</title>
+        <style>
+          @page {
+            size: ${paperSize};
+            margin: 0;
+          }
+
+          * {
+            box-sizing: border-box;
+          }
+
+          body {
+            width: ${bodyWidth};
+            margin: 0 auto;
+            background: #ffffff;
+            color: #000000;
+            font-family: ${font.family};
+            font-size: ${normalizedConfig.fontSize}px;
+            font-weight: ${darkness.fontWeight};
+            line-height: ${density.lineHeight};
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          .receipt-copy {
+            width: ${copyWidth};
+            min-height: 0;
+            padding: ${normalizedConfig.marginMm}mm;
+            background: #ffffff;
+          }
+
+          .receipt-copy + .receipt-copy {
+            margin-top: 6mm;
+            padding-top: ${Math.max(2, normalizedConfig.marginMm)}mm;
+            border-top: 1px dashed #000000;
+          }
+
+          .receipt-copy__meta,
+          .receipt-cut {
+            margin: 2mm 0;
+            text-align: center;
+            font-size: 0.86em;
+            text-transform: uppercase;
+          }
+
+          .receipt-header,
+          .receipt-title,
+          .receipt-section,
+          .receipt-qr {
+            display: grid;
+            gap: 1.5mm;
+            padding: 2mm 0;
+            border-bottom: 0;
+          }
+
+          .receipt-header,
+          .receipt-title,
+          .receipt-qr {
+            text-align: center;
+          }
+
+          .receipt {
+            letter-spacing: 0;
+            color: #000000;
+            text-shadow: ${darkness.textShadow};
+          }
+
+          .receipt-divider {
+            height: 1px;
+            margin: 1.5mm 0;
+            border-top: 1px dashed #000000;
+          }
+
+          .receipt-divider--top {
+            margin-top: 0;
+          }
+
+          .receipt-header strong,
+          .receipt-title strong {
+            font-size: 1.2em;
+            text-transform: uppercase;
+          }
+
+          .receipt-title span {
+            font-size: 1.55em;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+
+          .receipt-title small {
+            font-size: 0.95em;
+          }
+
+          .receipt-order-number {
+            padding: 1mm 0;
+            text-align: center;
+            font-size: 2.2em;
+            line-height: 1;
+          }
+
+          .receipt-header span,
+          .receipt-title span,
+          .receipt-title small,
+          .receipt-qr span,
+          .receipt-qr small {
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-section h3 {
+            margin: 0;
+            font-size: 1.42em;
+            font-weight: 400;
+          }
+
+          .receipt-section p {
+            margin: 0;
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-section p span {
+            font-weight: 700;
+          }
+
+          .receipt-row {
+            display: grid;
+            grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr);
+            gap: 2mm;
+            align-items: start;
+          }
+
+          .receipt-row span {
+            text-transform: uppercase;
+          }
+
+          .receipt-row strong {
+            text-align: right;
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-row--total {
+            margin-top: 1mm;
+            padding-top: 1.5mm;
+            border-top: 1px solid #000000;
+            font-size: 1.15em;
+          }
+
+          .receipt-items {
+            display: grid;
+            gap: 2mm;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+          }
+
+          .receipt-item {
+            display: grid;
+            gap: 0.6mm;
+          }
+
+          .receipt-item__line {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 3mm;
+            align-items: start;
+          }
+
+          .receipt-item__line span,
+          .receipt-item__line strong {
+            font-weight: 700;
+          }
+
+          .receipt-item__line span {
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-item__detail {
+            display: flex;
+            justify-content: space-between;
+            gap: 3mm;
+            padding-left: 3mm;
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-item__separator {
+            width: 36%;
+            margin: 1mm auto;
+            border-top: 1px dashed #000000;
+          }
+
+          .receipt-powered {
+            display: grid;
+            gap: 0.6mm;
+            padding-top: 2mm;
+            text-align: center;
+          }
+
+          .receipt-note strong {
+            overflow-wrap: anywhere;
+          }
+
+          .receipt-qr__code {
+            display: grid;
+            place-items: center;
+            justify-self: center;
+            width: min(45mm, 70vw);
+            aspect-ratio: 1;
+            border: 3mm solid #000000;
+            background:
+              linear-gradient(90deg, #000 10%, transparent 10% 20%, #000 20% 30%, transparent 30% 40%, #000 40% 50%, transparent 50% 60%, #000 60% 70%, transparent 70% 80%, #000 80% 90%, transparent 90%),
+              linear-gradient(#000 10%, transparent 10% 20%, #000 20% 30%, transparent 30% 40%, #000 40% 50%, transparent 50% 60%, #000 60% 70%, transparent 70% 80%, #000 80% 90%, transparent 90%),
+              #ffffff;
+            background-size: 9mm 9mm;
+            color: #000000;
+            font-weight: 900;
+            font-size: 1.4em;
+          }
+
+          @media print {
+            body {
+              margin: 0;
+            }
+
+            .receipt-copy + .receipt-copy {
+              break-before: page;
+            }
+          }
+        </style>
+      </head>
+      <body>${copyHtml}</body>
+    </html>`
+}
+
+function openPrintWindow(printDocument, config = {}) {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const printWindow = window.open('', '_blank', 'popup=yes,width=420,height=760')
+
+  if (!printWindow) {
+    return false
+  }
+
+  printWindow.document.open()
+  printWindow.document.write(buildPrintHtml(printDocument, config))
+  printWindow.document.close()
+  printWindow.focus()
+  printWindow.setTimeout(() => {
+    printWindow.focus()
+    printWindow.print()
+  }, 180)
+  return true
+}
+
 async function copyText(value) {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value)
@@ -2097,6 +2985,233 @@ function ordersToCsv(orders) {
   ]
 
   return lines.join('\n')
+}
+
+function getNextOrderId(orders = []) {
+  const maxOrderNumber = orders
+    .map((order) => Number(order.id))
+    .filter(Number.isFinite)
+    .reduce((max, orderNumber) => Math.max(max, orderNumber), 8300)
+
+  return String(maxOrderNumber + 1)
+}
+
+function toBackendMoney(value) {
+  return Number((Number(value) || 0).toFixed(2))
+}
+
+function truncateText(value, maxLength = 180) {
+  const text = String(value ?? '').trim()
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text
+}
+
+function isBackendUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
+}
+
+function formatBackendOrderTime(value) {
+  const parsed = value ? new Date(value) : null
+
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return nowTime()
+  }
+
+  return parsed.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function getBackendLocalReference(order = {}) {
+  const note = String(order.note || '')
+  const [, localId] = note.match(/Pedido local #([^|\n]+)/i) || []
+
+  return localId ? localId.trim() : ''
+}
+
+function getBackendNoteValue(note = '', label = '') {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const [, value] = String(note || '').match(new RegExp(`${escapedLabel}:\\s*([^|\\n]+)`, 'i')) || []
+
+  return value ? value.trim() : ''
+}
+
+function getPilotStatusMeta(sync = {}) {
+  const normalized = normalizePilotSync(sync)
+
+  if (!normalized.enabled) {
+    return { tone: 'muted', label: 'Piloto off', description: 'Sincronizacao desligada' }
+  }
+
+  const byStatus = {
+    checking: { tone: 'warning', label: 'Checando API', description: normalized.message },
+    syncing: { tone: 'warning', label: 'Sincronizando', description: normalized.message },
+    online: { tone: 'success', label: 'Piloto online', description: normalized.message },
+    offline: { tone: 'danger', label: 'API offline', description: normalized.message },
+    error: { tone: 'danger', label: 'Erro no piloto', description: normalized.message },
+  }
+
+  return byStatus[normalized.status] || { tone: 'neutral', label: 'Piloto pronto', description: normalized.message }
+}
+
+function getOrderSyncMeta(order = {}) {
+  if (order.backendId && order.syncStatus !== 'pending' && order.syncStatus !== 'failed') {
+    return { tone: 'success', label: 'API', description: order.syncedAt ? `Sincronizado ${order.syncedAt}` : 'Sincronizado com backend' }
+  }
+
+  if (order.syncStatus === 'pending') {
+    return { tone: 'warning', label: 'Pendente', description: order.syncMessage || 'Aguardando sincronizacao' }
+  }
+
+  if (order.syncStatus === 'failed') {
+    return { tone: 'danger', label: 'Falhou', description: order.syncMessage || 'Falha ao sincronizar' }
+  }
+
+  return { tone: 'muted', label: 'Local', description: 'Salvo apenas no navegador' }
+}
+
+function buildBackendOrderNote(order = {}) {
+  const receiptItems = getReceiptItems(order)
+  const itemDetails = receiptItems
+    .map((item) => {
+      const details = Array.isArray(item.details) && item.details.length > 0
+        ? ` (${item.details.join(', ')})`
+        : ''
+
+      return `${item.qty}x ${item.name}${details}`
+    })
+    .join(' | ')
+  const noteParts = [
+    `Pedido local #${order.id}`,
+    `Origem: ${getOrderSource(order)}`,
+    order.address ? `Endereco: ${order.address}` : '',
+    order.deliveryZoneName ? `Zona: ${order.deliveryZoneName}` : '',
+    order.document ? `Documento: ${order.document}` : '',
+    order.note ? `Obs: ${order.note}` : '',
+    itemDetails ? `Itens: ${itemDetails}` : '',
+  ].filter(Boolean)
+
+  return truncateText(noteParts.join(' | '), 1200)
+}
+
+function frontOrderToBackendRequest(order = {}) {
+  const normalizedOrder = normalizeOrderRecord(order)
+  const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
+  const receiptItems = getReceiptItems(normalizedOrder)
+  const fallbackSubtotal = financialBreakdown.subtotal || normalizedOrder.total || 0
+  const totalQuantity = receiptItems.reduce((sum, item) => sum + Math.max(1, Number(item.qty) || 1), 0) || 1
+  const fallbackUnitPrice = fallbackSubtotal / totalQuantity
+  const items = receiptItems.length > 0
+    ? receiptItems.map((item) => {
+        const quantity = Math.max(1, Number(item.qty) || 1)
+        const totalPrice = item.price === null || item.price === undefined
+          ? fallbackUnitPrice * quantity
+          : Number(item.price) || 0
+        const details = Array.isArray(item.details) && item.details.length > 0 ? ` - ${item.details.join(', ')}` : ''
+
+        return {
+          productName: truncateText(`${item.name || 'Item do pedido'}${details}`, 220),
+          quantity,
+          unitPrice: toBackendMoney(totalPrice / quantity),
+        }
+      })
+    : [{
+        productName: 'Item do pedido',
+        quantity: 1,
+        unitPrice: toBackendMoney(fallbackSubtotal),
+      }]
+
+  return {
+    customerName: truncateText(normalizedOrder.customer || 'Cliente balcao', 120),
+    customerPhone: truncateText(normalizedOrder.phone || '', 40),
+    fulfillment: inferOrderFulfillment(normalizedOrder),
+    payment: truncateText(String(normalizedOrder.payment || 'Cartao'), 80),
+    note: buildBackendOrderNote(normalizedOrder),
+    deliveryFee: toBackendMoney(financialBreakdown.deliveryFee),
+    items,
+  }
+}
+
+function backendOrderToFrontOrder(order = {}) {
+  const localReference = getBackendLocalReference(order)
+  const noteAddress = getBackendNoteValue(order.note, 'Endereco')
+  const noteSource = getBackendNoteValue(order.note, 'Origem')
+  const items = Array.isArray(order.items) ? order.items : []
+  const mappedItems = items.map((item) => `${item.quantity || 1}x ${item.productName || 'Item do pedido'}`)
+  const printItems = items.map((item) => ({
+    qty: item.quantity || 1,
+    name: item.productName || 'Item do pedido',
+    details: [],
+    price: Number(item.totalPrice ?? item.unitPrice ?? 0) || 0,
+  }))
+  const fulfillment = order.fulfillment || 'pickup'
+
+  return normalizeOrderRecord({
+    id: localReference || `api-${String(order.id || Date.now()).slice(0, 8)}`,
+    backendId: order.id || '',
+    backendCreatedAt: order.createdAt || '',
+    backendUpdatedAt: order.updatedAt || '',
+    customer: order.customerName || 'Cliente API',
+    phone: order.customerPhone || '',
+    channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
+    fulfillment,
+    source: noteSource || 'API',
+    status: order.status || 'analysis',
+    subtotal: Number(order.subtotal) || 0,
+    deliveryFee: formatCurrencyInput(Number(order.deliveryFee) || 0),
+    total: Number(order.total) || 0,
+    payment: order.payment || 'Cartao',
+    time: formatBackendOrderTime(order.createdAt),
+    address: noteAddress || (fulfillment === 'delivery' ? 'Endereco registrado na API' : fulfillment === 'dinein' ? 'Consumir no local' : 'Retirada no balcao'),
+    note: order.note || 'Pedido carregado da API.',
+    items: mappedItems.length > 0 ? mappedItems : ['Item do pedido'],
+    printItems,
+    syncStatus: 'synced',
+    syncMessage: 'Sincronizado com API',
+    syncedAt: nowDateTime(),
+  })
+}
+
+function mergeBackendOrderIntoLocal(localOrder, backendOrder) {
+  const mapped = backendOrderToFrontOrder(backendOrder)
+
+  return normalizeOrderRecord({
+    ...localOrder,
+    backendId: mapped.backendId,
+    backendCreatedAt: mapped.backendCreatedAt,
+    backendUpdatedAt: mapped.backendUpdatedAt,
+    status: mapped.status || localOrder.status,
+    syncStatus: 'synced',
+    syncMessage: 'Sincronizado com API',
+    syncedAt: nowDateTime(),
+  })
+}
+
+function mergeBackendOrders(localOrders = [], backendOrders = []) {
+  const backendById = new Map(backendOrders.map((order) => [order.id, order]))
+  const backendByLocalReference = new Map(
+    backendOrders
+      .map((order) => [getBackendLocalReference(order), order])
+      .filter(([localReference]) => Boolean(localReference)),
+  )
+  const usedBackendIds = new Set()
+  const mergedLocalOrders = localOrders.map((localOrder) => {
+    const backendOrder = (localOrder.backendId && backendById.get(localOrder.backendId))
+      || backendByLocalReference.get(String(localOrder.id))
+
+    if (!backendOrder) {
+      return localOrder
+    }
+
+    usedBackendIds.add(backendOrder.id)
+    return mergeBackendOrderIntoLocal(localOrder, backendOrder)
+  })
+  const addedBackendOrders = backendOrders
+    .filter((order) => !usedBackendIds.has(order.id))
+    .map(backendOrderToFrontOrder)
+
+  return [...mergedLocalOrders, ...addedBackendOrders]
 }
 
 function Icon({ name, size = 20, className = '' }) {
@@ -2757,7 +3872,9 @@ function Sidebar({
   )
 }
 
-function TopBar({ currentStoreUser, onLogout, onOpenModal, notificationCount }) {
+function TopBar({ currentStoreUser, onLogout, onOpenModal, notificationCount, pilotSync }) {
+  const pilotStatus = getPilotStatusMeta(pilotSync)
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -2784,6 +3901,15 @@ function TopBar({ currentStoreUser, onLogout, onOpenModal, notificationCount }) 
       </div>
 
       <div className="topbar-actions">
+        <button
+          className={`topbar-action topbar-action--pilot topbar-action--${pilotStatus.tone}`.trim()}
+          data-testid="open-pilot"
+          type="button"
+          onClick={() => onOpenModal('pilot')}
+        >
+          <Icon name="chain" size={19} />
+          <span>{pilotStatus.label}</span>
+        </button>
         <button className="topbar-action" data-testid="open-automations" type="button" onClick={() => onOpenModal('automations')}>
           <Icon name="bolt" size={19} />
           <span>Automacoes</span>
@@ -2921,8 +4047,9 @@ function Toolbar({
   )
 }
 
-function OrderCard({ order, stage, onOpenModal, onMoveOrder }) {
+function OrderCard({ order, stage, onOpenModal, onMoveOrder, onPrintOrder }) {
   const fulfillmentMeta = getOrderFulfillmentMeta(order)
+  const syncMeta = getOrderSyncMeta(order)
 
   return (
     <article className="order-card" data-testid={`order-${order.id}`}>
@@ -2947,10 +4074,18 @@ function OrderCard({ order, stage, onOpenModal, onMoveOrder }) {
           <Icon name="card" size={15} />
           {order.payment}
         </span>
+        <span className={`order-card__sync order-card__sync--${syncMeta.tone}`.trim()} title={syncMeta.description}>
+          <Icon name={syncMeta.tone === 'success' ? 'check' : syncMeta.tone === 'danger' ? 'x' : 'chain'} size={15} />
+          {syncMeta.label}
+        </span>
       </div>
       <p>{order.items.join(', ')}</p>
       <footer>
         <Button onClick={() => onOpenModal('orderDetails', order)}>Detalhes</Button>
+        <Button onClick={() => onPrintOrder(order, 'order')}>
+          <Icon name="printer" size={14} />
+          Imprimir
+        </Button>
         <Button data-testid={`edit-order-${order.id}`} onClick={() => onOpenModal('editOrder', order)}>
           <Icon name="edit" size={14} />
           Editar
@@ -2976,7 +4111,7 @@ function OrderCard({ order, stage, onOpenModal, onMoveOrder }) {
   )
 }
 
-function StageColumn({ stage, orders, onOpenModal, onMoveOrder }) {
+function StageColumn({ stage, orders, onOpenModal, onMoveOrder, onPrintOrder }) {
   return (
     <article className={`stage-card stage-card--${stage.tone}`}>
       <header className="stage-card__header">
@@ -2999,6 +4134,7 @@ function StageColumn({ stage, orders, onOpenModal, onMoveOrder }) {
               stage={stage}
               onOpenModal={onOpenModal}
               onMoveOrder={onMoveOrder}
+              onPrintOrder={onPrintOrder}
             />
           ))
         ) : (
@@ -3013,7 +4149,7 @@ function StageColumn({ stage, orders, onOpenModal, onMoveOrder }) {
   )
 }
 
-function Board({ visibleOrders, onOpenModal, onMoveOrder }) {
+function Board({ visibleOrders, onOpenModal, onMoveOrder, onPrintOrder }) {
   return (
     <section className="board" aria-label="Fluxo de pedidos">
       {stages.map((stage) => (
@@ -3023,6 +4159,7 @@ function Board({ visibleOrders, onOpenModal, onMoveOrder }) {
           orders={visibleOrders.filter((order) => order.status === stage.id)}
           onOpenModal={onOpenModal}
           onMoveOrder={onMoveOrder}
+          onPrintOrder={onPrintOrder}
         />
       ))}
     </section>
@@ -3375,7 +4512,7 @@ function ServiceInbox({ orders, chatMessages, onOpenModal }) {
 }
 
 function MenuPreviewPanel({ storeProfile, categories, products, coupons, qrCodes, onOpenModal }) {
-  const activeProducts = products.filter((product) => product.active)
+  const activeProducts = products.filter(isProductAvailable)
   const [previewProductId, setPreviewProductId] = useState(activeProducts[0]?.id || null)
 
   useEffect(() => {
@@ -3740,7 +4877,7 @@ function ReportsDeepDive({ orders, products, tables, finance, coupons, recoverie
             </article>
             <article>
               <span>Produtos ativos</span>
-              <strong>{products.filter((product) => product.active).length}</strong>
+              <strong>{products.filter(isProductAvailable).length}</strong>
             </article>
             <article>
               <span>Mesas ocupadas</span>
@@ -3809,7 +4946,7 @@ function IntegrationStudio({ integrations, onOpenModal }) {
 }
 
 function CounterSection({ products, cart, onAddCart, onRemoveCart, onClearCart, onOpenModal }) {
-  const activeProducts = products.filter((product) => product.active)
+  const activeProducts = products.filter(isProductAvailable)
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0)
 
   return (
@@ -3830,7 +4967,7 @@ function CounterSection({ products, cart, onAddCart, onRemoveCart, onClearCart, 
             <button type="button" key={product.id} onClick={() => onAddCart(product)}>
               <span>
                 <strong>{product.name}</strong>
-                <small>{product.category} - estoque {product.stock}</small>
+                <small>{product.category}</small>
               </span>
               <b>{formatCurrency(product.price)}</b>
             </button>
@@ -3920,7 +5057,7 @@ function MenuSection({
   const qualityPercent = Math.min(
     98,
     Math.round(
-      ((products.filter((product) => product.active).length + categories.filter((category) => category.active).length) /
+      ((products.filter(isProductAvailable).length + categories.filter((category) => category.active).length) /
         Math.max(products.length + categories.length, 1)) *
         100,
     ),
@@ -3933,7 +5070,7 @@ function MenuSection({
           return null
         }
 
-        const allCategoryProducts = products.filter((product) => product.category === category.name)
+        const allCategoryProducts = products.filter((product) => productAppearsInCategory(product, category.name))
         const categoryNameMatches = normalizedSearch.length > 0 && category.name.toLowerCase().includes(normalizedSearch)
         const visibleProducts = normalizedSearch && !categoryNameMatches
           ? allCategoryProducts.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
@@ -4016,7 +5153,7 @@ function MenuSection({
                   <div className="menu-category-card__lead">
                     <div className="menu-category-card__meta">
                       <h3>{category.name}</h3>
-                      <small>{totalProducts} item(ns) principais</small>
+                      <small>{totalProducts} item(ns) exibidos</small>
                     </div>
 
                     <button
@@ -4027,15 +5164,23 @@ function MenuSection({
                       <Icon name="plus" size={16} />
                       Adicionar item
                     </button>
+                    <button
+                      className="menu-inline-action"
+                      type="button"
+                      onClick={() => onOpenModal('importProducts', { category: category.name })}
+                    >
+                      <Icon name="plus" size={16} />
+                      Importar de
+                    </button>
                   </div>
 
                   <div className="menu-category-card__tools">
                     <div className="menu-toggle-group">
-                      <span>Esgotar tudo</span>
+                      <span>{category.active ? 'Esgotar tudo' : 'Esgotada'}</span>
                       <button
-                        className={`mini-toggle ${category.active ? '' : 'is-off'}`.trim()}
+                        className={`mini-toggle ${category.active ? 'is-off' : ''}`.trim()}
                         type="button"
-                        aria-label={`Ativar categoria ${category.name}`}
+                        aria-label={`${category.active ? 'Esgotar' : 'Disponibilizar'} categoria ${category.name}`}
                         onClick={() => onToggleCategory(category.id)}
                       />
                     </div>
@@ -4066,10 +5211,12 @@ function MenuSection({
                 {isCategoryExpanded ? (
                   <div className="menu-category-card__body">
                     {visibleProducts.length > 0 ? visibleProducts.map((product) => {
-                      const thumbClass = getMenuProductThumbClass(product)
-                      const isProductExpanded = normalizedSearch ? true : Boolean(expandedProducts[product.id])
+      const thumbClass = getMenuProductThumbClass(product)
+      const isProductExpanded = normalizedSearch ? true : Boolean(expandedProducts[product.id])
+      const isProductExhausted = isProductExhaustedInCategory(product, category.name)
+      const sourceLabel = product.category === category.name ? 'Principal' : `Importado de ${product.category}`
 
-                      return (
+      return (
                         <article className={`menu-product-card ${isProductExpanded ? 'is-open' : ''}`.trim()} key={product.id}>
                           <div className="menu-product-row" data-testid={`product-${product.id}`}>
                             <span className="drag-handle" aria-hidden="true" />
@@ -4077,7 +5224,7 @@ function MenuSection({
 
                             <div className="menu-product-row__name">
                               <strong>{product.name}</strong>
-                              <small>{product.category} - {product.stock} em estoque</small>
+                              <small>{sourceLabel}</small>
                             </div>
 
                             <div className="menu-product-row__controls">
@@ -4103,12 +5250,12 @@ function MenuSection({
                               </Button>
 
                               <div className="menu-toggle-group menu-toggle-group--compact">
-                                <span>Esgotar</span>
+                                <span>{isProductExhausted ? 'Esgotado' : 'Esgotar'}</span>
                                 <button
-                                  className={`mini-toggle ${product.active ? '' : 'is-off'}`.trim()}
+                                  className={`mini-toggle ${isProductExhausted ? '' : 'is-off'}`.trim()}
                                   type="button"
-                                  aria-label={`Esgotar ${product.name}`}
-                                  onClick={() => onToggleProduct(product.id)}
+                                  aria-label={`${isProductExhausted ? 'Disponibilizar' : 'Esgotar'} ${product.name} em ${category.name}`}
+                                  onClick={() => onToggleProduct(product.id, category.name)}
                                 />
                               </div>
 
@@ -4209,9 +5356,9 @@ function MenuSection({
                                     <input
                                       className="menu-option-row__price"
                                       inputMode="decimal"
-                                      value={String(flavor.price).replace('.', ',')}
+                                      value={formatCurrencyInput(flavor.price)}
                                       onChange={(event) => onUpdateProductFlavor(product.id, flavor.id, {
-                                        price: Number(String(event.target.value).replace(',', '.')) || 0,
+                                        price: parseCurrencyInput(formatCurrencyTypingInput(event.target.value)),
                                       })}
                                     />
                                     <span className="menu-option-row__limit">Max. {product.maxFlavors}</span>
@@ -4356,9 +5503,9 @@ function MenuSection({
                                               <input
                                                 className="menu-option-row__price"
                                                 inputMode="decimal"
-                                                value={String(option.price).replace('.', ',')}
+                                                value={formatCurrencyInput(option.price)}
                                                 onChange={(event) => onUpdateProductAddonOption(product.id, group.id, option.id, {
-                                                  price: Number(String(event.target.value).replace(',', '.')) || 0,
+                                                  price: parseCurrencyInput(formatCurrencyTypingInput(event.target.value)),
                                                 })}
                                               />
                                               <span className="menu-option-row__limit">Max. {group.maxSelect}</span>
@@ -4531,9 +5678,11 @@ function DeliverySection({ orders, couriers, deliveryZones, onToggleCourier, onO
   )
 }
 
-function ReportsSection({ orders, products, tables, finance, coupons, recoveries, onOpenModal }) {
+function ReportsSection({ orders, products, tables, finance, coupons, recoveries, pilotSync, onOpenModal }) {
   const completed = orders.filter((order) => order.status === 'completed')
   const revenue = orders.reduce((sum, order) => sum + order.total, 0)
+  const pendingSyncCount = orders.filter((order) => !order.backendId || order.syncStatus === 'pending' || order.syncStatus === 'failed').length
+  const pilotStatus = getPilotStatusMeta(pilotSync)
 
   return (
     <section className="module-grid module-grid--reports">
@@ -4550,6 +5699,27 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
           <div><span>Concluidos</span><strong>{completed.length}</strong></div>
           <div><span>Produtos</span><strong>{products.length}</strong></div>
           <div><span>Mesas ativas</span><strong>{tables.filter((table) => table.status !== 'free').length}</strong></div>
+        </div>
+      </article>
+      <article className="module-card">
+        <header className="module-card__header">
+          <div>
+            <h2>Teste controlado</h2>
+            <p>Status do backend, backup e fila de sincronizacao.</p>
+          </div>
+          <Button variant="primary" onClick={() => onOpenModal('pilot')}>Abrir piloto</Button>
+        </header>
+        <div className="pilot-mini">
+          <div>
+            <span>API</span>
+            <strong>{pilotStatus.label}</strong>
+            <small>{pilotSync.storeName || API_BASE_URL}</small>
+          </div>
+          <div>
+            <span>Pendentes</span>
+            <strong>{pendingSyncCount}</strong>
+            <small>{pilotSync.lastSyncedAt ? `Ultimo sync ${pilotSync.lastSyncedAt}` : 'Ainda sem sync'}</small>
+          </div>
         </div>
       </article>
       <article className="module-card">
@@ -5016,6 +6186,7 @@ function App() {
   const [tables, setTables] = useState(initialData.tables)
   const [couriers, setCouriers] = useState(initialData.couriers)
   const [productForm, setProductForm] = useState(blankProduct)
+  const [importProductsForm, setImportProductsForm] = useState(blankImportProducts)
   const [flavorForm, setFlavorForm] = useState(blankFlavor)
   const [categoryForm, setCategoryForm] = useState(blankCategory)
   const [tableForm, setTableForm] = useState(blankTable)
@@ -5045,13 +6216,9 @@ function App() {
   const [storeAddressLookup, setStoreAddressLookup] = useState({ status: 'idle', message: '' })
   const [storeMapMode, setStoreMapMode] = useState('view')
   const storeFormRef = useRef(initialData.storeProfile)
-  const [printerConfig, setPrinterConfig] = useState(initialData.printerConfig)
-  const [printerForm, setPrinterForm] = useState({
-    deviceName: initialData.printerConfig.deviceName,
-    copies: String(initialData.printerConfig.copies),
-    paper: initialData.printerConfig.paper,
-    connected: initialData.printerConfig.connected ? 'yes' : 'no',
-  })
+  const [printerConfig, setPrinterConfig] = useState(normalizePrinterConfig(initialData.printerConfig))
+  const [printerForm, setPrinterForm] = useState(printerConfigToForm(initialData.printerConfig))
+  const [pilotSync, setPilotSync] = useState(normalizePilotSync(initialData.pilotSync))
   const [security, setSecurity] = useState(initialData.security)
   const [storeUsers, setStoreUsers] = useState(initialData.storeUsers)
   const [currentStoreUser, setCurrentStoreUser] = useState(initialWorkspace.currentStoreUser)
@@ -5072,8 +6239,7 @@ function App() {
   const [eventLog, setEventLog] = useState(initialData.eventLog)
   const [dataImportError, setDataImportError] = useState('')
   const activeTitle = navItems.find((item) => item.id === activeNav)?.label ?? 'Pedidos'
-  const lowStockCount = inventory.filter((item) => item.quantity <= item.min).length
-  const notificationCount = Math.min(9, blockedOrders.length + lowStockCount)
+  const notificationCount = Math.min(9, blockedOrders.length)
   const isStoreReady = Boolean(activeStoreId) && isStoreConfigured(storeProfile) && storeUsers.length > 0
   const hasValidStoreSession = currentStoreUser?.storeId === activeStoreId
 
@@ -5128,6 +6294,7 @@ function App() {
     deliveryZones,
     storeProfile,
     printerConfig,
+    pilotSync,
     security,
     storeUsers,
     botConfig,
@@ -5160,6 +6327,7 @@ function App() {
     deliveryZones,
     storeProfile,
     printerConfig,
+    pilotSync,
     security,
     storeUsers,
     botConfig,
@@ -5287,6 +6455,11 @@ function App() {
       setProductForm({ ...blankProduct, category: fallbackCategory })
     }
 
+    if (type === 'importProducts' && payload?.category) {
+      const sourceCategory = categories.find((category) => category.name !== payload.category)?.name || ''
+      setImportProductsForm({ sourceCategory, productIds: [] })
+    }
+
     if (type === 'newFlavor') {
       setFlavorForm(blankFlavor)
     }
@@ -5362,7 +6535,7 @@ function App() {
         unit: payload.unit,
         quantity: String(payload.quantity),
         min: String(payload.min),
-        cost: String(payload.cost).replace('.', ','),
+        cost: formatCurrencyInput(payload.cost),
       })
     }
 
@@ -5374,7 +6547,7 @@ function App() {
       setFinanceForm({
         title: payload.title,
         type: payload.type,
-        amount: String(payload.amount).replace('.', ','),
+        amount: formatCurrencyInput(payload.amount),
         status: payload.status,
       })
     }
@@ -5430,12 +6603,7 @@ function App() {
     }
 
     if (type === 'printer') {
-      setPrinterForm({
-        deviceName: printerConfig.deviceName,
-        copies: String(printerConfig.copies),
-        paper: printerConfig.paper,
-        connected: printerConfig.connected ? 'yes' : 'no',
-      })
+      setPrinterForm(printerConfigToForm(printerConfig))
     }
 
     if (type === 'botTraining') {
@@ -5486,6 +6654,322 @@ function App() {
       { id: `evt-${Date.now()}-${current.length}`, message, time: nowDateTime(), tone },
       ...current,
     ].slice(0, 60))
+  }
+
+  function updatePilotSync(partial) {
+    setPilotSync((current) => normalizePilotSync({ ...current, ...partial }))
+  }
+
+  function markOrderSyncState(orderId, partial) {
+    setOrders((current) =>
+      current.map((order) => (
+        order.id === orderId
+          ? normalizeOrderRecord({ ...order, ...partial })
+          : order
+      )),
+    )
+  }
+
+  async function ensurePilotStoreId() {
+    if (pilotSync.storeId) {
+      return pilotSync.storeId
+    }
+
+    const workspace = await loadBackendWorkspace()
+
+    if (!workspace.store) {
+      throw new Error('Nenhuma loja cadastrada no backend.')
+    }
+
+    updatePilotSync({
+      enabled: true,
+      status: 'online',
+      storeId: workspace.store.id,
+      storeName: workspace.store.tradeName,
+      lastCheckedAt: nowDateTime(),
+      message: `Conectado em ${workspace.store.tradeName}.`,
+    })
+
+    return workspace.store.id
+  }
+
+  async function refreshPilotFromBackend({ enable = false, silent = false } = {}) {
+    updatePilotSync({
+      enabled: enable ? true : pilotSync.enabled,
+      status: 'checking',
+      message: 'Consultando API e pedidos recentes...',
+    })
+
+    try {
+      const workspace = await loadBackendWorkspace(pilotSync.storeId)
+
+      if (!workspace.store) {
+        throw new Error('Backend respondeu, mas nao encontrou loja cadastrada.')
+      }
+
+      setOrders((current) => mergeBackendOrders(current, workspace.orders))
+      updatePilotSync({
+        enabled: enable ? true : pilotSync.enabled,
+        status: 'online',
+        storeId: workspace.store.id,
+        storeName: workspace.store.tradeName,
+        lastCheckedAt: nowDateTime(),
+        lastSyncedAt: nowDateTime(),
+        message: `${workspace.orders.length} pedido(s) lido(s) da API.`,
+      })
+
+      if (!silent) {
+        notify(`API conectada: ${workspace.store.tradeName}.`)
+      }
+
+      return workspace
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nao foi possivel consultar a API.'
+      updatePilotSync({
+        enabled: enable ? true : pilotSync.enabled,
+        status: 'offline',
+        lastCheckedAt: nowDateTime(),
+        message,
+      })
+
+      if (!silent) {
+        notify(`Backend indisponivel: ${message}`, 'warning')
+      }
+
+      return null
+    }
+  }
+
+  async function connectPilotSync() {
+    await refreshPilotFromBackend({ enable: true })
+  }
+
+  function disablePilotSync() {
+    setPilotSync((current) => normalizePilotSync({
+      ...current,
+      enabled: false,
+      status: 'idle',
+      message: 'Modo piloto desligado. Os proximos pedidos ficarao locais.',
+    }))
+    notify('Modo piloto desligado.')
+  }
+
+  async function syncSingleOrderToBackend(order, { storeId = '', silent = false } = {}) {
+    const normalizedOrder = normalizeOrderRecord(order)
+    const localOrderId = normalizedOrder.id
+
+    if (!pilotSync.enabled && !storeId) {
+      markOrderSyncState(localOrderId, {
+        syncStatus: 'pending',
+        syncMessage: 'Modo piloto desligado.',
+      })
+      return false
+    }
+
+    markOrderSyncState(localOrderId, {
+      syncStatus: 'pending',
+      syncMessage: 'Sincronizando com API...',
+    })
+    updatePilotSync({
+      status: 'syncing',
+      message: `Sincronizando pedido #${localOrderId}...`,
+    })
+
+    try {
+      const targetStoreId = storeId || await ensurePilotStoreId()
+      const requestBody = frontOrderToBackendRequest(normalizedOrder)
+      let savedOrder = null
+
+      if (isBackendUuid(normalizedOrder.backendId)) {
+        savedOrder = await updateBackendOrder(targetStoreId, normalizedOrder.backendId, requestBody)
+      } else {
+        savedOrder = await createBackendOrder(targetStoreId, requestBody)
+      }
+
+      if (savedOrder?.id && savedOrder.status !== normalizedOrder.status) {
+        savedOrder = await updateBackendOrderStatus(targetStoreId, savedOrder.id, normalizedOrder.status)
+      }
+
+      markOrderSyncState(localOrderId, {
+        backendId: savedOrder?.id || normalizedOrder.backendId,
+        backendCreatedAt: savedOrder?.createdAt || normalizedOrder.backendCreatedAt || '',
+        backendUpdatedAt: savedOrder?.updatedAt || normalizedOrder.backendUpdatedAt || '',
+        status: savedOrder?.status || normalizedOrder.status,
+        syncStatus: 'synced',
+        syncMessage: 'Sincronizado com API',
+        syncedAt: nowDateTime(),
+      })
+      updatePilotSync({
+        status: 'online',
+        lastSyncedAt: nowDateTime(),
+        message: `Pedido #${localOrderId} sincronizado.`,
+      })
+
+      if (!silent) {
+        notify(`Pedido #${localOrderId} sincronizado com a API.`)
+      }
+
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao sincronizar pedido.'
+      markOrderSyncState(localOrderId, {
+        syncStatus: 'failed',
+        syncMessage: message,
+      })
+      updatePilotSync({
+        status: 'error',
+        lastCheckedAt: nowDateTime(),
+        message,
+      })
+
+      if (!silent) {
+        notify(`Pedido #${localOrderId} ficou pendente: ${message}`, 'warning')
+      }
+
+      return false
+    }
+  }
+
+  async function syncOrderStatusToBackend(order, nextStatus) {
+    const normalizedOrder = normalizeOrderRecord({ ...order, status: nextStatus })
+
+    if (!pilotSync.enabled || !pilotSync.syncOnStatusChange) {
+      markOrderSyncState(normalizedOrder.id, {
+        syncStatus: normalizedOrder.backendId ? normalizedOrder.syncStatus : 'pending',
+        syncMessage: 'Status alterado apenas localmente.',
+      })
+      return false
+    }
+
+    if (!isBackendUuid(normalizedOrder.backendId)) {
+      return syncSingleOrderToBackend(normalizedOrder, { silent: true })
+    }
+
+    try {
+      const targetStoreId = await ensurePilotStoreId()
+      const savedOrder = await updateBackendOrderStatus(targetStoreId, normalizedOrder.backendId, nextStatus)
+      markOrderSyncState(normalizedOrder.id, {
+        backendUpdatedAt: savedOrder?.updatedAt || normalizedOrder.backendUpdatedAt || '',
+        status: savedOrder?.status || nextStatus,
+        syncStatus: 'synced',
+        syncMessage: 'Status sincronizado com API',
+        syncedAt: nowDateTime(),
+      })
+      updatePilotSync({
+        status: 'online',
+        lastSyncedAt: nowDateTime(),
+        message: `Status do pedido #${normalizedOrder.id} sincronizado.`,
+      })
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao sincronizar status.'
+      markOrderSyncState(normalizedOrder.id, {
+        syncStatus: 'failed',
+        syncMessage: message,
+      })
+      updatePilotSync({
+        status: 'error',
+        message,
+      })
+      notify(`Status do pedido #${normalizedOrder.id} ficou pendente.`, 'warning')
+      return false
+    }
+  }
+
+  async function deleteOrderFromBackend(order) {
+    if (!pilotSync.enabled || !isBackendUuid(order?.backendId)) {
+      return true
+    }
+
+    try {
+      const targetStoreId = await ensurePilotStoreId()
+      await deleteBackendOrder(targetStoreId, order.backendId)
+      updatePilotSync({
+        status: 'online',
+        lastSyncedAt: nowDateTime(),
+        message: `Pedido #${order.id} removido da API.`,
+      })
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao remover pedido na API.'
+      updatePilotSync({ status: 'error', message })
+      notify(`Pedido apagado localmente, mas a API nao removeu: ${message}`, 'warning')
+      return false
+    }
+  }
+
+  async function syncPendingOrders() {
+    const pendingOrders = orders.filter((order) => !order.backendId || order.syncStatus === 'pending' || order.syncStatus === 'failed')
+
+    if (pendingOrders.length === 0) {
+      notify('Nao ha pedidos pendentes para sincronizar.')
+      return
+    }
+
+    updatePilotSync({
+      enabled: true,
+      status: 'syncing',
+      message: `Sincronizando ${pendingOrders.length} pedido(s)...`,
+    })
+
+    try {
+      const targetStoreId = await ensurePilotStoreId()
+      let syncedCount = 0
+
+      for (const order of pendingOrders) {
+        const synced = await syncSingleOrderToBackend(order, { storeId: targetStoreId, silent: true })
+        if (synced) {
+          syncedCount += 1
+        }
+      }
+
+      await refreshPilotFromBackend({ silent: true, enable: true })
+      notify(`${syncedCount}/${pendingOrders.length} pedido(s) sincronizado(s) com a API.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao iniciar sincronizacao.'
+      updatePilotSync({ status: 'error', message })
+      notify(`Sincronizacao interrompida: ${message}`, 'warning')
+    }
+  }
+
+  async function sendPilotLog() {
+    try {
+      const targetStoreId = await ensurePilotStoreId()
+      await createBackendLog({
+        storeId: targetStoreId,
+        level: 'INFO',
+        area: 'pilot',
+        message: `Teste controlado pelo front em ${nowDateTime()}`,
+      })
+      updatePilotSync({
+        status: 'online',
+        lastCheckedAt: nowDateTime(),
+        message: 'Log de teste gravado na API.',
+      })
+      notify('Log de teste gravado no backend.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao gravar log de teste.'
+      updatePilotSync({ status: 'error', message })
+      notify(`Nao foi possivel gravar log: ${message}`, 'warning')
+    }
+  }
+
+  async function quickHealthCheck() {
+    updatePilotSync({ status: 'checking', message: 'Checando saude da API...' })
+
+    try {
+      const health = await checkBackendHealth()
+      updatePilotSync({
+        status: 'online',
+        lastCheckedAt: nowDateTime(),
+        message: `API respondeu ${health.status || 'OK'}.`,
+      })
+      notify('API respondeu ao teste de saude.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'API nao respondeu.'
+      updatePilotSync({ status: 'offline', lastCheckedAt: nowDateTime(), message })
+      notify(`API offline: ${message}`, 'warning')
+    }
   }
 
   function loginStoreUser(credentials) {
@@ -5584,12 +7068,8 @@ function App() {
     setStoreProfile(merged.storeProfile)
     setStoreForm(merged.storeProfile)
     setPrinterConfig(merged.printerConfig)
-    setPrinterForm({
-      deviceName: merged.printerConfig.deviceName,
-      copies: String(merged.printerConfig.copies),
-      paper: merged.printerConfig.paper,
-      connected: merged.printerConfig.connected ? 'yes' : 'no',
-    })
+    setPrinterForm(printerConfigToForm(merged.printerConfig))
+    setPilotSync(merged.pilotSync)
     setSecurity(merged.security)
     setStoreUsers(merged.storeUsers)
     setBotConfig(merged.botConfig)
@@ -5671,6 +7151,7 @@ function App() {
       storeUsers,
       security,
       printerConfig,
+      pilotSync,
       botConfig,
       kdsConfig,
     }, 'Base local redefinida para o estado inicial.')
@@ -5689,14 +7170,131 @@ function App() {
     notify('Cadastro da loja removido deste navegador.', 'warning')
   }
 
-  function enqueuePrintJob(label, type = 'Pedido') {
-    setPrinterConfig((current) => ({
-      ...current,
-      queue: [
-        { id: `job-${Date.now()}`, label, type, status: current.connected ? 'Pronto' : 'Pendente' },
-        ...current.queue,
-      ].slice(0, 20),
-    }))
+  function createPrintQueueJob(printDocument, status, normalizedConfig) {
+    return normalizePrintJob({
+      id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      label: printDocument.label,
+      type: printDocument.type,
+      status,
+      createdAt: nowDateTime(),
+      printedAt: status === 'Impresso' ? nowDateTime() : '',
+      printer: normalizedConfig.deviceName,
+      document: printDocument,
+    })
+  }
+
+  function pushPrintJob(job) {
+    setPrinterConfig((current) => {
+      const normalized = normalizePrinterConfig(current)
+
+      return {
+        ...normalized,
+        queue: [job, ...normalized.queue].slice(0, 30),
+      }
+    })
+  }
+
+  function sendPrintDocument(printDocument, { printNow = true, configOverride = null } = {}) {
+    const normalizedConfig = normalizePrinterConfig(configOverride || printerConfig)
+    const canPrintNow = printNow && normalizedConfig.connected
+    const printed = canPrintNow ? openPrintWindow(printDocument, normalizedConfig) : false
+    const status = canPrintNow ? (printed ? 'Impresso' : 'Falha') : 'Pendente'
+    const job = createPrintQueueJob(printDocument, status, normalizedConfig)
+
+    pushPrintJob(job)
+
+    if (!normalizedConfig.connected) {
+      notify(`${printDocument.label} ficou pendente: impressora desconectada.`, 'warning')
+      return false
+    }
+
+    if (!printed && printNow) {
+      notify(`${printDocument.label} entrou na fila, mas o navegador bloqueou a janela de impressao.`, 'warning')
+      return false
+    }
+
+    notify(printed ? `${printDocument.label} enviado para impressao.` : `${printDocument.label} adicionado a fila.`)
+    return printed
+  }
+
+  function enqueuePrintJob(label, type = 'Pedido', printDocument = null, options = {}) {
+    const documentData = printDocument || {
+      label,
+      type,
+      title: label,
+      bodyHtml: buildGenericPrintBody(label, type, storeProfile, printerConfig),
+    }
+
+    return sendPrintDocument(documentData, options)
+  }
+
+  function createOrderPrintDocument(order, variant = 'order') {
+    const normalizedOrder = normalizeOrderRecord(order)
+    const typeLabels = {
+      order: 'Pedido',
+      kitchen: 'Cozinha',
+      dispatch: 'Expedicao',
+      fiscal: 'Fiscal',
+    }
+    const type = typeLabels[variant] || 'Pedido'
+
+    return {
+      label: `${type} #${normalizedOrder.id}`,
+      type,
+      title: `${type} #${normalizedOrder.id}`,
+      bodyHtml: buildOrderPrintBody(normalizedOrder, storeProfile, printerConfig, variant),
+    }
+  }
+
+  function printOrderTicket(order, variant = 'order', options = {}) {
+    return enqueuePrintJob(
+      `${variant === 'dispatch' ? 'Expedicao' : variant === 'kitchen' ? 'Cozinha' : 'Pedido'} #${order.id}`,
+      variant === 'dispatch' ? 'Expedicao' : variant === 'kitchen' ? 'Cozinha' : 'Pedido',
+      createOrderPrintDocument(order, variant),
+      { printNow: true, ...options },
+    )
+  }
+
+  function printInvoiceForOrder(order, invoice = null, options = {}) {
+    const normalizedOrder = normalizeOrderRecord(order)
+    const fiscalDocument = invoice || {
+      id: `nfc-${normalizedOrder.id}`,
+      orderId: normalizedOrder.id,
+      customer: normalizedOrder.customer,
+      amount: normalizedOrder.total,
+      status: 'Autorizada',
+    }
+    const printDocument = {
+      label: `NFC-e #${normalizedOrder.id}`,
+      type: 'Fiscal',
+      title: `NFC-e #${normalizedOrder.id}`,
+      bodyHtml: buildInvoicePrintBody(fiscalDocument, normalizedOrder, storeProfile, printerConfig),
+    }
+
+    return enqueuePrintJob(printDocument.label, printDocument.type, printDocument, { printNow: true, ...options })
+  }
+
+  function printInvoiceRecord(invoice, options = {}) {
+    const sourceOrder = orders.find((order) => order.id === invoice.orderId)
+    const printDocument = {
+      label: `NFC-e #${invoice.orderId}`,
+      type: 'Fiscal',
+      title: `NFC-e #${invoice.orderId}`,
+      bodyHtml: buildInvoicePrintBody(invoice, sourceOrder, storeProfile, printerConfig),
+    }
+
+    return enqueuePrintJob(printDocument.label, printDocument.type, printDocument, { printNow: true, ...options })
+  }
+
+  function printQrCode(qr, options = {}) {
+    const printDocument = {
+      label: `QR ${qr.table}`,
+      type: 'QR',
+      title: `QR ${qr.table}`,
+      bodyHtml: buildQrPrintBody(qr, storeProfile, printerConfig),
+    }
+
+    return enqueuePrintJob(printDocument.label, printDocument.type, printDocument, { printNow: true, ...options })
   }
 
   function saveStoreProfile(event) {
@@ -5777,20 +7375,22 @@ function App() {
 
   function savePrinterSettings(event) {
     event.preventDefault()
-    setPrinterConfig((current) => ({
-      ...current,
-      deviceName: printerForm.deviceName || current.deviceName,
-      copies: Number(printerForm.copies) || 1,
-      paper: printerForm.paper,
-      connected: printerForm.connected === 'yes',
-    }))
+    setPrinterConfig((current) => printerFormToConfig(printerForm, current))
     closeModal()
     notify('Impressora configurada localmente.')
   }
 
   function runPrinterTest() {
-    enqueuePrintJob(`Teste ${nowTime()}`, 'Teste')
-    notify('Teste de impressao enviado para a fila.')
+    const previewConfig = printerFormToConfig(printerForm, printerConfig)
+    const testOrder = createPrinterTestOrder()
+    const printDocument = {
+      label: `Pedido teste #${testOrder.id}`,
+      type: 'Teste',
+      title: `Pedido teste #${testOrder.id}`,
+      bodyHtml: buildOrderPrintBody(testOrder, storeProfile, previewConfig, 'order'),
+    }
+
+    sendPrintDocument(printDocument, { printNow: true, configOverride: previewConfig })
   }
 
   function clearPrintQueue() {
@@ -5824,10 +7424,47 @@ function App() {
 
   function completePrintJob(jobId) {
     setPrinterConfig((current) => ({
-      ...current,
-      queue: current.queue.filter((job) => job.id !== jobId),
+      ...normalizePrinterConfig(current),
+      queue: normalizePrinterConfig(current).queue.filter((job) => job.id !== jobId),
     }))
     notify('Item removido da fila de impressao.')
+  }
+
+  function printQueuedJob(job) {
+    const normalizedConfig = normalizePrinterConfig(printerConfig)
+    const documentData = job.document || {
+      label: job.label,
+      type: job.type,
+      title: job.label,
+      bodyHtml: buildGenericPrintBody(job.label, job.type, storeProfile, printerConfig),
+    }
+    const printed = normalizedConfig.connected ? openPrintWindow(documentData, normalizedConfig) : false
+    const status = normalizedConfig.connected ? (printed ? 'Impresso' : 'Falha') : 'Pendente'
+
+    setPrinterConfig((current) => {
+      const normalized = normalizePrinterConfig(current)
+
+      return {
+        ...normalized,
+        queue: normalized.queue.map((currentJob) =>
+          currentJob.id === job.id
+            ? {
+                ...currentJob,
+                status,
+                printedAt: printed ? nowDateTime() : currentJob.printedAt,
+                printer: normalizedConfig.deviceName,
+              }
+            : currentJob,
+        ),
+      }
+    })
+
+    if (!normalizedConfig.connected) {
+      notify(`${job.label} continua pendente: impressora desconectada.`, 'warning')
+      return
+    }
+
+    notify(printed ? `${job.label} reenviado para impressao.` : `${job.label} nao abriu a janela de impressao.`, printed ? 'neutral' : 'warning')
   }
 
   function saveBotTraining(event) {
@@ -5936,9 +7573,19 @@ function App() {
     setDeliveryAddressLookup({ status: 'idle', message: '' })
   }
 
-  function applyCoordinatesToDeliveryAddress(lat, lng, label = getPointLabelFromCoordinates(lat, lng)) {
+  async function applyCoordinatesToDeliveryAddress(lat, lng, label = getPointLabelFromCoordinates(lat, lng)) {
+    let baseAddress = resetDeliveryAddressVerification(deliveryAddressFormRef.current)
+
+    try {
+      const reverseResult = await reverseGeocodeCoordinates(lat, lng)
+      baseAddress = mergeReverseGeocodeAddress(baseAddress, reverseResult)
+      label = formatOrderAddress(baseAddress) || reverseResult?.display_name || label
+    } catch {
+      label = formatOrderAddress(baseAddress) || label
+    }
+
     const nextAddress = {
-      ...resetDeliveryAddressVerification(deliveryAddressFormRef.current),
+      ...baseAddress,
       lat: formatCoordinate(lat),
       lng: formatCoordinate(lng),
       mapLabel: label,
@@ -5966,7 +7613,7 @@ function App() {
       const position = await getCurrentBrowserPosition()
       const lat = normalizeCoordinate(position.coords.latitude)
       const lng = normalizeCoordinate(position.coords.longitude)
-      applyCoordinatesToDeliveryAddress(lat, lng, getPointLabelFromCoordinates(lat, lng, 'Localizacao atual'))
+      await applyCoordinatesToDeliveryAddress(lat, lng, getPointLabelFromCoordinates(lat, lng, 'Localizacao atual'))
       setDeliveryAddressMapMode('view')
       setDeliveryAddressLookup({ status: 'success', message: 'Localizacao atual aplicada ao endereco.' })
       notify('Localizacao atual aplicada ao endereco.')
@@ -5984,12 +7631,12 @@ function App() {
     }))
   }
 
-  function handleDeliveryAddressMapPick(point) {
+  async function handleDeliveryAddressMapPick(point) {
     const [lng, lat] = point
-    applyCoordinatesToDeliveryAddress(lat, lng)
+    await applyCoordinatesToDeliveryAddress(lat, lng)
     setDeliveryAddressMapMode('view')
-    setDeliveryAddressLookup({ status: 'success', message: 'Ponto marcado no mapa. Agora confirme a taxa.' })
-    notify('Ponto do endereco marcado no mapa.')
+    setDeliveryAddressLookup({ status: 'success', message: 'Ponto marcado. Confira numero, complemento e taxa.' })
+    notify('Ponto marcado. Confira o endereco preenchido.')
   }
 
   async function useCurrentLocationForStore() {
@@ -6173,7 +7820,7 @@ function App() {
     return results
   }
 
-  async function geocodeDeliveryAddress(address) {
+async function geocodeDeliveryAddress(address) {
     const urls = buildNominatimSearchUrls(address)
 
     for (const url of urls) {
@@ -6185,8 +7832,67 @@ function App() {
       }
     }
 
-    return null
+  return null
+}
+
+async function reverseGeocodeCoordinates(lat, lng) {
+  const params = new URLSearchParams({
+    format: 'jsonv2',
+    lat: String(lat),
+    lon: String(lng),
+    addressdetails: '1',
+    zoom: '18',
+  })
+  const url = `https://nominatim.openstreetmap.org/reverse?${params.toString()}`
+  const cachedResult = geocodeCacheRef.current.get(url)
+
+  if (cachedResult) {
+    return cachedResult
   }
+
+  const elapsed = Date.now() - nominatimLastRequestRef.current
+
+  if (elapsed < NOMINATIM_MIN_INTERVAL_MS) {
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, NOMINATIM_MIN_INTERVAL_MS - elapsed)
+    })
+  }
+
+  nominatimLastRequestRef.current = Date.now()
+
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  }, 1500)
+
+  if (!response.ok) {
+    throw new Error('nominatim-reverse-request')
+  }
+
+  const result = await response.json()
+  geocodeCacheRef.current.set(url, result)
+  return result
+}
+
+function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
+  const address = reverseResult?.address || {}
+  const street = address.road || address.pedestrian || address.residential || address.footway || address.path || ''
+  const number = address.house_number || ''
+  const district = address.suburb || address.neighbourhood || address.city_district || address.quarter || ''
+  const cityName = address.city || address.town || address.village || address.municipality || ''
+  const state = address.state_code || address.state || ''
+  const city = [cityName, state].filter(Boolean).join(' - ')
+
+  return {
+    ...currentAddress,
+    cep: currentAddress.cep || formatCepInput(address.postcode || ''),
+    street: currentAddress.street || street,
+    number: currentAddress.number || number,
+    district: currentAddress.district || district,
+    city: currentAddress.city || city,
+  }
+}
 
   async function verifyDeliveryAddressForm({ silent = false, addressInput = deliveryAddressFormRef.current } = {}) {
     const coordinates = getAddressCoordinates(addressInput)
@@ -6205,9 +7911,17 @@ function App() {
       let geocode = null
       let lat = coordinates?.lat ?? null
       let lng = coordinates?.lng ?? null
+      let verifiedAddressInput = addressInput
       const fallbackZoneByDistrict = findDeliveryZoneByDistrict(addressInput, deliveryZones)
 
-      if (!coordinates) {
+      if (coordinates) {
+        try {
+          geocode = await reverseGeocodeCoordinates(lat, lng)
+          verifiedAddressInput = mergeReverseGeocodeAddress(addressInput, geocode)
+        } catch {
+          geocode = null
+        }
+      } else {
         geocode = getFallbackGeocodeForAddress(addressInput, deliveryZones)
 
         if (!geocode) {
@@ -6245,11 +7959,11 @@ function App() {
       }
 
       const verifiedAddress = createOrderAddress({
-        ...addressInput,
-        cep: formatCepInput(addressInput.cep),
+        ...verifiedAddressInput,
+        cep: formatCepInput(verifiedAddressInput.cep),
         lat: formatCoordinate(lat),
         lng: formatCoordinate(lng),
-        mapLabel: geocode?.display_name || addressInput.mapLabel || getPointLabelFromCoordinates(lat, lng),
+        mapLabel: formatOrderAddress(verifiedAddressInput) || geocode?.display_name || addressInput.mapLabel || getPointLabelFromCoordinates(lat, lng),
         deliveryZoneId: zone?.id || '',
         deliveryZoneName: zone?.name || '',
         deliveryFee: zone ? formatCurrencyInput(parseCurrencyInput(zone.fee)) : '0,00',
@@ -6355,13 +8069,15 @@ function App() {
     })
 
     setSelectedAddressDraftId(normalizedAddress.id)
-    setEditingDeliveryAddressId(null)
-    setDeliveryAddressForm(blankDeliveryAddress)
-    deliveryAddressFormRef.current = blankDeliveryAddress
-    setDeliveryAddressLookup({ status: 'idle', message: '' })
+    setEditingDeliveryAddressId(normalizedAddress.id)
+    setDeliveryAddressForm(normalizedAddress)
+    deliveryAddressFormRef.current = normalizedAddress
+    setDeliveryAddressLookup({
+      status: normalizedAddress.deliveryAvailable ? 'success' : 'danger',
+      message: getDeliveryAddressSummary(normalizedAddress),
+    })
     setDeliveryAddressMapMode('view')
-    setOrderPanel('delivery')
-    notify(editingDeliveryAddressId ? 'Endereco atualizado.' : 'Endereco criado.')
+    notify(editingDeliveryAddressId ? 'Endereco atualizado. Voce pode continuar editando.' : 'Endereco criado. Voce pode adicionar complemento.')
   }
 
   function applyOrderPayment(paymentId = paymentDraft) {
@@ -6494,21 +8210,19 @@ function App() {
   }
 
   function moveOrder(orderId, nextStatus) {
-    let updatedOrder = null
+    const currentOrder = orders.find((order) => order.id === orderId)
+    const updatedOrder = currentOrder ? { ...currentOrder, status: nextStatus } : null
 
     setOrders((current) =>
-      current.map((order) => {
-        if (order.id !== orderId) {
-          return order
-        }
-
-        updatedOrder = { ...order, status: nextStatus }
-        return updatedOrder
-      }),
+      current.map((order) => (order.id === orderId ? { ...order, status: nextStatus } : order)),
     )
 
     if (updatedOrder && nextStatus === 'ready' && settings.autoPrint) {
-      enqueuePrintJob(`Pedido #${orderId} pronto`, 'Expedicao')
+      printOrderTicket(updatedOrder, 'dispatch')
+    }
+
+    if (updatedOrder) {
+      void syncOrderStatusToBackend(updatedOrder, nextStatus)
     }
 
     notify(
@@ -6585,7 +8299,7 @@ function App() {
       return
     }
 
-    const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
+    const nextId = getNextOrderId(orders)
     const createdOrder = {
       id: nextId,
       customer: newOrder.customer || 'Cliente balcao',
@@ -6620,12 +8334,23 @@ function App() {
       items: orderCart.length
         ? orderCart.map(getOrderCartItemLabel)
         : typedItems,
+      printItems: orderCart.length
+        ? orderCart.map(getOrderCartPrintItem)
+        : [],
     }
 
     setOrders((current) => [createdOrder, ...current])
     registerOrderFinanceEntry(createdOrder)
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(createdOrder, { silent: true })
+    } else {
+      markOrderSyncState(createdOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Aguardando modo piloto.',
+      })
+    }
     if (settings.autoPrint) {
-      enqueuePrintJob(`Pedido #${nextId}`, 'Pedido')
+      printOrderTicket(createdOrder, 'order')
     }
     setNewOrder(blankOrder)
     setOrderCart([])
@@ -6692,6 +8417,7 @@ function App() {
 
     if (updatedOrder) {
       syncOrderFinanceEntry(updatedOrder)
+      void syncSingleOrderToBackend(updatedOrder, { silent: true })
     }
 
     closeModal()
@@ -6699,9 +8425,14 @@ function App() {
   }
 
   function deleteOrder(orderId) {
+    const deletedOrder = orders.find((order) => order.id === orderId)
+
     setOrders((current) => current.filter((order) => order.id !== orderId))
     removeOrderFinanceEntry(orderId)
     closeModal()
+    if (deletedOrder) {
+      void deleteOrderFromBackend(deletedOrder)
+    }
     notify(`Pedido #${orderId} apagado.`)
   }
 
@@ -6711,10 +8442,14 @@ function App() {
   }
 
   function finishReadyOrders() {
-    const readyCount = orders.filter((order) => order.status === 'ready').length
+    const readyOrders = orders.filter((order) => order.status === 'ready')
+    const readyCount = readyOrders.length
     setOrders((current) =>
       current.map((order) => (order.status === 'ready' ? { ...order, status: 'completed' } : order)),
     )
+    readyOrders.forEach((order) => {
+      void syncOrderStatusToBackend(order, 'completed')
+    })
     closeModal()
     notify(`${readyCount} pedido(s) finalizado(s).`)
   }
@@ -6749,6 +8484,14 @@ function App() {
       restoredOrder,
       ...current,
     ])
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(restoredOrder, { silent: true })
+    } else {
+      markOrderSyncState(restoredOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Aguardando modo piloto.',
+      })
+    }
     notify(`Pedido #${id} recuperado.`)
   }
 
@@ -6784,8 +8527,8 @@ function App() {
     setPosSearch('')
   }
 
-  function openNewOrderCartItem(product) {
-    setPosCategory(product.category)
+  function openNewOrderCartItem(product, categoryName = product.category) {
+    setPosCategory(categoryName)
     setPosSearch('')
     setCartItemForm(orderCartItemToForm(product))
     setCartItemStepIndex(0)
@@ -6806,8 +8549,8 @@ function App() {
     setCartItemStepIndex(0)
   }
 
-  function addOrderCart(product) {
-    openNewOrderCartItem(product)
+  function addOrderCart(product, categoryName = product.category) {
+    openNewOrderCartItem(product, categoryName)
   }
 
   function removeOrderCart(productId) {
@@ -6967,7 +8710,7 @@ function App() {
 
   function checkoutCounter() {
     const subtotal = counterCart.reduce((sum, item) => sum + item.price * item.qty, 0)
-    const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
+    const nextId = getNextOrderId(orders)
     const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: 'Cliente PDV',
@@ -6984,12 +8727,26 @@ function App() {
       deliveryFee: '0,00',
       note: 'Venda criada no PDV.',
       items: counterCart.map((item) => `${item.qty}x ${item.name}`),
+      printItems: counterCart.map((item) => ({
+        qty: item.qty,
+        name: item.name,
+        details: [],
+        price: (Number(item.price) || 0) * (Number(item.qty) || 1),
+      })),
     })
 
     setOrders((current) => [createdOrder, ...current])
     registerOrderFinanceEntry(createdOrder, 'Venda PDV')
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(createdOrder, { silent: true })
+    } else {
+      markOrderSyncState(createdOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Aguardando modo piloto.',
+      })
+    }
     if (settings.autoPrint) {
-      enqueuePrintJob(`Venda PDV #${nextId}`, 'PDV')
+      printOrderTicket(createdOrder, 'order')
     }
     setCounterCart([])
     closeModal()
@@ -7008,13 +8765,15 @@ function App() {
     }
 
     const baseProduct = productId ? products.find((product) => product.id === productId) : null
+    const primaryCategory = productForm.category || categories[0]?.name || baseProduct?.category || ''
     const normalizedProduct = normalizeProduct({
       ...baseProduct,
       name: productForm.name || 'Produto sem nome',
-      category: productForm.category || categories[0]?.name || baseProduct?.category || '',
-      price: Number(String(productForm.price).replace(',', '.')) || 0,
-      stock: Number(productForm.stock) || 0,
-      active: productForm.active,
+      category: primaryCategory,
+      extraCategories: Array.isArray(productForm.extraCategories)
+        ? productForm.extraCategories.filter((category) => category !== primaryCategory)
+        : [],
+      price: parseCurrencyInput(productForm.price),
       maxFlavors: Number(productForm.maxFlavors) || baseProduct?.maxFlavors || 2,
       availableFrom: productForm.availableFrom || baseProduct?.availableFrom || '18:00',
       availableTo: productForm.availableTo || baseProduct?.availableTo || '23:30',
@@ -7047,8 +8806,36 @@ function App() {
     notify('Produto apagado.')
   }
 
-  function toggleProduct(productId) {
+  function importProductsToCategory(event, targetCategoryName) {
+    event.preventDefault()
+
+    const productIds = importProductsForm.productIds || []
+    if (!targetCategoryName || productIds.length === 0) {
+      notify('Selecione ao menos um item para importar.', 'warning')
+      return
+    }
+
+    setProducts((current) =>
+      current.map((product) => {
+        if (!productIds.includes(product.id) || product.category === targetCategoryName) {
+          return product
+        }
+
+        return normalizeProduct({
+          ...product,
+          extraCategories: [...(product.extraCategories || []), targetCategoryName],
+          exhaustedCategories: (product.exhaustedCategories || []).filter((category) => category !== targetCategoryName),
+        }, categories[0]?.name || 'Pizzas')
+      }),
+    )
+
+    closeModal()
+    notify(`${productIds.length} item(ns) importado(s).`)
+  }
+
+  function toggleProduct(productId, categoryName) {
     let toggledProduct = null
+    let exhausted = false
 
     setProducts((current) =>
       current.map((product) => {
@@ -7056,13 +8843,20 @@ function App() {
           return product
         }
 
-        toggledProduct = { ...product, active: !product.active }
+        const currentExhausted = product.exhaustedCategories || []
+        exhausted = !currentExhausted.includes(categoryName)
+        toggledProduct = normalizeProduct({
+          ...product,
+          exhaustedCategories: exhausted
+            ? [...currentExhausted, categoryName]
+            : currentExhausted.filter((currentCategory) => currentCategory !== categoryName),
+        }, categories[0]?.name || 'Pizzas')
         return toggledProduct
       }),
     )
 
     if (toggledProduct) {
-      notify(`${toggledProduct.name} ${toggledProduct.active ? 'ativado' : 'pausado'}.`)
+      notify(`${toggledProduct.name} ${exhausted ? 'esgotado' : 'disponivel'} em ${categoryName}.`)
     }
   }
 
@@ -7098,7 +8892,7 @@ function App() {
 
     const normalizedFlavor = createProductFlavor(
       flavorForm.name.trim() || (flavorId ? 'Sabor editado' : 'Novo sabor'),
-      Number(String(flavorForm.price).replace(',', '.')) || 0,
+      parseCurrencyInput(flavorForm.price),
       flavorForm.active,
       flavorId || undefined,
     )
@@ -7341,7 +9135,13 @@ function App() {
       if (currentCategory && currentCategory.name !== name) {
         setProducts((current) =>
           current.map((product) =>
-            product.category === currentCategory.name ? { ...product, category: name } : product,
+            normalizeProduct({
+              ...product,
+              category: product.category === currentCategory.name ? name : product.category,
+              extraCategories: Array.isArray(product.extraCategories)
+                ? product.extraCategories.map((extraCategory) => extraCategory === currentCategory.name ? name : extraCategory)
+                : [],
+            }, categories[0]?.name || 'Pizzas'),
           ),
         )
       }
@@ -7380,10 +9180,22 @@ function App() {
 
       if (!fallbackCategory) {
         return current.filter((product) => product.category !== currentCategory.name)
+          .map((product) => ({
+            ...product,
+            extraCategories: Array.isArray(product.extraCategories)
+              ? product.extraCategories.filter((category) => category !== currentCategory.name)
+              : [],
+          }))
       }
 
       return current.map((product) =>
-        product.category === currentCategory.name ? { ...product, category: fallbackCategory } : product,
+        normalizeProduct({
+          ...product,
+          category: product.category === currentCategory.name ? fallbackCategory : product.category,
+          extraCategories: Array.isArray(product.extraCategories)
+            ? product.extraCategories.filter((category) => category !== currentCategory.name)
+            : [],
+        }, fallbackCategory),
       )
     })
 
@@ -7440,7 +9252,7 @@ function App() {
   }
 
   function addTableOrder(table) {
-    const nextId = String(Math.max(...orders.map((order) => Number(order.id)), 8300) + 1)
+    const nextId = getNextOrderId(orders)
     const subtotal = table.total || 49.9
     const createdOrder = normalizeOrderRecord({
       id: nextId,
@@ -7467,6 +9279,17 @@ function App() {
       ),
     )
     registerOrderFinanceEntry(createdOrder, 'Mesa')
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(createdOrder, { silent: true })
+    } else {
+      markOrderSyncState(createdOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Aguardando modo piloto.',
+      })
+    }
+    if (settings.autoPrint) {
+      printOrderTicket(createdOrder, 'order')
+    }
     closeModal()
     notify(`Pedido #${nextId} criado para ${table.name}.`)
   }
@@ -7481,7 +9304,13 @@ function App() {
       ),
     )
     if (settings.autoPrint) {
-      enqueuePrintJob(`Entrega #${orderId} - ${courierName}`, 'Entrega')
+      const deliveryOrder = orders.find((order) => order.id === orderId)
+
+      if (deliveryOrder) {
+        printOrderTicket({ ...deliveryOrder, courier: courierName }, 'dispatch')
+      } else {
+        enqueuePrintJob(`Entrega #${orderId} - ${courierName}`, 'Entrega', null, { printNow: true })
+      }
     }
     closeModal()
     notify(`Entrega #${orderId} atribuida para ${courierName}.`)
@@ -7748,7 +9577,7 @@ function App() {
       unit: stockForm.unit,
       quantity: Number(stockForm.quantity) || 0,
       min: Number(stockForm.min) || 0,
-      cost: Number(String(stockForm.cost).replace(',', '.')) || 0,
+      cost: parseCurrencyInput(stockForm.cost),
     }
 
     if (stockId) {
@@ -7802,7 +9631,7 @@ function App() {
     const normalizedFinance = {
       title: financeForm.title,
       type: financeForm.type,
-      amount: Number(String(financeForm.amount).replace(',', '.')) || 0,
+      amount: parseCurrencyInput(financeForm.amount),
       status: financeForm.status,
     }
 
@@ -7865,7 +9694,13 @@ function App() {
       ...current,
     ])
     if (settings.autoPrint) {
-      enqueuePrintJob(`NFC-e #${sourceOrder.id}`, 'Fiscal')
+      printInvoiceForOrder(sourceOrder, {
+        id: `nfc-${sourceOrder.id}`,
+        orderId: sourceOrder.id,
+        customer: sourceOrder.customer,
+        amount: sourceOrder.total,
+        status: 'Autorizada',
+      })
     }
     closeModal()
     notify(`NFC-e do pedido #${sourceOrder.id} emitida.`)
@@ -8025,10 +9860,6 @@ function App() {
       )
     }
 
-    if (activeNav === 'inventory') {
-      return <InventorySection inventory={inventory} onOpenModal={openModal} onStockAdjust={stockAdjust} />
-    }
-
     if (activeNav === 'finance') {
       return <FinanceSection finance={finance} orders={orders} onOpenModal={openModal} onPayFinance={payFinance} />
     }
@@ -8056,6 +9887,7 @@ function App() {
           finance={finance}
           coupons={coupons}
           recoveries={recoveries}
+          pilotSync={pilotSync}
           onOpenModal={openModal}
         />
       )
@@ -8074,7 +9906,7 @@ function App() {
 
         <div className="operations-grid">
           <div className="operations-stack">
-            <Board visibleOrders={visibleOrders} onOpenModal={openModal} onMoveOrder={moveOrder} />
+            <Board visibleOrders={visibleOrders} onOpenModal={openModal} onMoveOrder={moveOrder} onPrintOrder={printOrderTicket} />
           </div>
           <OrdersSideRail
             orders={orders}
@@ -8099,22 +9931,21 @@ function App() {
       const configuredProduct = products.find((product) => product.id === cartItemForm.productId) || null
       const availableCategories = categories
         .filter((category) => category.active)
-        .filter((category) => products.some((product) => product.active && product.category === category.name))
+        .filter((category) => products.some((product) => isProductAvailableInCategory(product, category.name)))
       const visibleCategories = availableCategories.filter((category) => {
         if (!normalizedPosSearch) {
           return true
         }
 
         const productNames = products
-          .filter((product) => product.active && product.category === category.name)
+          .filter((product) => isProductAvailableInCategory(product, category.name))
           .map((product) => product.name)
           .join(' ')
 
         return `${category.name} ${productNames}`.toLowerCase().includes(normalizedPosSearch)
       })
       const activeProducts = products
-        .filter((product) => product.active)
-        .filter((product) => posCategory === 'all' || product.category === posCategory)
+        .filter((product) => posCategory === 'all' ? isProductAvailable(product) : isProductAvailableInCategory(product, posCategory))
         .filter((product) => product.name.toLowerCase().includes(normalizedPosSearch))
       const posStep = configuredProduct ? 'configure' : posCategory === 'all' ? 'categories' : 'products'
       const configurationSteps = configuredProduct ? getCartConfigurationSteps(configuredProduct) : []
@@ -8269,7 +10100,7 @@ function App() {
                       >
                         <span className="tile-pattern" />
                         <strong>{category.name}</strong>
-                        <small>{products.filter((product) => product.active && product.category === category.name).length} item(ns)</small>
+                        <small>{products.filter((product) => isProductAvailableInCategory(product, category.name)).length} item(ns)</small>
                       </button>
                     )) : (
                       <div className="pos-stage-empty">Nenhuma categoria encontrada para o filtro atual.</div>
@@ -8294,7 +10125,7 @@ function App() {
                           data-testid={`pos-product-${product.id}`}
                           type="button"
                           key={product.id}
-                          onClick={() => addOrderCart(product)}
+                          onClick={() => addOrderCart(product, posCategory)}
                         >
                           <span className={`tile-pattern tile-pattern--food ${getMenuProductThumbClass(product)}`.trim()} />
                           <strong>{product.name}</strong>
@@ -8672,7 +10503,7 @@ function App() {
                           data-testid="delivery-fee"
                           inputMode="decimal"
                           value={deliveryFeeDraft}
-                          onChange={(event) => setDeliveryFeeDraft(event.target.value)}
+                          onChange={(event) => setDeliveryFeeDraft(formatCurrencyTypingInput(event.target.value))}
                           placeholder="0,00"
                           readOnly={Boolean(orderAddresses.find((address) => address.id === selectedAddressDraftId)?.deliveryAvailable)}
                         />
@@ -8815,7 +10646,10 @@ function App() {
                         data-testid="discount-input"
                         inputMode="decimal"
                         value={adjustmentDraft.discountValue}
-                        onChange={(event) => setAdjustmentDraft({ ...adjustmentDraft, discountValue: event.target.value })}
+                        onChange={(event) => setAdjustmentDraft({
+                          ...adjustmentDraft,
+                          discountValue: adjustmentDraft.discountType === 'percent' ? event.target.value : formatCurrencyTypingInput(event.target.value),
+                        })}
                         placeholder={adjustmentDraft.discountType === 'percent' ? 'Ex. 10' : 'Ex. 5,00'}
                       />
                     </label>
@@ -8844,7 +10678,10 @@ function App() {
                         data-testid="surcharge-input"
                         inputMode="decimal"
                         value={adjustmentDraft.surchargeValue}
-                        onChange={(event) => setAdjustmentDraft({ ...adjustmentDraft, surchargeValue: event.target.value })}
+                        onChange={(event) => setAdjustmentDraft({
+                          ...adjustmentDraft,
+                          surchargeValue: adjustmentDraft.surchargeType === 'percent' ? event.target.value : formatCurrencyTypingInput(event.target.value),
+                        })}
                         placeholder={adjustmentDraft.surchargeType === 'percent' ? 'Ex. 10' : 'Ex. 5,00'}
                       />
                     </label>
@@ -8949,10 +10786,10 @@ function App() {
               </select>
             </Field>
             <Field label="Subtotal">
-              <input data-testid="edit-subtotal" value={orderForm.subtotal} onChange={(event) => setOrderForm({ ...orderForm, subtotal: event.target.value })} placeholder="59,90" />
+              <input data-testid="edit-subtotal" value={orderForm.subtotal} onChange={(event) => setOrderForm({ ...orderForm, subtotal: formatCurrencyTypingInput(event.target.value) })} placeholder="59,90" />
             </Field>
             <Field label="Taxa de entrega">
-              <input value={orderForm.deliveryFee} disabled={orderForm.fulfillment !== 'delivery'} onChange={(event) => setOrderForm({ ...orderForm, deliveryFee: event.target.value })} placeholder="0,00" />
+              <input value={orderForm.deliveryFee} disabled={orderForm.fulfillment !== 'delivery'} onChange={(event) => setOrderForm({ ...orderForm, deliveryFee: formatCurrencyTypingInput(event.target.value) })} placeholder="0,00" />
             </Field>
             <Field label="CPF/CNPJ">
               <input value={orderForm.document} onChange={(event) => setOrderForm({ ...orderForm, document: event.target.value })} placeholder="Opcional" />
@@ -8967,7 +10804,7 @@ function App() {
               </select>
             </Field>
             <Field label="Desconto">
-              <input value={orderForm.discountValue} onChange={(event) => setOrderForm({ ...orderForm, discountValue: event.target.value })} placeholder={orderForm.discountType === 'percent' ? '10' : '5,00'} />
+              <input value={orderForm.discountValue} onChange={(event) => setOrderForm({ ...orderForm, discountValue: orderForm.discountType === 'percent' ? event.target.value : formatCurrencyTypingInput(event.target.value) })} placeholder={orderForm.discountType === 'percent' ? '10' : '5,00'} />
             </Field>
             <Field label="Tipo de acrescimo">
               <select value={orderForm.surchargeType} onChange={(event) => setOrderForm({ ...orderForm, surchargeType: event.target.value })}>
@@ -8976,7 +10813,7 @@ function App() {
               </select>
             </Field>
             <Field label="Acrescimo">
-              <input value={orderForm.surchargeValue} onChange={(event) => setOrderForm({ ...orderForm, surchargeValue: event.target.value })} placeholder={orderForm.surchargeType === 'percent' ? '10' : '5,00'} />
+              <input value={orderForm.surchargeValue} onChange={(event) => setOrderForm({ ...orderForm, surchargeValue: orderForm.surchargeType === 'percent' ? event.target.value : formatCurrencyTypingInput(event.target.value) })} placeholder={orderForm.surchargeType === 'percent' ? '10' : '5,00'} />
             </Field>
             <Field label="Total final">
               <input value={formatCurrencyInput(editBreakdown.total)} readOnly />
@@ -9068,21 +10905,22 @@ function App() {
               <input data-testid="product-name" value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Nome do produto" />
             </Field>
             <Field label="Categoria">
-              <select value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })}>
+              <select
+                value={productForm.category}
+                onChange={(event) => {
+                  const nextCategory = event.target.value
+                  setProductForm({
+                    ...productForm,
+                    category: nextCategory,
+                    extraCategories: (productForm.extraCategories || []).filter((category) => category !== nextCategory),
+                  })
+                }}
+              >
                 {categories.map((category) => <option key={category.id}>{category.name}</option>)}
               </select>
             </Field>
             <Field label="Preco">
-              <input data-testid="product-price" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: event.target.value })} placeholder="49,90" />
-            </Field>
-            <Field label="Estoque">
-              <input type="number" value={productForm.stock} onChange={(event) => setProductForm({ ...productForm, stock: event.target.value })} />
-            </Field>
-            <Field label="Visibilidade">
-              <select value={productForm.active ? 'yes' : 'no'} onChange={(event) => setProductForm({ ...productForm, active: event.target.value === 'yes' })}>
-                <option value="yes">Visivel</option>
-                <option value="no">Pausado</option>
-              </select>
+              <input data-testid="product-price" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: formatCurrencyTypingInput(event.target.value) })} placeholder="49,90" />
             </Field>
             <Field label="Maximo de sabores">
               <input
@@ -9106,6 +10944,93 @@ function App() {
                 onChange={(event) => setProductForm({ ...productForm, availableTo: event.target.value })}
               />
             </Field>
+            <div className="field form-grid__full">
+              <span>Importar para categorias</span>
+              <div className="category-checkbox-list">
+                {categories.map((category) => {
+                  const isPrimary = productForm.category === category.name
+                  const isChecked = isPrimary || (productForm.extraCategories || []).includes(category.name)
+
+                  return (
+                    <label className={isPrimary ? 'is-disabled' : ''} key={category.id}>
+                      <input
+                        checked={isChecked}
+                        disabled={isPrimary}
+                        type="checkbox"
+                        onChange={(event) => {
+                          const currentExtras = productForm.extraCategories || []
+                          setProductForm({
+                            ...productForm,
+                            extraCategories: event.target.checked
+                              ? [...currentExtras, category.name]
+                              : currentExtras.filter((extraCategory) => extraCategory !== category.name),
+                          })
+                        }}
+                      />
+                      <span>{category.name}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'importProducts') {
+      const targetCategory = payload?.category || ''
+      const sourceCategories = categories.filter((category) => category.name !== targetCategory)
+      const importableProducts = products.filter((product) =>
+        product.category === importProductsForm.sourceCategory && !productAppearsInCategory(product, targetCategory),
+      )
+
+      return (
+        <Modal
+          title={`Importar de`}
+          subtitle={targetCategory ? `Trazer itens para ${targetCategory} sem duplicar cadastro.` : 'Importar itens entre categorias.'}
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={closeModal}>Cancelar</Button>
+              <Button variant="primary" form="import-products-form" type="submit">Importar</Button>
+            </>
+          }
+        >
+          <form className="form-grid" id="import-products-form" onSubmit={(event) => importProductsToCategory(event, targetCategory)}>
+            <Field label="Importar de">
+              <select
+                value={importProductsForm.sourceCategory}
+                onChange={(event) => setImportProductsForm({ sourceCategory: event.target.value, productIds: [] })}
+              >
+                {sourceCategories.map((category) => <option key={category.id}>{category.name}</option>)}
+              </select>
+            </Field>
+            <div className="field form-grid__full">
+              <span>Itens</span>
+              <div className="category-checkbox-list">
+                {importableProducts.length > 0 ? importableProducts.map((product) => (
+                  <label key={product.id}>
+                    <input
+                      checked={importProductsForm.productIds.includes(product.id)}
+                      type="checkbox"
+                      onChange={(event) => {
+                        const currentIds = importProductsForm.productIds
+                        setImportProductsForm({
+                          ...importProductsForm,
+                          productIds: event.target.checked
+                            ? [...currentIds, product.id]
+                            : currentIds.filter((productId) => productId !== product.id),
+                        })
+                      }}
+                    />
+                    <span>{product.name}</span>
+                  </label>
+                )) : (
+                  <span className="empty-modal">Nenhum item disponivel nessa categoria.</span>
+                )}
+              </div>
+            </div>
           </form>
         </Modal>
       )
@@ -9133,7 +11058,7 @@ function App() {
               <input value={flavorForm.name} onChange={(event) => setFlavorForm({ ...flavorForm, name: event.target.value })} placeholder={isComboProduct(flavorOwner) ? 'Ex: Pizza BBQ do combo' : 'Ex: Sabor especial'} />
             </Field>
             <Field label="Valor do sabor">
-              <input value={flavorForm.price} onChange={(event) => setFlavorForm({ ...flavorForm, price: event.target.value })} placeholder="0,00" />
+              <input value={flavorForm.price} onChange={(event) => setFlavorForm({ ...flavorForm, price: formatCurrencyTypingInput(event.target.value) })} placeholder="0,00" />
             </Field>
             <Field label="Status">
               <select value={flavorForm.active ? 'yes' : 'no'} onChange={(event) => setFlavorForm({ ...flavorForm, active: event.target.value === 'yes' })}>
@@ -9280,7 +11205,7 @@ function App() {
               <input value={stockForm.min} onChange={(event) => setStockForm({ ...stockForm, min: event.target.value })} />
             </Field>
             <Field label="Custo">
-              <input value={stockForm.cost} onChange={(event) => setStockForm({ ...stockForm, cost: event.target.value })} />
+              <input value={stockForm.cost} onChange={(event) => setStockForm({ ...stockForm, cost: formatCurrencyTypingInput(event.target.value) })} />
             </Field>
           </form>
         </Modal>
@@ -9308,7 +11233,7 @@ function App() {
               </select>
             </Field>
             <Field label="Valor">
-              <input value={financeForm.amount} onChange={(event) => setFinanceForm({ ...financeForm, amount: event.target.value })} placeholder="120,00" />
+              <input value={financeForm.amount} onChange={(event) => setFinanceForm({ ...financeForm, amount: formatCurrencyTypingInput(event.target.value) })} placeholder="120,00" />
             </Field>
             <Field label="Status">
               <select value={financeForm.status} onChange={(event) => setFinanceForm({ ...financeForm, status: event.target.value })}>
@@ -9374,7 +11299,12 @@ function App() {
 
     if (modal.type === 'invoiceView') {
       return (
-        <Modal title={`NFC-e ${payload.orderId}`} subtitle={payload.status} onClose={closeModal}>
+        <Modal
+          title={`NFC-e ${payload.orderId}`}
+          subtitle={payload.status}
+          onClose={closeModal}
+          footer={<Button variant="primary" onClick={() => printInvoiceRecord(payload)}>Imprimir NFC-e</Button>}
+        >
           <div className="invoice-preview">
             <strong>{storeProfile.name || 'MeuCardapio'}</strong>
             <span>Cliente: {payload.customer}</span>
@@ -9412,7 +11342,7 @@ function App() {
             <span>{payload.table}</span>
             <b>QR</b>
             <small>/cardapio/{payload.url}</small>
-            <Button variant="primary" onClick={() => notify(`QR de ${payload.table} enviado para impressao.`)}>Imprimir</Button>
+            <Button variant="primary" onClick={() => printQrCode(payload)}>Imprimir</Button>
           </div>
         </Modal>
       )
@@ -9570,7 +11500,7 @@ function App() {
 
     if (modal.type === 'integrationHelp') {
       const setupStatus = [
-        { id: 'menu', title: 'Cardapio e QR', done: products.filter((product) => product.active).length > 0 },
+        { id: 'menu', title: 'Cardapio e QR', done: products.filter(isProductAvailable).length > 0 },
         { id: 'channels', title: 'Marketplaces e social', done: integrations.some((integration) => integration.active) },
         { id: 'cash', title: 'Pagamento e caixa', done: cashOpen || finance.length > 0 },
       ]
@@ -9701,7 +11631,10 @@ function App() {
               <input type="number" min="10" value={settings.deliveryTime} onChange={(event) => setSettings({ ...settings, deliveryTime: Number(event.target.value) })} />
             </Field>
             <Field label="Impressao automatica">
-              <select value={settings.printer ? 'yes' : 'no'} onChange={(event) => setSettings({ ...settings, printer: event.target.value === 'yes' })}>
+              <select
+                value={settings.autoPrint ? 'yes' : 'no'}
+                onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes', printer: event.target.value === 'yes' })}
+              >
                 <option value="yes">Ligada</option>
                 <option value="no">Desligada</option>
               </select>
@@ -9968,7 +11901,7 @@ function App() {
                 <input value={deliveryZoneForm.name} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, name: event.target.value })} placeholder="Centro" />
               </Field>
               <Field label="Taxa">
-                <input inputMode="decimal" value={deliveryZoneForm.fee} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, fee: event.target.value })} placeholder="5,00" />
+                <input inputMode="decimal" value={deliveryZoneForm.fee} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, fee: formatCurrencyTypingInput(event.target.value) })} placeholder="5,00" />
               </Field>
               <Field label="Status">
                 <select value={deliveryZoneForm.active} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, active: event.target.value })}>
@@ -10111,6 +12044,160 @@ function App() {
             <span>Entregador</span>
             <strong>{payload.name}</strong>
             <p>{payload.vehicle || 'Moto'} - {payload.phone || 'Sem telefone'}</p>
+          </div>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'pilot') {
+      const pilotStatus = getPilotStatusMeta(pilotSync)
+      const pendingSyncOrders = orders.filter((order) => !order.backendId || order.syncStatus === 'pending' || order.syncStatus === 'failed')
+      const syncedOrders = orders.filter((order) => order.backendId && order.syncStatus !== 'pending' && order.syncStatus !== 'failed')
+      const pilotChecklist = [
+        {
+          label: 'Loja cadastrada',
+          ok: isStoreConfigured(storeProfile),
+          detail: storeProfile.tradeName || storeProfile.name || 'Complete os dados da loja',
+        },
+        {
+          label: 'Backend respondendo',
+          ok: pilotSync.enabled && pilotSync.status === 'online',
+          detail: pilotSync.message,
+        },
+        {
+          label: 'Pedidos com fallback local',
+          ok: true,
+          detail: `${orders.length} pedido(s) salvos no navegador`,
+        },
+        {
+          label: 'Impressao revisada',
+          ok: printerConfig.connected && printerConfig.deviceName,
+          detail: printerConfig.connected ? printerConfig.deviceName : 'Impressora desconectada',
+        },
+      ]
+
+      return (
+        <Modal
+          title="Modo piloto controlado"
+          subtitle="Backend, backup, logs e fila de pedidos para teste real acompanhado."
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={exportOrdersCsvFile}>CSV pedidos</Button>
+              <Button onClick={exportAppBackup}>Backup JSON</Button>
+              <Button variant="primary" onClick={syncPendingOrders}>Sincronizar pendentes</Button>
+            </>
+          }
+        >
+          <div className="pilot-layout">
+            <section className="pilot-panel pilot-panel--status">
+              <header className="pilot-panel__header">
+                <div>
+                  <strong>Conexao da API</strong>
+                  <small>{API_BASE_URL}</small>
+                </div>
+                <StatusBadge tone={pilotStatus.tone}>{pilotStatus.label}</StatusBadge>
+              </header>
+
+              <div className="pilot-grid">
+                <div>
+                  <span>Loja API</span>
+                  <strong>{pilotSync.storeName || 'Nao vinculada'}</strong>
+                  <small>{pilotSync.storeId || 'Sem storeId carregado'}</small>
+                </div>
+                <div>
+                  <span>Ultimo teste</span>
+                  <strong>{pilotSync.lastCheckedAt || '-'}</strong>
+                  <small>{pilotSync.message}</small>
+                </div>
+                <div>
+                  <span>Ultimo sync</span>
+                  <strong>{pilotSync.lastSyncedAt || '-'}</strong>
+                  <small>{syncedOrders.length} pedido(s) com backend</small>
+                </div>
+                <div>
+                  <span>Pendentes</span>
+                  <strong>{pendingSyncOrders.length}</strong>
+                  <small>Reenvio manual disponivel</small>
+                </div>
+              </div>
+
+              <div className="pilot-actions">
+                <Button variant="primary" onClick={connectPilotSync}>Ligar piloto</Button>
+                <Button onClick={quickHealthCheck}>Checar API</Button>
+                <Button onClick={sendPilotLog}>Log teste</Button>
+                <Button variant="danger" onClick={disablePilotSync}>Desligar</Button>
+              </div>
+
+              <form className="pilot-switches">
+                <Field label="Sincronizar novos pedidos">
+                  <select
+                    value={pilotSync.autoSyncOrders ? 'yes' : 'no'}
+                    onChange={(event) => updatePilotSync({ autoSyncOrders: event.target.value === 'yes' })}
+                  >
+                    <option value="yes">Automaticamente</option>
+                    <option value="no">Manual</option>
+                  </select>
+                </Field>
+                <Field label="Sincronizar mudanca de status">
+                  <select
+                    value={pilotSync.syncOnStatusChange ? 'yes' : 'no'}
+                    onChange={(event) => updatePilotSync({ syncOnStatusChange: event.target.value === 'yes' })}
+                  >
+                    <option value="yes">Automaticamente</option>
+                    <option value="no">Manual</option>
+                  </select>
+                </Field>
+              </form>
+            </section>
+
+            <section className="pilot-panel">
+              <header className="pilot-panel__header">
+                <div>
+                  <strong>Checklist do teste</strong>
+                  <small>Use antes de abrir pedidos reais.</small>
+                </div>
+              </header>
+              <div className="stack-list">
+                {pilotChecklist.map((item) => (
+                  <article className="list-row" key={item.label}>
+                    <Icon name={item.ok ? 'check' : 'bell'} size={18} />
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.detail}</small>
+                    </span>
+                    <StatusBadge tone={item.ok ? 'success' : 'warning'}>{item.ok ? 'OK' : 'Revisar'}</StatusBadge>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="pilot-panel pilot-panel--queue">
+              <header className="pilot-panel__header">
+                <div>
+                  <strong>Fila de sincronizacao</strong>
+                  <small>Pedidos sem backend ou com falha aparecem aqui.</small>
+                </div>
+                <Button variant="primary" onClick={syncPendingOrders}>Reenviar</Button>
+              </header>
+              <div className="stack-list">
+                {pendingSyncOrders.slice(0, 8).map((order) => {
+                  const syncMeta = getOrderSyncMeta(order)
+
+                  return (
+                    <article className="list-row" key={order.id}>
+                      <span>
+                        <strong>#{order.id} - {order.customer}</strong>
+                        <small>{syncMeta.description}</small>
+                      </span>
+                      <StatusBadge tone={syncMeta.tone}>{syncMeta.label}</StatusBadge>
+                      <Button onClick={() => syncSingleOrderToBackend(order)}>Enviar</Button>
+                    </article>
+                  )
+                })}
+                {pendingSyncOrders.length === 0 ? <div className="empty-modal">Nenhum pedido pendente de API.</div> : null}
+              </div>
+            </section>
           </div>
         </Modal>
       )
@@ -10260,7 +12347,18 @@ function App() {
       const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
 
       return (
-        <Modal title={`Pedido #${payload.id}`} subtitle={payload.customer} onClose={closeModal}>
+        <Modal
+          title={`Pedido #${payload.id}`}
+          subtitle={payload.customer}
+          onClose={closeModal}
+          footer={
+            <>
+              <Button onClick={() => printOrderTicket(normalizedOrder, 'kitchen')}>Cozinha</Button>
+              <Button onClick={() => printOrderTicket(normalizedOrder, 'dispatch')}>Expedicao</Button>
+              <Button variant="primary" onClick={() => printOrderTicket(normalizedOrder, 'order')}>Imprimir pedido</Button>
+            </>
+          }
+        >
           <div className="order-detail">
             <div><span>Origem</span><strong>{getOrderSource(normalizedOrder)}</strong></div>
             <div><span>Status</span><strong>{getOrderStageLabel(normalizedOrder.status || 'analysis')} - ETA {getOrderEta(normalizedOrder)}</strong></div>
@@ -10338,11 +12436,11 @@ function App() {
             <Button
               variant="primary"
               onClick={() => {
-                notify(`NF do pedido #${payload.id} enviada para fila de impressao.`)
+                printInvoiceForOrder(normalizedOrder)
                 closeModal()
               }}
             >
-              Simular impressao
+              Imprimir NFC-e
             </Button>
           </div>
         </Modal>
@@ -10415,8 +12513,8 @@ function App() {
             </article>
             <article className="list-row">
               <span>
-                <strong>Estoque em alerta</strong>
-                <small>{lowStockCount} item(ns) abaixo do minimo</small>
+                <strong>Itens esgotados</strong>
+                <small>{products.filter((product) => !isProductAvailable(product)).length} item(ns) indisponiveis</small>
               </span>
             </article>
             <article className="list-row">
@@ -10605,50 +12703,191 @@ function App() {
     }
 
     if (modal.type === 'printer') {
+      const normalizedPrinter = normalizePrinterConfig(printerConfig)
+      const previewPrinter = printerFormToConfig(printerForm, normalizedPrinter)
+      const previewPaper = getPrinterPaperOption(previewPrinter.paper)
+      const previewFont = getPrinterFontOption(previewPrinter.fontFamily)
+      const previewDensity = getPrinterDensityOption(previewPrinter.density)
+      const previewDarkness = getPrinterDarknessOption(previewPrinter.darknessLevel)
+      const previewOrder = createPrinterTestOrder()
+      const previewDocument = {
+        label: `Pedido teste #${previewOrder.id}`,
+        type: 'Teste',
+        title: `Pedido teste #${previewOrder.id}`,
+        bodyHtml: buildOrderPrintBody(previewOrder, storeProfile, previewPrinter, 'order'),
+      }
+
       return (
         <Modal
-          title="Impressora"
-          subtitle="Dispositivo local, fila e testes de impressao."
+          title="Configuracao de comandas"
+          subtitle="Layout da bobina, impressora, conteudo do ticket e pre-visualizacao."
           onClose={closeModal}
-          footer={<><Button onClick={clearPrintQueue}>Limpar fila</Button><Button variant="primary" form="printer-form" type="submit">Salvar impressora</Button></>}
+          footer={<><Button onClick={runPrinterTest}>Imprimir teste</Button><Button onClick={clearPrintQueue}>Limpar fila</Button><Button variant="primary" form="printer-form" type="submit">Salvar configuracao</Button></>}
         >
-          <form className="form-grid" id="printer-form" onSubmit={savePrinterSettings}>
-            <Field label="Dispositivo">
-              <input value={printerForm.deviceName} onChange={(event) => setPrinterForm({ ...printerForm, deviceName: event.target.value })} />
-            </Field>
-            <Field label="Conectada">
-              <select value={printerForm.connected} onChange={(event) => setPrinterForm({ ...printerForm, connected: event.target.value })}>
-                <option value="yes">Sim</option>
-                <option value="no">Nao</option>
-              </select>
-            </Field>
-            <Field label="Copias">
-              <input value={printerForm.copies} onChange={(event) => setPrinterForm({ ...printerForm, copies: event.target.value })} />
-            </Field>
-            <Field label="Bobina">
-              <select value={printerForm.paper} onChange={(event) => setPrinterForm({ ...printerForm, paper: event.target.value })}>
-                <option>58mm</option>
-                <option>80mm</option>
-              </select>
-            </Field>
-          </form>
-          <div className="stack-list">
-            <article className="list-row">
-              <span>
-                <strong>Fila atual</strong>
-                <small>{printerConfig.queue.length} item(ns) aguardando ou prontos</small>
-              </span>
-              <Button variant="primary" onClick={runPrinterTest}>Teste</Button>
-            </article>
-            {printerConfig.queue.map((job) => (
-              <article className="list-row" key={job.id}>
-                <span>
-                  <strong>{job.label}</strong>
-                  <small>{job.type} - {job.status}</small>
-                </span>
-                <Button variant="danger" onClick={() => completePrintJob(job.id)}>Remover</Button>
-              </article>
-            ))}
+          <div className="printer-config-layout">
+            <section className="printer-panel printer-panel--settings">
+              <header className="printer-panel__header">
+                <div>
+                  <strong>Comanda</strong>
+                  <small>{previewPrinter.paper} - {previewPrinter.copies} via(s) - fonte {previewPrinter.fontSize}px</small>
+                </div>
+                <StatusBadge tone={previewPrinter.connected ? 'success' : 'warning'}>
+                  {previewPrinter.connected ? 'Conectada' : 'Desconectada'}
+                </StatusBadge>
+              </header>
+
+              <form className="printer-settings-form" id="printer-form" onSubmit={savePrinterSettings}>
+                <section className="printer-form-section">
+                  <h3>Impressora</h3>
+                  <div className="printer-form-grid">
+                    <Field label="Dispositivo">
+                      <input value={printerForm.deviceName} onChange={(event) => setPrinterForm({ ...printerForm, deviceName: event.target.value })} />
+                    </Field>
+                    <Field label="Conectada">
+                      <select value={printerForm.connected} onChange={(event) => setPrinterForm({ ...printerForm, connected: event.target.value })}>
+                        <option value="yes">Sim</option>
+                        <option value="no">Nao</option>
+                      </select>
+                    </Field>
+                    <Field label="Copias">
+                      <input min="1" max="5" type="number" value={printerForm.copies} onChange={(event) => setPrinterForm({ ...printerForm, copies: event.target.value })} />
+                    </Field>
+                    <Field label="Bobina">
+                      <select value={printerForm.paper} onChange={(event) => setPrinterForm({ ...printerForm, paper: event.target.value })}>
+                        {PRINTER_PAPER_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="printer-form-section">
+                  <h3>Formato</h3>
+                  <div className="printer-form-grid">
+                    <Field label="Fonte">
+                      <select value={printerForm.fontFamily} onChange={(event) => setPrinterForm({ ...printerForm, fontFamily: event.target.value })}>
+                        {PRINTER_FONT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Tamanho da fonte">
+                      <input min="9" max="18" type="number" value={printerForm.fontSize} onChange={(event) => setPrinterForm({ ...printerForm, fontSize: event.target.value })} />
+                    </Field>
+                    <Field label="Margem em mm">
+                      <input min="0" max="12" type="number" value={printerForm.marginMm} onChange={(event) => setPrinterForm({ ...printerForm, marginMm: event.target.value })} />
+                    </Field>
+                    <Field label="Densidade">
+                      <select value={printerForm.density} onChange={(event) => setPrinterForm({ ...printerForm, density: event.target.value })}>
+                        {PRINTER_DENSITY_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label={`Escuro do texto (${printerForm.darknessLevel}%)`}>
+                      <input
+                        className="printer-darkness-range"
+                        max="100"
+                        min="0"
+                        step="1"
+                        type="range"
+                        value={printerForm.darknessLevel}
+                        onChange={(event) => setPrinterForm({ ...printerForm, darknessLevel: event.target.value })}
+                      />
+                      <div className="printer-range-scale">
+                        <span>Claro</span>
+                        <span>Escuro</span>
+                      </div>
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="printer-form-section">
+                  <h3>Conteudo</h3>
+                  <div className="printer-form-grid">
+                    <Field label="Linha de corte">
+                      <select value={printerForm.cutPaper} onChange={(event) => setPrinterForm({ ...printerForm, cutPaper: event.target.value })}>
+                        <option value="yes">Mostrar</option>
+                        <option value="no">Ocultar</option>
+                      </select>
+                    </Field>
+                    <Field label="Cabecalho da loja">
+                      <select value={printerForm.showStoreHeader} onChange={(event) => setPrinterForm({ ...printerForm, showStoreHeader: event.target.value })}>
+                        <option value="yes">Mostrar</option>
+                        <option value="no">Ocultar</option>
+                      </select>
+                    </Field>
+                    <Field label="Telefone do cliente">
+                      <select value={printerForm.showCustomerPhone} onChange={(event) => setPrinterForm({ ...printerForm, showCustomerPhone: event.target.value })}>
+                        <option value="yes">Mostrar</option>
+                        <option value="no">Ocultar</option>
+                      </select>
+                    </Field>
+                    <Field label="Valores do pedido">
+                      <select value={printerForm.showFinancials} onChange={(event) => setPrinterForm({ ...printerForm, showFinancials: event.target.value })}>
+                        <option value="yes">Mostrar</option>
+                        <option value="no">Ocultar</option>
+                      </select>
+                    </Field>
+                    <Field label="Observacoes">
+                      <select value={printerForm.showNotes} onChange={(event) => setPrinterForm({ ...printerForm, showNotes: event.target.value })}>
+                        <option value="yes">Mostrar</option>
+                        <option value="no">Ocultar</option>
+                      </select>
+                    </Field>
+                  </div>
+                </section>
+              </form>
+            </section>
+
+            <section className="printer-panel printer-panel--preview">
+              <header className="printer-panel__header">
+                <div>
+                  <strong>Previa da comanda</strong>
+                  <small>Atualiza enquanto voce configura.</small>
+                </div>
+                <Button variant="primary" onClick={runPrinterTest}>Imprimir teste</Button>
+              </header>
+              <div className="printer-preview-shell">
+                <div
+                  className="printer-preview-paper"
+                  style={{
+                    '--preview-paper-width': previewPrinter.paper === 'A4' ? '360px' : `${Math.min(360, Math.max(250, previewPaper.widthMm * 4.4))}px`,
+                    '--preview-font-family': previewFont.family,
+                    '--preview-font-size': `${previewPrinter.fontSize}px`,
+                    '--preview-font-weight': previewDarkness.fontWeight,
+                    '--preview-line-height': previewDensity.lineHeight,
+                    '--preview-text-shadow': previewDarkness.textShadow,
+                    '--preview-margin': `${Math.max(8, previewPrinter.marginMm * 3)}px`,
+                  }}
+                >
+                  <div className="printer-preview-receipt" dangerouslySetInnerHTML={{ __html: previewDocument.bodyHtml }} />
+                </div>
+              </div>
+            </section>
+
+            <section className="printer-panel printer-panel--queue">
+              <header className="printer-panel__header">
+                <div>
+                  <strong>Fila de impressao</strong>
+                  <small>{normalizedPrinter.queue.length} item(ns) aguardando, impressos ou com falha</small>
+                </div>
+                <Button onClick={clearPrintQueue}>Limpar fila</Button>
+              </header>
+              <div className="empty-modal">
+                A impressao abre a janela do navegador. Nela, selecione a impressora fisica, desative cabecalhos/rodapes e mantenha o tamanho da bobina configurado aqui.
+              </div>
+              <div className="stack-list">
+                {normalizedPrinter.queue.map((job) => (
+                  <article className="list-row" key={job.id}>
+                    <span>
+                      <strong>{job.label}</strong>
+                      <small>{job.type} - {job.status} - {job.printedAt || job.createdAt}</small>
+                    </span>
+                    <div className="modal-actions">
+                      <Button onClick={() => printQueuedJob(job)}>Imprimir</Button>
+                      <Button variant="danger" onClick={() => completePrintJob(job.id)}>Remover</Button>
+                    </div>
+                  </article>
+                ))}
+                {normalizedPrinter.queue.length === 0 ? <div className="empty-modal">Nenhum item na fila.</div> : null}
+              </div>
+            </section>
           </div>
         </Modal>
       )
@@ -10670,7 +12909,10 @@ function App() {
               </select>
             </Field>
             <Field label="Impressao automatica">
-              <select value={settings.autoPrint ? 'yes' : 'no'} onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes' })}>
+              <select
+                value={settings.autoPrint ? 'yes' : 'no'}
+                onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes', printer: event.target.value === 'yes' })}
+              >
                 <option value="yes">Ativa</option>
                 <option value="no">Desligada</option>
               </select>
@@ -10751,6 +12993,7 @@ function App() {
         notificationCount={notificationCount}
         onLogout={logoutStoreUser}
         onOpenModal={openModal}
+        pilotSync={pilotSync}
       />
 
       <div className="workspace">
@@ -10780,6 +13023,8 @@ function App() {
             onClose={() => setNoticeVisible(false)}
             onOpenPassword={() => openModal('password')}
           />
+
+          {activeNav === 'reports' ? <BackendDiagnostics /> : null}
 
           {activeNav === 'menu' ? null : <Metrics orders={orders} storeOpen={storeOpen} />}
 
