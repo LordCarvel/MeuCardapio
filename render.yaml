@@ -17,3 +17,13 @@ services:
         value: org.postgresql.Driver
       - key: APP_CORS_ALLOWED_ORIGINS
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false

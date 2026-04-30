@@ -50,4 +50,8 @@ public class StoreUser {
     public String getPasswordHash() { return passwordHash; }
     public String getRole() { return role; }
     public LocalDateTime getCreatedAt() { return createdAt; }
+
+    public void changePassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
 }

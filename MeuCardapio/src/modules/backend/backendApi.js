@@ -106,3 +106,31 @@ export async function createBackendTestLog(storeId) {
     message: 'Teste manual enviado pelo painel React',
   })
 }
+
+export async function requestEmailLoginCode(email) {
+  return request('/auth/request-code', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function verifyEmailLoginCode(email, code) {
+  return request('/auth/verify-code', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  })
+}
+
+export async function requestPasswordResetCode(email) {
+  return request('/auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function resetBackendPassword(email, code, password) {
+  return request('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ email, code, password }),
+  })
+}

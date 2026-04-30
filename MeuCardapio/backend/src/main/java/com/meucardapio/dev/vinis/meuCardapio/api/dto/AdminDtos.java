@@ -34,6 +34,18 @@ public final class AdminDtos {
     public record LoginResponse(boolean ok, String message, StoreUserResponse user) {
     }
 
+    public record EmailCodeRequest(@Email @NotBlank String email) {
+    }
+
+    public record VerifyEmailCodeRequest(@Email @NotBlank String email, @NotBlank String code) {
+    }
+
+    public record ResetPasswordRequest(@Email @NotBlank String email, @NotBlank String code, @Size(min = 6) String password) {
+    }
+
+    public record AuthMessageResponse(boolean ok, String message) {
+    }
+
     public record LogRequest(UUID storeId, @NotBlank String level, @NotBlank String area, @NotBlank String message) {
     }
 

@@ -179,6 +179,11 @@ DATABASE_URL
 DATABASE_USERNAME
 DATABASE_PASSWORD
 APP_CORS_ALLOWED_ORIGINS
+SMTP_HOST
+SMTP_PORT
+SMTP_USERNAME
+SMTP_PASSWORD
+SMTP_FROM
 ```
 
 O `render.yaml` ja define:
@@ -191,6 +196,82 @@ Se o Render pedir tambem `DATABASE_DRIVER`, use exatamente:
 
 ```text
 org.postgresql.Driver
+```
+
+### Envio de codigo por email
+
+O login por codigo e a recuperacao de senha usam SMTP. Para manter gratuito, use uma conta de email sua com SMTP, por exemplo Gmail com senha de app, Outlook ou email do seu dominio.
+
+No Render, configure:
+
+```text
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=seu-email@gmail.com
+SMTP_PASSWORD=SENHA_DE_APP_DO_EMAIL
+SMTP_FROM=seu-email@gmail.com
+```
+
+Para Gmail, nao use a senha normal da conta. Use uma senha de app criada nas configuracoes de seguranca da conta Google.
+
+Endpoints disponiveis:
+
+```text
+POST /api/auth/request-code
+POST /api/auth/verify-code
+POST /api/auth/request-password-reset
+POST /api/auth/reset-password
+```
+
+Teste para pedir codigo de login:
+
+```powershell
+$body = @{ email = "demo@meucardapio.local" } | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://NOME-DO-SERVICO.onrender.com/api/auth/request-code" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Depois de receber o codigo por email:
+
+```powershell
+$body = @{
+  email = "demo@meucardapio.local"
+  code = "123456"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://NOME-DO-SERVICO.onrender.com/api/auth/verify-code" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Para recuperacao de senha:
+
+```powershell
+$body = @{ email = "demo@meucardapio.local" } | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://NOME-DO-SERVICO.onrender.com/api/auth/request-password-reset" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+E depois:
+
+```powershell
+$body = @{
+  email = "demo@meucardapio.local"
+  code = "123456"
+  password = "nova-senha"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://NOME-DO-SERVICO.onrender.com/api/auth/reset-password" `
+  -ContentType "application/json" `
+  -Body $body
 ```
 
 ### Valor correto do CORS
@@ -276,6 +357,11 @@ DATABASE_USERNAME=postgres.PROJECT_REF
 DATABASE_PASSWORD=SUA_SENHA_DO_SUPABASE
 DATABASE_DRIVER=org.postgresql.Driver
 APP_CORS_ALLOWED_ORIGINS=https://lordcarvel.github.io
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=seu-email@gmail.com
+SMTP_PASSWORD=SENHA_DE_APP_DO_EMAIL
+SMTP_FROM=seu-email@gmail.com
 ```
 
 9. Clique em deploy.
@@ -449,7 +535,63 @@ https://lordcarvel.github.io/MeuCardapio/
 12. Diagnostico do front conectando na API.
 13. Tabelas criadas no Supabase.
 
-## 6. Erros comuns
+## 6. Como saber se funcionou 100%
+
+Depois que Render e GitHub Pages estiverem publicados, faca estes testes nesta ordem.
+
+### 6.1 Testar API diretamente
+
+Abra no navegador:
+
+```text
+https://NOME-DO-SERVICO.onrender.com/api/health
+```
+
+Esperado:
+
+```text
+status UP
+```
+
+### 6.2 Testar banco via API
+
+Abra:
+
+```text
+https://NOME-DO-SERVICO.onrender.com/api/stores
+```
+
+Esperado: uma lista JSON. Se a conta admin criou uma loja inicial ou se o seed demo rodou, a lista vem com pelo menos uma loja.
+
+### 6.3 Testar front com API de producao
+
+Abra:
+
+```text
+https://lordcarvel.github.io/MeuCardapio/
+```
+
+Entre no app, va em `Relatorios` e confira o bloco `Backend`.
+
+Esperado:
+
+```text
+API conectada
+```
+
+Depois clique em `Gerar log`. Em seguida, confira no Supabase a tabela:
+
+```text
+app_logs
+```
+
+Se o log apareceu, o fluxo completo funcionou:
+
+```text
+GitHub Pages -> Render -> Supabase
+```
+
+## 7. Erros comuns
 
 ### Front abriu, mas nao conecta na API
 
