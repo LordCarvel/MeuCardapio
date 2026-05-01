@@ -122,6 +122,7 @@
 }
 
 .form label span,
+.scheduleBlock > span,
 .demoBox strong {
   color: #0b2332;
   font-size: 13px;
@@ -165,6 +166,50 @@
   background: #ffffff;
   color: #0d5eab;
   box-shadow: 0 8px 18px rgba(31, 79, 112, 0.1);
+}
+
+.scheduleBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.scheduleGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.scheduleRow {
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) minmax(0, 92px) minmax(0, 92px);
+  gap: 8px;
+  align-items: center;
+}
+
+.scheduleToggle {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #d7e0e7;
+  border-radius: 12px;
+  background: #f8fbfd;
+}
+
+.scheduleToggle input {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+.scheduleToggle strong {
+  color: #17303e;
+  font-size: 13px;
+}
+
+.form input:disabled {
+  background: #eef3f6;
+  color: #8da0ab;
 }
 
 .primaryButton,
@@ -453,6 +498,14 @@
   .featureRow,
   .deviceColumns {
     grid-template-columns: 1fr;
+  }
+
+  .scheduleRow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .scheduleToggle {
+    grid-column: 1 / -1;
   }
 
   .deviceMain {

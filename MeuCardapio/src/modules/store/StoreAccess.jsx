@@ -6,6 +6,26 @@ const blankLoginForm = {
   password: '',
 }
 
+const signupWeekdays = [
+  ['mon', 'Segunda'],
+  ['tue', 'Terca'],
+  ['wed', 'Quarta'],
+  ['thu', 'Quinta'],
+  ['fri', 'Sexta'],
+  ['sat', 'Sabado'],
+  ['sun', 'Domingo'],
+]
+
+const defaultSignupSchedule = {
+  mon: { open: true, from: '18:00', to: '23:30' },
+  tue: { open: true, from: '18:00', to: '23:30' },
+  wed: { open: true, from: '18:00', to: '23:30' },
+  thu: { open: true, from: '18:00', to: '23:30' },
+  fri: { open: true, from: '18:00', to: '00:30' },
+  sat: { open: true, from: '18:00', to: '00:30' },
+  sun: { open: false, from: '18:00', to: '23:30' },
+}
+
 const blankSignupForm = {
   tradeName: '',
   ownerName: '',
@@ -17,7 +37,7 @@ const blankSignupForm = {
   number: '',
   cityName: '',
   state: 'SC',
-  schedule: '',
+  schedule: defaultSignupSchedule,
   password: '',
   confirmPassword: '',
 }
@@ -43,6 +63,28 @@ export function StoreAccess({
 
   function updateSignup(field, value) {
     setSignupForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateSignupSchedule(day, field, value) {
+    setSignupForm((current) => ({
+      ...current,
+      schedule: {
+        ...current.schedule,
+        [day]: {
+          ...current.schedule[day],
+          [field]: field === 'open' ? Boolean(value) : value,
+        },
+      },
+    }))
+  }
+
+  function buildScheduleText(schedule) {
+    return signupWeekdays
+      .map(([day, label]) => {
+        const item = schedule[day]
+        return item?.open ? `${label} ${item.from || '--:--'}-${item.to || '--:--'}` : `${label} fechado`
+      })
+      .join('; ')
   }
 
   async function submitLogin(event) {
@@ -120,7 +162,7 @@ export function StoreAccess({
       number: signupForm.number.trim(),
       cityName: signupForm.cityName.trim(),
       state: signupForm.state.trim().toUpperCase(),
-      schedule: signupForm.schedule.trim(),
+      schedule: buildScheduleText(signupForm.schedule),
       password: signupForm.password,
     })
     setStatus('idle')
@@ -264,10 +306,24 @@ export function StoreAccess({
                 <span>UF</span>
                 <input maxLength="2" required value={signupForm.state} onChange={(event) => updateSignup('state', event.target.value.toUpperCase())} />
               </label>
-              <label>
-                <span>Horario</span>
-                <input required placeholder="Ex: 18:00 - 23:30" value={signupForm.schedule} onChange={(event) => updateSignup('schedule', event.target.value)} />
-              </label>
+              <div className={styles.scheduleBlock}>
+                <span>Horarios por dia</span>
+                <div className={styles.scheduleGrid}>
+                  {signupWeekdays.map(([day, label]) => {
+                    const schedule = signupForm.schedule[day]
+                    return (
+                      <div className={styles.scheduleRow} key={day}>
+                        <label className={styles.scheduleToggle}>
+                          <input checked={schedule.open} type="checkbox" onChange={(event) => updateSignupSchedule(day, 'open', event.target.checked)} />
+                          <strong>{label}</strong>
+                        </label>
+                        <input aria-label={`${label} abre`} disabled={!schedule.open} type="time" value={schedule.from} onChange={(event) => updateSignupSchedule(day, 'from', event.target.value)} />
+                        <input aria-label={`${label} fecha`} disabled={!schedule.open} type="time" value={schedule.to} onChange={(event) => updateSignupSchedule(day, 'to', event.target.value)} />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
               <label>
                 <span>Senha</span>
                 <input autoComplete="new-password" required type="password" value={signupForm.password} onChange={(event) => updateSignup('password', event.target.value)} />

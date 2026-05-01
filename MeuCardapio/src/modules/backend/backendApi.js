@@ -1,5 +1,17 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
 
+function getApiConfigurationHint() {
+  if (/github\.io/i.test(API_BASE_URL)) {
+    return 'VITE_API_BASE_URL esta apontando para o GitHub Pages. Configure a variavel do GitHub Actions com a URL do Render terminando em /api.'
+  }
+
+  if (!/\/api\/?$/i.test(API_BASE_URL)) {
+    return 'Confira VITE_API_BASE_URL. Ela deve apontar para a API do Render e terminar em /api.'
+  }
+
+  return ''
+}
+
 export async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -8,7 +20,12 @@ export async function request(path, options = {}) {
 
   if (!response.ok) {
     const detail = await response.text()
-    throw new Error(detail || `Erro HTTP ${response.status}`)
+    const hint = getApiConfigurationHint()
+    const isHtml = /^\s*</.test(detail)
+    const message = isHtml
+      ? `Erro HTTP ${response.status}. A resposta veio em HTML, o que normalmente indica que o front chamou o GitHub Pages em vez da API do Render.`
+      : detail || `Erro HTTP ${response.status}`
+    throw new Error([message, hint].filter(Boolean).join(' '))
   }
 
   return response.status === 204 ? null : response.json()
