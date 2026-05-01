@@ -61,6 +61,24 @@ export async function request(path, options = {}) {
   return response.status === 204 ? null : response.json()
 }
 
+async function requestFirstAvailable(paths, options = {}) {
+  let lastError
+
+  for (const path of paths) {
+    try {
+      return await request(path, options)
+    } catch (err) {
+      lastError = err
+      const message = err instanceof Error ? err.message : ''
+      if (!/Erro HTTP 404/.test(message)) {
+        throw err
+      }
+    }
+  }
+
+  throw lastError || new Error('Endpoint da API nao encontrado.')
+}
+
 export async function checkBackendHealth() {
   return request('/health')
 }
@@ -180,9 +198,9 @@ export async function loginBackendUser(email, password) {
 }
 
 export async function requestSignupCode(email) {
-  return request('/auth/request-signup-code', {
+  return requestFirstAvailable(['/auth/signup/request-code', '/auth/request-signup-code', '/auth/codes'], {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, purpose: 'SIGNUP' }),
   })
 }
 
@@ -194,28 +212,28 @@ export async function signupBackendAccount(account) {
 }
 
 export async function requestEmailLoginCode(email) {
-  return request('/auth/request-code', {
+  return requestFirstAvailable(['/auth/login/request-code', '/auth/request-code', '/auth/codes'], {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, purpose: 'LOGIN' }),
   })
 }
 
 export async function verifyEmailLoginCode(email, code) {
-  return request('/auth/verify-code', {
+  return requestFirstAvailable(['/auth/login/verify-code', '/auth/verify-code'], {
     method: 'POST',
     body: JSON.stringify({ email, code }),
   })
 }
 
 export async function requestPasswordResetCode(email) {
-  return request('/auth/request-password-reset', {
+  return requestFirstAvailable(['/auth/password/request-reset', '/auth/request-password-reset', '/auth/codes'], {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, purpose: 'PASSWORD_RESET' }),
   })
 }
 
 export async function resetBackendPassword(email, code, password) {
-  return request('/auth/reset-password', {
+  return requestFirstAvailable(['/auth/password/reset', '/auth/reset-password'], {
     method: 'POST',
     body: JSON.stringify({ email, code, password }),
   })

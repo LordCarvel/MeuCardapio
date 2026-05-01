@@ -37,6 +37,9 @@ public final class AdminDtos {
     public record EmailCodeRequest(@Email @NotBlank String email) {
     }
 
+    public record AuthCodeRequest(@Email @NotBlank String email, @NotBlank String purpose) {
+    }
+
     public record VerifyEmailCodeRequest(@Email @NotBlank String email, @NotBlank String code) {
     }
 

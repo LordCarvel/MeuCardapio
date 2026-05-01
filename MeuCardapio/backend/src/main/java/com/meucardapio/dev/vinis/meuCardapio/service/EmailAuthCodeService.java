@@ -58,6 +58,16 @@ public class EmailAuthCodeService {
         requestCode(email, PURPOSE_PASSWORD_RESET);
     }
 
+    public void requestCodeByPurpose(String email, String purpose) {
+        String normalizedPurpose = purpose == null ? "" : purpose.trim().toUpperCase();
+        switch (normalizedPurpose) {
+            case PURPOSE_SIGNUP -> requestSignupCode(email);
+            case PURPOSE_PASSWORD_RESET -> requestPasswordResetCode(email);
+            case PURPOSE_LOGIN -> requestLoginCode(email);
+            default -> throw new IllegalArgumentException("Finalidade de codigo invalida.");
+        }
+    }
+
     public void requestSignupCode(String email) {
         String normalizedEmail = normalizeEmail(email);
         if (normalizedEmail.isBlank()) {

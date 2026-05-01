@@ -2,6 +2,7 @@ package com.meucardapio.dev.vinis.meuCardapio.api;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -17,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.LoginRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.LoginResponse;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.AuthCodeRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.AuthMessageResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.EmailCodeRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.ResetPasswordRequest;
@@ -47,6 +49,22 @@ public class AuthController {
         this.users = users;
         this.logService = logService;
         this.emailCodes = emailCodes;
+    }
+
+    @GetMapping("/auth/status")
+    public Map<String, Object> status() {
+        return Map.of(
+                "ok", true,
+                "service", "MeuCardapio Auth",
+                "endpoints", List.of(
+                        "/api/auth/login",
+                        "/api/auth/request-code",
+                        "/api/auth/request-signup-code",
+                        "/api/auth/signup/request-code",
+                        "/api/auth/codes",
+                        "/api/auth/signup",
+                        "/api/auth/request-password-reset",
+                        "/api/auth/reset-password"));
     }
 
     @GetMapping("/stores/{storeId}/users")
@@ -84,13 +102,13 @@ public class AuthController {
                 .orElseGet(() -> new LoginResponse(false, "Email ou senha invalidos", null));
     }
 
-    @PostMapping("/auth/request-code")
+    @PostMapping({"/auth/request-code", "/auth/login/request-code"})
     public AuthMessageResponse requestCode(@Valid @RequestBody EmailCodeRequest request) {
         emailCodes.requestLoginCode(request.email());
         return new AuthMessageResponse(true, "Se o email existir, um codigo de acesso sera enviado.");
     }
 
-    @PostMapping("/auth/request-signup-code")
+    @PostMapping({"/auth/request-signup-code", "/auth/signup/request-code"})
     public AuthMessageResponse requestSignupCode(@Valid @RequestBody EmailCodeRequest request) {
         users.findByEmailIgnoreCase(request.email()).ifPresent(user -> {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email ja cadastrado");
@@ -99,7 +117,20 @@ public class AuthController {
         return new AuthMessageResponse(true, "Codigo de validacao enviado para o email informado.");
     }
 
-    @PostMapping("/auth/verify-code")
+    @PostMapping("/auth/codes")
+    public AuthMessageResponse requestCodeByPurpose(@Valid @RequestBody AuthCodeRequest request) {
+        String purpose = request.purpose().trim().toUpperCase();
+        if (EmailAuthCodeService.PURPOSE_SIGNUP.equals(purpose)) {
+            users.findByEmailIgnoreCase(request.email()).ifPresent(user -> {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Email ja cadastrado");
+            });
+        }
+
+        emailCodes.requestCodeByPurpose(request.email(), purpose);
+        return new AuthMessageResponse(true, "Se os dados estiverem validos, um codigo sera enviado.");
+    }
+
+    @PostMapping({"/auth/verify-code", "/auth/login/verify-code"})
     public LoginResponse verifyCode(@Valid @RequestBody VerifyEmailCodeRequest request) {
         return emailCodes.verifyLoginCode(request.email(), request.code())
                 .map(user -> {
@@ -109,13 +140,13 @@ public class AuthController {
                 .orElseGet(() -> new LoginResponse(false, "Codigo invalido ou expirado", null));
     }
 
-    @PostMapping("/auth/request-password-reset")
+    @PostMapping({"/auth/request-password-reset", "/auth/password/request-reset"})
     public AuthMessageResponse requestPasswordReset(@Valid @RequestBody EmailCodeRequest request) {
         emailCodes.requestPasswordResetCode(request.email());
         return new AuthMessageResponse(true, "Se o email existir, um codigo de redefinicao sera enviado.");
     }
 
-    @PostMapping("/auth/reset-password")
+    @PostMapping({"/auth/reset-password", "/auth/password/reset"})
     public AuthMessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         boolean ok = emailCodes.resetPassword(request.email(), request.code(), request.password());
         return ok
