@@ -105,12 +105,19 @@ export function StoreAccess({
 
   async function submitLogin(event) {
     event.preventDefault()
-    setStatus('submitting')
-    const result = await onLogin?.({
-      email: loginForm.email.trim(),
-      password: loginForm.password,
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onLogin?.({
+        email: loginForm.email.trim(),
+        password: loginForm.password,
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel entrar agora.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setError(result.message || 'Login invalido.')
@@ -122,12 +129,19 @@ export function StoreAccess({
 
   async function submitAccessKey(event) {
     event.preventDefault()
-    setStatus('submitting')
-    const result = await onUseDemo?.({
-      source: 'accessKey',
-      accessKey: accessKey.trim(),
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onUseDemo?.({
+        source: 'accessKey',
+        accessKey: accessKey.trim(),
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel entrar com a chave.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setError(result.message || 'Chave invalida.')
@@ -138,12 +152,19 @@ export function StoreAccess({
   }
 
   async function startDemo() {
-    setStatus('submitting')
-    const result = await onUseDemo?.({
-      source: 'demoButton',
-      accessKey: 'demo',
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onUseDemo?.({
+        source: 'demoButton',
+        accessKey: 'demo',
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel abrir o demo.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setError(result.message || 'Nao foi possivel abrir o demo.')
@@ -166,23 +187,30 @@ export function StoreAccess({
       return
     }
 
-    setStatus('submitting')
-    const result = await onCreateAccount?.({
-      tradeName: signupForm.tradeName.trim(),
-      ownerName: signupForm.ownerName.trim(),
-      email: signupForm.email.trim(),
-      phone: signupForm.phone.trim(),
-      taxId: signupForm.taxId.trim(),
-      category: signupForm.category,
-      street: signupForm.street.trim(),
-      number: signupForm.number.trim(),
-      cityName: signupForm.cityName.trim(),
-      state: signupForm.state.trim().toUpperCase(),
-      schedule: buildScheduleText(signupForm.schedule),
-      password: signupForm.password,
-      code: signupForm.emailCode.trim(),
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onCreateAccount?.({
+        tradeName: signupForm.tradeName.trim(),
+        ownerName: signupForm.ownerName.trim(),
+        email: signupForm.email.trim(),
+        phone: signupForm.phone.trim(),
+        taxId: signupForm.taxId.trim(),
+        category: signupForm.category,
+        street: signupForm.street.trim(),
+        number: signupForm.number.trim(),
+        cityName: signupForm.cityName.trim(),
+        state: signupForm.state.trim().toUpperCase(),
+        schedule: buildScheduleText(signupForm.schedule),
+        password: signupForm.password,
+        code: signupForm.emailCode.trim(),
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel criar a conta.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setError(result.message || 'Nao foi possivel criar a conta.')
@@ -198,12 +226,19 @@ export function StoreAccess({
       return
     }
 
-    setStatus('submitting')
-    const result = await onCreateAccount?.({
-      action: 'requestCode',
-      email: signupForm.email.trim(),
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onCreateAccount?.({
+        action: 'requestCode',
+        email: signupForm.email.trim(),
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel enviar o codigo.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setMessage('')
@@ -222,12 +257,19 @@ export function StoreAccess({
       return
     }
 
-    setStatus('submitting')
-    const result = await onResetPassword?.({
-      action: 'requestCode',
-      email: resetForm.email.trim(),
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onResetPassword?.({
+        action: 'requestCode',
+        email: resetForm.email.trim(),
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel enviar o codigo.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setMessage('')
@@ -248,14 +290,21 @@ export function StoreAccess({
       return
     }
 
-    setStatus('submitting')
-    const result = await onResetPassword?.({
-      action: 'reset',
-      email: resetForm.email.trim(),
-      code: resetForm.code.trim(),
-      password: resetForm.password,
-    })
-    setStatus('idle')
+    let result
+
+    try {
+      setStatus('submitting')
+      result = await onResetPassword?.({
+        action: 'reset',
+        email: resetForm.email.trim(),
+        code: resetForm.code.trim(),
+        password: resetForm.password,
+      })
+    } catch (err) {
+      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel redefinir a senha.' }
+    } finally {
+      setStatus('idle')
+    }
 
     if (result?.ok === false) {
       setMessage('')

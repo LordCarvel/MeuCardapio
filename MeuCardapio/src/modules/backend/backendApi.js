@@ -1,4 +1,5 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
+const REQUEST_TIMEOUT_MS = 30000
 
 function getApiConfigurationHint() {
   if (/github\.io/i.test(API_BASE_URL)) {
@@ -13,19 +14,48 @@ function getApiConfigurationHint() {
 }
 
 export async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  })
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      signal: controller.signal,
+      ...options,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('A API demorou demais para responder. Confira se o Render esta online e se o SMTP do email esta configurado corretamente.')
+    }
+
+    throw err
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 
   if (!response.ok) {
     const detail = await response.text()
     const hint = getApiConfigurationHint()
     const isHtml = /^\s*</.test(detail)
+    let apiMessage = detail
+
+    if (!isHtml && detail) {
+      try {
+        const parsed = JSON.parse(detail)
+        apiMessage = parsed.message || parsed.error || parsed.detail || detail
+      } catch {
+        apiMessage = detail
+      }
+    }
+
+    const notFoundHint = response.status === 404 && path.startsWith('/auth/')
+      ? 'Esse endpoint existe no codigo atual. Faca redeploy do backend no Render e confirme que o front esta usando a URL desse servico.'
+      : ''
     const message = isHtml
       ? `Erro HTTP ${response.status}. A resposta veio em HTML, o que normalmente indica que o front chamou o GitHub Pages em vez da API do Render.`
-      : detail || `Erro HTTP ${response.status}`
-    throw new Error([message, hint].filter(Boolean).join(' '))
+      : apiMessage || `Erro HTTP ${response.status}`
+    throw new Error([message, notFoundHint, hint].filter(Boolean).join(' '))
   }
 
   return response.status === 204 ? null : response.json()
