@@ -5,6 +5,12 @@ const blankLoginForm = {
   email: '',
   password: '',
 }
+const blankResetForm = {
+  email: '',
+  code: '',
+  password: '',
+  confirmPassword: '',
+}
 
 const signupWeekdays = [
   ['mon', 'Segunda'],
@@ -40,6 +46,7 @@ const blankSignupForm = {
   schedule: defaultSignupSchedule,
   password: '',
   confirmPassword: '',
+  emailCode: '',
 }
 
 export function StoreAccess({
@@ -47,6 +54,7 @@ export function StoreAccess({
   users = [],
   onCreateAccount,
   onLogin,
+  onResetPassword,
   onUseDemo,
 }) {
   const [mode, setMode] = useState('login')
@@ -56,13 +64,21 @@ export function StoreAccess({
     email: users[0]?.email || '',
   })
   const [signupForm, setSignupForm] = useState(blankSignupForm)
+  const [resetForm, setResetForm] = useState(blankResetForm)
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
   const [status, setStatus] = useState('idle')
+  const [signupCodeSent, setSignupCodeSent] = useState(false)
+  const [resetCodeSent, setResetCodeSent] = useState(false)
 
   const busy = status === 'submitting'
 
   function updateSignup(field, value) {
     setSignupForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateReset(field, value) {
+    setResetForm((current) => ({ ...current, [field]: value }))
   }
 
   function updateSignupSchedule(day, field, value) {
@@ -164,6 +180,7 @@ export function StoreAccess({
       state: signupForm.state.trim().toUpperCase(),
       schedule: buildScheduleText(signupForm.schedule),
       password: signupForm.password,
+      code: signupForm.emailCode.trim(),
     })
     setStatus('idle')
 
@@ -173,6 +190,85 @@ export function StoreAccess({
     }
 
     setError('')
+  }
+
+  async function requestSignupValidationCode() {
+    if (!signupForm.email.trim()) {
+      setError('Informe o email antes de pedir o codigo.')
+      return
+    }
+
+    setStatus('submitting')
+    const result = await onCreateAccount?.({
+      action: 'requestCode',
+      email: signupForm.email.trim(),
+    })
+    setStatus('idle')
+
+    if (result?.ok === false) {
+      setMessage('')
+      setError(result.message || 'Nao foi possivel enviar o codigo.')
+      return
+    }
+
+    setSignupCodeSent(true)
+    setError('')
+    setMessage('Codigo enviado. Confira seu email e informe os 6 digitos.')
+  }
+
+  async function requestPasswordCode() {
+    if (!resetForm.email.trim()) {
+      setError('Informe o email cadastrado.')
+      return
+    }
+
+    setStatus('submitting')
+    const result = await onResetPassword?.({
+      action: 'requestCode',
+      email: resetForm.email.trim(),
+    })
+    setStatus('idle')
+
+    if (result?.ok === false) {
+      setMessage('')
+      setError(result.message || 'Nao foi possivel enviar o codigo.')
+      return
+    }
+
+    setResetCodeSent(true)
+    setError('')
+    setMessage('Codigo enviado. Confira seu email para redefinir a senha.')
+  }
+
+  async function submitPasswordReset(event) {
+    event.preventDefault()
+
+    if (resetForm.password.length < 6 || resetForm.password !== resetForm.confirmPassword) {
+      setError('Informe e confirme uma senha com pelo menos 6 caracteres.')
+      return
+    }
+
+    setStatus('submitting')
+    const result = await onResetPassword?.({
+      action: 'reset',
+      email: resetForm.email.trim(),
+      code: resetForm.code.trim(),
+      password: resetForm.password,
+    })
+    setStatus('idle')
+
+    if (result?.ok === false) {
+      setMessage('')
+      setError(result.message || 'Nao foi possivel redefinir a senha.')
+      return
+    }
+
+    setMode('login')
+    setLoginForm({ email: resetForm.email.trim(), password: '' })
+    setResetForm(blankResetForm)
+    setResetCodeSent(false)
+    setError('')
+    setMessage('Senha redefinida. Entre com sua nova senha.')
   }
 
   return (
@@ -196,10 +292,10 @@ export function StoreAccess({
           </header>
 
           <div className={styles.modeTabs} role="tablist" aria-label="Acesso">
-            <button className={mode === 'login' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('login'); setError('') }}>
+            <button className={mode === 'login' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('login'); setError(''); setMessage('') }}>
               Entrar
             </button>
-            <button className={mode === 'signup' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('signup'); setError('') }}>
+            <button className={mode === 'signup' ? styles.modeTabActive : ''} type="button" onClick={() => { setMode('signup'); setError(''); setMessage('') }}>
               Criar conta
             </button>
           </div>
@@ -249,13 +345,17 @@ export function StoreAccess({
                 </label>
 
                 {error ? <strong className={styles.error}>{error}</strong> : null}
+                {message ? <strong className={styles.success}>{message}</strong> : null}
 
                 <button className={styles.primaryButton} data-testid="store-login-submit" disabled={busy} type="submit">
                   Entrar
                 </button>
+                <button className={styles.linkButton} type="button" onClick={() => { setMode('reset'); setError(''); setMessage('') }}>
+                  Esqueci minha senha
+                </button>
               </form>
             </>
-          ) : (
+          ) : mode === 'signup' ? (
             <form className={styles.form} data-testid="store-signup-form" onSubmit={submitSignup}>
               <label>
                 <span>Nome da loja</span>
@@ -269,6 +369,11 @@ export function StoreAccess({
                 <span>E-mail</span>
                 <input autoComplete="username" required type="email" value={signupForm.email} onChange={(event) => updateSignup('email', event.target.value)} />
               </label>
+              <div className={styles.inlineAction}>
+                <button className={styles.outlineButton} disabled={busy} type="button" onClick={requestSignupValidationCode}>
+                  {signupCodeSent ? 'Reenviar codigo' : 'Enviar codigo de validacao'}
+                </button>
+              </div>
               <label>
                 <span>Telefone</span>
                 <input required value={signupForm.phone} onChange={(event) => updateSignup('phone', event.target.value)} />
@@ -332,11 +437,48 @@ export function StoreAccess({
                 <span>Confirmar senha</span>
                 <input autoComplete="new-password" required type="password" value={signupForm.confirmPassword} onChange={(event) => updateSignup('confirmPassword', event.target.value)} />
               </label>
+              <label>
+                <span>Codigo recebido por email</span>
+                <input inputMode="numeric" maxLength="6" required value={signupForm.emailCode} onChange={(event) => updateSignup('emailCode', event.target.value.replace(/\D/g, '').slice(0, 6))} />
+              </label>
 
               {error ? <strong className={styles.error}>{error}</strong> : null}
+              {message ? <strong className={styles.success}>{message}</strong> : null}
 
               <button className={styles.primaryButton} disabled={busy} type="submit">
                 {busy ? 'Criando conta...' : 'Criar conta'}
+              </button>
+            </form>
+          ) : (
+            <form className={styles.form} data-testid="store-reset-form" onSubmit={submitPasswordReset}>
+              <label>
+                <span>E-mail cadastrado</span>
+                <input autoComplete="username" required type="email" value={resetForm.email} onChange={(event) => updateReset('email', event.target.value)} />
+              </label>
+              <button className={styles.outlineButton} disabled={busy} type="button" onClick={requestPasswordCode}>
+                {resetCodeSent ? 'Reenviar codigo' : 'Enviar codigo de recuperacao'}
+              </button>
+              <label>
+                <span>Codigo recebido</span>
+                <input inputMode="numeric" maxLength="6" required value={resetForm.code} onChange={(event) => updateReset('code', event.target.value.replace(/\D/g, '').slice(0, 6))} />
+              </label>
+              <label>
+                <span>Nova senha</span>
+                <input autoComplete="new-password" required type="password" value={resetForm.password} onChange={(event) => updateReset('password', event.target.value)} />
+              </label>
+              <label>
+                <span>Confirmar nova senha</span>
+                <input autoComplete="new-password" required type="password" value={resetForm.confirmPassword} onChange={(event) => updateReset('confirmPassword', event.target.value)} />
+              </label>
+
+              {error ? <strong className={styles.error}>{error}</strong> : null}
+              {message ? <strong className={styles.success}>{message}</strong> : null}
+
+              <button className={styles.primaryButton} disabled={busy} type="submit">
+                Redefinir senha
+              </button>
+              <button className={styles.linkButton} type="button" onClick={() => { setMode('login'); setError(''); setMessage('') }}>
+                Voltar para entrar
               </button>
             </form>
           )}

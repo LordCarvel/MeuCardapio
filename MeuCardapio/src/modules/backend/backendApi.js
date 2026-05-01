@@ -131,6 +131,10 @@ export async function createBackendStore(store) {
   })
 }
 
+export async function getBackendStore(storeId) {
+  return request(`/stores/${storeId}`)
+}
+
 export async function createBackendStoreUser(storeId, user) {
   return request(`/stores/${storeId}/users`, {
     method: 'POST',
@@ -142,6 +146,20 @@ export async function loginBackendUser(email, password) {
   return request('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+  })
+}
+
+export async function requestSignupCode(email) {
+  return request('/auth/request-signup-code', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function signupBackendAccount(account) {
+  return request('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify(account),
   })
 }
 

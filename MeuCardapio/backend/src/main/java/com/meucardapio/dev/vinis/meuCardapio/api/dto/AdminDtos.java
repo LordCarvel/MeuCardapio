@@ -46,6 +46,25 @@ public final class AdminDtos {
     public record AuthMessageResponse(boolean ok, String message) {
     }
 
+    public record SignupRequest(
+            @NotBlank String tradeName,
+            @NotBlank String ownerName,
+            @Email @NotBlank String email,
+            @NotBlank String phone,
+            @NotBlank String taxId,
+            @NotBlank String category,
+            String street,
+            String number,
+            String district,
+            String cityName,
+            String state,
+            String schedule,
+            BigDecimal minimumOrder,
+            BigDecimal deliveryRadiusKm,
+            @NotBlank String code,
+            @Size(min = 6) String password) {
+    }
+
     public record LogRequest(UUID storeId, @NotBlank String level, @NotBlank String area, @NotBlank String message) {
     }
 

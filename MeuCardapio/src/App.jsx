@@ -8,10 +8,14 @@ import {
   checkBackendHealth,
   createBackendLog,
   createBackendOrder,
-  createBackendStore,
-  createBackendStoreUser,
   deleteBackendOrder,
+  getBackendStore,
   loadBackendWorkspace,
+  loginBackendUser,
+  requestPasswordResetCode,
+  requestSignupCode,
+  resetBackendPassword,
+  signupBackendAccount,
   updateBackendOrder,
   updateBackendOrderStatus,
 } from './modules/backend/backendApi'
@@ -100,6 +104,79 @@ const navItems = [
   { id: 'fiscal', icon: 'printer', label: 'Fiscal' },
   { id: 'integrations', icon: 'settings', label: 'Integracoes' },
   { id: 'reports', icon: 'chart', label: 'Relatorios' },
+]
+
+const tutorialSteps = [
+  {
+    nav: 'orders',
+    title: 'Visao geral da operacao',
+    body: 'Este painel concentra sua operacao diaria. No topo ficam o status do piloto, notificacoes e o usuario logado. A lateral troca entre pedidos, atendimento, PDV, cardapio, cozinha, entregas, financeiro e relatorios. Comece sempre conferindo se a loja esta aberta e se o piloto esta online.',
+  },
+  {
+    nav: 'orders',
+    title: 'Pedidos',
+    body: 'Aqui entram os pedidos da loja. Use as colunas para acompanhar entrada, preparo, entrega e finalizacao. Cada pedido pode carregar cliente, telefone, endereco, itens, pagamento, observacoes, impressao e sincronizacao com a API. Em uma conta nova, esta area comeca vazia para voce montar a operacao real.',
+  },
+  {
+    nav: 'service',
+    title: 'Atendimento',
+    body: 'Esta area organiza conversas e sinais do atendimento. Ela foi pensada para WhatsApp, cardapio digital, recuperacao de carrinho e mensagens operacionais. Quando a loja estiver integrada, use esta tela para acompanhar pendencias humanas e automatizadas.',
+  },
+  {
+    nav: 'counter',
+    title: 'PDV',
+    body: 'O PDV serve para venda de balcao e retirada. Selecione produtos, monte o carrinho, escolha pagamento e finalize o pedido. Ele compartilha a mesma base de produtos e pedidos do restante do sistema, entao tudo aparece nos relatorios depois.',
+  },
+  {
+    nav: 'tables',
+    title: 'Salao',
+    body: 'Em Salao voce gerencia mesas, QR codes e consumo local. Use quando a loja atende clientes no local. As mesas podem receber pedidos separados e depois entrar no fluxo de cozinha, pagamento e fiscal.',
+  },
+  {
+    nav: 'menu',
+    title: 'Cardapio',
+    body: 'Cadastre categorias, produtos, precos, estoque, horarios de disponibilidade, sabores e complementos. Conta nova nao recebe produtos ficticios; a demo continua com exemplos para estudo. Antes de vender, esta e uma das primeiras areas que voce deve preencher.',
+  },
+  {
+    nav: 'kds',
+    title: 'Cozinha KDS',
+    body: 'O KDS e a tela de producao da cozinha. Ela ajuda a separar o que entrou, o que esta em preparo, o que esta pronto e o que precisa de atencao. Configure alertas e tempos para reduzir atraso e retrabalho.',
+  },
+  {
+    nav: 'delivery',
+    title: 'Entregas',
+    body: 'Aqui voce controla entregadores, enderecos, zonas, taxas e andamento das rotas. Use zonas de entrega para padronizar taxas e evitar prometer entrega fora da area atendida.',
+  },
+  {
+    nav: 'marketing',
+    title: 'Marketing',
+    body: 'Esta area concentra cupons, recuperacao de clientes e campanhas. Use com cuidado: campanhas funcionam melhor quando cardapio, horarios, taxa de entrega e estoque estao corretos.',
+  },
+  {
+    nav: 'finance',
+    title: 'Financeiro',
+    body: 'Acompanhe entradas, pagamentos, totais, taxas e movimentos da loja. O financeiro depende dos pedidos finalizados e do preenchimento correto de forma de pagamento.',
+  },
+  {
+    nav: 'fiscal',
+    title: 'Fiscal e impressao',
+    body: 'Aqui ficam rotinas fiscais, comprovantes e impressao. Configure impressora, papel, margens, numero de vias e comportamento da fila antes de operar no balcao ou na cozinha.',
+  },
+  {
+    nav: 'integrations',
+    title: 'Integracoes',
+    body: 'Este modulo concentra conexoes externas: API, automacoes, canais de venda e servicos futuros. Sempre valide credenciais e URLs antes de ativar sincronizacao automatica em producao.',
+  },
+  {
+    nav: 'reports',
+    title: 'Relatorios e backend',
+    body: 'Em Relatorios voce confere indicadores e o diagnostico do backend. O bloco Backend mostra se GitHub Pages, Render e Supabase estao conversando. Use Atualizar e Gerar log para validar a conexao completa.',
+  },
+  {
+    nav: 'reports',
+    title: 'Configuracoes e seguranca',
+    body: 'Use os botoes do topo e da lateral para abrir configuracoes da loja, piloto, impressora, automacoes e senha. Se trocar de dispositivo, este tutorial aparece de novo para a mesma conta, porque ele e controlado por navegador.',
+  },
 ]
 
 const shortcutItems = [
@@ -2055,6 +2132,39 @@ function createDefaultAppData() {
   })
 }
 
+function createBlankAppData() {
+  const defaults = createDefaultAppData()
+
+  return cloneData({
+    ...defaults,
+    orders: [],
+    blockedOrders: [],
+    chatMessages: [],
+    categories: [],
+    products: [],
+    tables: [],
+    couriers: [],
+    channels: [],
+    recoveries: [],
+    coupons: [],
+    inventory: [],
+    finance: [],
+    invoices: [],
+    integrations: [],
+    qrCodes: [],
+    orderAddresses: [],
+    deliveryZones: [],
+    storeProfile: normalizeStoreProfile(createEmptyStoreProfile()),
+    printerConfig: normalizePrinterConfig({ ...initialPrinterConfig, queue: [] }),
+    pilotSync: normalizePilotSync({ enabled: false, status: 'idle', message: 'Modo piloto ainda nao conectado.' }),
+    storeUsers: [],
+    currentStoreUser: null,
+    orderDrafts: [],
+    suggestions: [],
+    eventLog: [],
+  })
+}
+
 function normalizeAppSnapshot(snapshot = {}) {
   const defaults = createDefaultAppData()
   const parsed = snapshot ?? {}
@@ -2117,8 +2227,8 @@ function normalizeAppSnapshot(snapshot = {}) {
   }
 }
 
-function createStoreRecord({ profile, owner }, index = 0) {
-  const baseSnapshot = normalizeAppSnapshot(createDefaultAppData())
+function createStoreRecord({ profile, owner, demo = false }, index = 0) {
+  const baseSnapshot = normalizeAppSnapshot(demo ? createDefaultAppData() : createBlankAppData())
   const nextProfile = normalizeStoreProfile({
     ...profile,
     owner: profile.owner || owner.name,
@@ -2153,6 +2263,7 @@ function createStoreRecord({ profile, owner }, index = 0) {
 
 function createDemoStoreRecord(index = 0) {
   return createStoreRecord({
+    demo: true,
     profile: {
       tradeName: 'Loja Demo MeuCardapio',
       legalName: 'Loja Demo MeuCardapio LTDA',
@@ -6124,6 +6235,40 @@ function IntegrationsSection({ integrations, onToggleIntegration, onOpenModal })
   )
 }
 
+function GuidedTutorial({ step, stepIndex, totalSteps, onBack, onClose, onNext }) {
+  if (!step) {
+    return null
+  }
+
+  const isLast = stepIndex >= totalSteps - 1
+
+  return (
+    <div className="guided-tutorial" role="dialog" aria-modal="true" aria-label="Tutorial guiado">
+      <div className="guided-tutorial__backdrop" />
+      <section className="guided-tutorial__panel">
+        <header>
+          <span>Tutorial guiado</span>
+          <strong>{step.title}</strong>
+        </header>
+        <p>{step.body}</p>
+        <div className="guided-tutorial__progress">
+          <span>Passo {stepIndex + 1} de {totalSteps}</span>
+          <div>
+            {Array.from({ length: totalSteps }).map((_, index) => (
+              <i className={index <= stepIndex ? 'is-active' : ''} key={index} />
+            ))}
+          </div>
+        </div>
+        <footer>
+          <Button onClick={onClose}>Encerrar</Button>
+          <Button disabled={stepIndex === 0} onClick={onBack}>Voltar</Button>
+          <Button variant="primary" onClick={onNext}>{isLast ? 'Concluir' : 'Proximo'}</Button>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const initialWorkspaceRef = useRef(null)
 
@@ -6240,10 +6385,35 @@ function App() {
   const [orderDrafts, setOrderDrafts] = useState(initialData.orderDrafts)
   const [eventLog, setEventLog] = useState(initialData.eventLog)
   const [dataImportError, setDataImportError] = useState('')
+  const [tutorialOpen, setTutorialOpen] = useState(false)
+  const [tutorialStepIndex, setTutorialStepIndex] = useState(0)
   const activeTitle = navItems.find((item) => item.id === activeNav)?.label ?? 'Pedidos'
   const notificationCount = Math.min(9, blockedOrders.length)
   const isStoreReady = Boolean(activeStoreId) && isStoreConfigured(storeProfile) && storeUsers.length > 0
   const hasValidStoreSession = currentStoreUser?.storeId === activeStoreId
+  const tutorialStorageKey = activeStoreId ? `${STORAGE_KEY}:tutorial:v1:${activeStoreId}` : ''
+  const currentTutorialStep = tutorialOpen ? tutorialSteps[tutorialStepIndex] : null
+
+  function finishTutorial() {
+    if (tutorialStorageKey) {
+      localStorage.setItem(tutorialStorageKey, 'done')
+    }
+    setTutorialOpen(false)
+    setTutorialStepIndex(0)
+  }
+
+  function advanceTutorial() {
+    if (tutorialStepIndex >= tutorialSteps.length - 1) {
+      finishTutorial()
+      return
+    }
+
+    setTutorialStepIndex((current) => current + 1)
+  }
+
+  function backTutorial() {
+    setTutorialStepIndex((current) => Math.max(0, current - 1))
+  }
 
   useEffect(() => {
     const nextCoordinates = formatDeliveryZoneCoordinates(deliveryZonePoints)
@@ -6252,6 +6422,23 @@ function App() {
       current.coordinates === nextCoordinates ? current : { ...current, coordinates: nextCoordinates },
     )
   }, [deliveryZonePoints])
+
+  useEffect(() => {
+    if (!hasValidStoreSession || !isStoreReady || !tutorialStorageKey) {
+      return
+    }
+
+    if (localStorage.getItem(tutorialStorageKey) !== 'done') {
+      setTutorialOpen(true)
+      setTutorialStepIndex(0)
+    }
+  }, [hasValidStoreSession, isStoreReady, tutorialStorageKey])
+
+  useEffect(() => {
+    if (currentTutorialStep?.nav && currentTutorialStep.nav !== activeNav) {
+      setActiveNav(currentTutorialStep.nav)
+    }
+  }, [activeNav, currentTutorialStep])
 
   useEffect(() => {
     setSelectedDeliveryZonePointIndex((current) => {
@@ -6975,15 +7162,24 @@ function App() {
   }
 
   async function createOnlineStoreAccount(account) {
+    if (account.action === 'requestCode') {
+      try {
+        await requestSignupCode(account.email)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel enviar o codigo.' }
+      }
+    }
+
     const email = String(account.email || '').trim().toLowerCase()
     const password = String(account.password || '')
 
-    if (!email || password.length < 6) {
-      return { ok: false, message: 'Informe email e senha com pelo menos 6 caracteres.' }
+    if (!email || password.length < 6 || String(account.code || '').trim().length !== 6) {
+      return { ok: false, message: 'Informe email, senha e codigo de 6 digitos.' }
     }
 
     try {
-      const backendStore = await createBackendStore({
+      const signup = await signupBackendAccount({
         tradeName: account.tradeName,
         ownerName: account.ownerName,
         email,
@@ -6998,36 +7194,36 @@ function App() {
         schedule: account.schedule,
         minimumOrder: 0,
         deliveryRadiusKm: 5,
-      })
-
-      const backendUser = await createBackendStoreUser(backendStore.id, {
-        name: account.ownerName,
-        email,
         password,
-        role: 'owner',
+        code: account.code,
       })
 
+      if (signup.ok === false || !signup.user?.storeId) {
+        return { ok: false, message: signup.message || 'Codigo invalido ou expirado.' }
+      }
+
+      const storeId = signup.user.storeId
       const localStore = createStoreRecord({
         profile: {
-          tradeName: backendStore.tradeName,
-          owner: backendStore.ownerName,
-          phone: backendStore.phone,
-          whatsapp: backendStore.phone,
-          email: backendStore.email,
-          taxId: backendStore.taxId,
-          category: backendStore.category,
-          street: backendStore.street || account.street,
-          number: backendStore.number || account.number,
-          district: backendStore.district || '',
-          cityName: backendStore.cityName || account.cityName,
-          state: backendStore.state || account.state || 'SC',
-          schedule: backendStore.schedule || account.schedule,
-          minimumOrder: formatCurrencyInput(backendStore.minimumOrder || 0),
-          deliveryRadius: String(backendStore.deliveryRadiusKm || 5),
+          tradeName: account.tradeName,
+          owner: account.ownerName,
+          phone: account.phone,
+          whatsapp: account.phone,
+          email,
+          taxId: account.taxId,
+          category: account.category || 'Restaurante',
+          street: account.street,
+          number: account.number,
+          district: '',
+          cityName: account.cityName,
+          state: account.state || 'SC',
+          schedule: account.schedule,
+          minimumOrder: '0,00',
+          deliveryRadius: '5',
         },
         owner: {
-          name: backendUser.name || account.ownerName,
-          email: backendUser.email || email,
+          name: signup.user.name || account.ownerName,
+          email: signup.user.email || email,
           password,
         },
       }, resolvedStores.length)
@@ -7038,15 +7234,15 @@ function App() {
 
       const nextStore = {
         ...localStore.store,
-        id: backendStore.id,
+        id: storeId,
         snapshot: {
           ...localStore.store.snapshot,
           pilotSync: normalizePilotSync({
             ...localStore.store.snapshot.pilotSync,
             enabled: true,
             status: 'online',
-            storeId: backendStore.id,
-            storeName: backendStore.tradeName,
+            storeId,
+            storeName: account.tradeName,
             lastCheckedAt: nowDateTime(),
             message: 'Conta criada e vinculada a API.',
           }),
@@ -7071,20 +7267,100 @@ function App() {
     }
   }
 
-  function loginStoreUser(credentials) {
-    if (!activeStoreId) {
-      return { ok: false, message: 'Use a chave demo ou clique em Testar demo para carregar um ambiente local.' }
+  async function handlePasswordReset(request) {
+    try {
+      if (request.action === 'requestCode') {
+        await requestPasswordResetCode(request.email)
+        return { ok: true }
+      }
+
+      const result = await resetBackendPassword(request.email, request.code, request.password)
+      return result?.ok === false ? result : { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : 'Nao foi possivel processar a recuperacao.',
+      }
+    }
+  }
+
+  async function loginStoreUser(credentials) {
+    if (activeStoreId) {
+      const result = authenticateStoreUser(storeUsers, credentials)
+
+      if (result.ok !== false) {
+        setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, activeStoreId))
+        setToast(`Bem-vindo, ${result.user.name}.`)
+        return { ok: true }
+      }
     }
 
-    const result = authenticateStoreUser(storeUsers, credentials)
+    try {
+      const login = await loginBackendUser(credentials.email, credentials.password)
 
-    if (result.ok === false) {
-      return result
+      if (login.ok === false || !login.user?.storeId) {
+        return { ok: false, message: login.message || 'Email ou senha invalidos.' }
+      }
+
+      const backendStore = await getBackendStore(login.user.storeId)
+      const localStore = createStoreRecord({
+        profile: {
+          tradeName: backendStore.tradeName,
+          owner: backendStore.ownerName,
+          phone: backendStore.phone,
+          whatsapp: backendStore.phone,
+          email: backendStore.email,
+          taxId: backendStore.taxId,
+          category: backendStore.category,
+          street: backendStore.street || '',
+          number: backendStore.number || '',
+          district: backendStore.district || '',
+          cityName: backendStore.cityName || '',
+          state: backendStore.state || 'SC',
+          schedule: backendStore.schedule || '',
+          minimumOrder: formatCurrencyInput(backendStore.minimumOrder || 0),
+          deliveryRadius: String(backendStore.deliveryRadiusKm || 5),
+        },
+        owner: {
+          name: login.user.name,
+          email: login.user.email,
+          password: credentials.password,
+        },
+      }, resolvedStores.length)
+
+      if (localStore.ok === false) {
+        return localStore
+      }
+
+      const nextStore = {
+        ...localStore.store,
+        id: login.user.storeId,
+        snapshot: {
+          ...localStore.store.snapshot,
+          pilotSync: normalizePilotSync({
+            ...localStore.store.snapshot.pilotSync,
+            enabled: true,
+            status: 'online',
+            storeId: login.user.storeId,
+            storeName: backendStore.tradeName,
+            lastCheckedAt: nowDateTime(),
+            message: 'Conta carregada da API.',
+          }),
+        },
+      }
+      const nextStores = [...resolvedStores.filter((store) => store.id !== nextStore.id), nextStore]
+
+      setStores(nextStores)
+      setActiveStoreId(nextStore.id)
+      applySnapshot(nextStore.snapshot, 'Conta carregada.')
+      setPilotSync(nextStore.snapshot.pilotSync)
+      setCurrentStoreUser(buildStoreSession(localStore.user, nowDateTime, nextStore.id))
+      setToast(`Bem-vindo, ${localStore.user.name}.`)
+      notify('Conta carregada do backend.')
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel entrar agora.' }
     }
-
-    setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, activeStoreId))
-    setToast(`Bem-vindo, ${result.user.name}.`)
-    return { ok: true }
   }
 
   function logoutStoreUser() {
@@ -13080,6 +13356,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         demoAvailable={resolvedStores.some((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))}
         onCreateAccount={createOnlineStoreAccount}
         onLogin={loginStoreUser}
+        onResetPassword={handlePasswordReset}
         onUseDemo={openDemoStore}
         users={storeUsers}
       />
@@ -13134,6 +13411,14 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
       <input ref={importInputRef} type="file" accept="application/json" className="sr-only-input" onChange={handleImportData} />
       {renderModal()}
+      <GuidedTutorial
+        step={currentTutorialStep}
+        stepIndex={tutorialStepIndex}
+        totalSteps={tutorialSteps.length}
+        onBack={backTutorial}
+        onClose={finishTutorial}
+        onNext={advanceTutorial}
+      />
     </main>
   )
 }

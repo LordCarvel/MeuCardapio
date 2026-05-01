@@ -125,7 +125,7 @@ Front GitHub Pages -> API Render -> PostgreSQL Supabase
 Por isso, as tabelas devem ficar fechadas para acesso publico direto. A migration abaixo ja faz isso para projetos novos ou no proximo deploy da API:
 
 ```text
-MeuCardapio/backend/src/main/resources/db/migration/V2__enable_supabase_rls.sql
+MeuCardapio/backend/src/main/resources/db/postgresql/V2__enable_supabase_rls.sql
 ```
 
 Se voce quiser corrigir imediatamente pelo painel do Supabase, abra `SQL Editor` e rode:
@@ -216,6 +216,8 @@ Para Gmail, nao use a senha normal da conta. Use uma senha de app criada nas con
 Endpoints disponiveis:
 
 ```text
+POST /api/auth/request-signup-code
+POST /api/auth/signup
 POST /api/auth/request-code
 POST /api/auth/verify-code
 POST /api/auth/request-password-reset

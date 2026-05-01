@@ -21,6 +21,7 @@ import com.meucardapio.dev.vinis.meuCardapio.repository.StoreUserRepository;
 public class EmailAuthCodeService {
     public static final String PURPOSE_LOGIN = "LOGIN";
     public static final String PURPOSE_PASSWORD_RESET = "PASSWORD_RESET";
+    public static final String PURPOSE_SIGNUP = "SIGNUP";
 
     private final AuthCodeRepository codes;
     private final StoreUserRepository users;
@@ -55,6 +56,26 @@ public class EmailAuthCodeService {
 
     public void requestPasswordResetCode(String email) {
         requestCode(email, PURPOSE_PASSWORD_RESET);
+    }
+
+    public void requestSignupCode(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        if (normalizedEmail.isBlank()) {
+            return;
+        }
+
+        String code = generateCode();
+        codes.save(new AuthCode(
+                UUID.randomUUID(),
+                normalizedEmail,
+                PURPOSE_SIGNUP,
+                encoder.encode(code),
+                LocalDateTime.now().plusMinutes(Math.max(1, codeMinutes))));
+        sendCodeEmail(normalizedEmail, PURPOSE_SIGNUP, code);
+    }
+
+    public boolean verifySignupCode(String email, String code) {
+        return verifyCode(email, code, PURPOSE_SIGNUP).isPresent();
     }
 
     public Optional<StoreUser> verifyLoginCode(String email, String code) {
@@ -136,7 +157,11 @@ public class EmailAuthCodeService {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(mailFrom);
         message.setTo(email);
-        message.setSubject(PURPOSE_PASSWORD_RESET.equals(purpose) ? "Codigo para redefinir sua senha" : "Codigo de acesso MeuCardapio");
+        message.setSubject(switch (purpose) {
+            case PURPOSE_PASSWORD_RESET -> "Codigo para redefinir sua senha";
+            case PURPOSE_SIGNUP -> "Codigo para validar seu email";
+            default -> "Codigo de acesso MeuCardapio";
+        });
         message.setText("""
                 Seu codigo MeuCardapio e: %s
 

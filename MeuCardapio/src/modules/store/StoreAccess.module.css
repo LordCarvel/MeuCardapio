@@ -214,7 +214,8 @@
 
 .primaryButton,
 .outlineButton,
-.demoButton {
+.demoButton,
+.linkButton {
   min-height: 46px;
   border-radius: 12px;
   font: inherit;
@@ -239,6 +240,16 @@
   border: 1px solid #0d5eab;
   background: linear-gradient(135deg, #137de4, #0d5eab);
   color: #ffffff;
+}
+
+.linkButton {
+  border: 0;
+  background: transparent;
+  color: #0d5eab;
+}
+
+.inlineAction {
+  display: grid;
 }
 
 .primaryButton:disabled,
@@ -298,6 +309,15 @@
   border-radius: 14px;
   background: #fff4f2;
   color: #b4483b;
+  font-size: 13px;
+}
+
+.success {
+  padding: 12px 14px;
+  border: 1px solid #b9dfcc;
+  border-radius: 14px;
+  background: #f0fbf5;
+  color: #20784f;
   font-size: 13px;
 }
 

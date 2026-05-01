@@ -5472,3 +5472,85 @@
     justify-content: start;
   }
 }
+.guided-tutorial {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: end center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.guided-tutorial__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 22, 34, 0.58);
+  pointer-events: auto;
+}
+
+.guided-tutorial__panel {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  width: min(680px, 100%);
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+
+.guided-tutorial__panel header {
+  display: grid;
+  gap: 6px;
+}
+
+.guided-tutorial__panel header span,
+.guided-tutorial__progress span {
+  color: #6b7e89;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.guided-tutorial__panel header strong {
+  color: #0b2332;
+  font-size: 24px;
+}
+
+.guided-tutorial__panel p {
+  margin: 0;
+  color: #405867;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.guided-tutorial__progress {
+  display: grid;
+  gap: 8px;
+}
+
+.guided-tutorial__progress div {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.guided-tutorial__progress i {
+  height: 5px;
+  border-radius: 999px;
+  background: #dbe5ec;
+}
+
+.guided-tutorial__progress i.is-active {
+  background: #0d5eab;
+}
+
+.guided-tutorial__panel footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}

@@ -1,5 +1,6 @@
 package com.meucardapio.dev.vinis.meuCardapio.api;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,6 +20,7 @@ import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.LoginResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.AuthMessageResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.EmailCodeRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.ResetPasswordRequest;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.SignupRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.StoreUserRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.StoreUserResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.AdminDtos.VerifyEmailCodeRequest;
@@ -88,6 +90,15 @@ public class AuthController {
         return new AuthMessageResponse(true, "Se o email existir, um codigo de acesso sera enviado.");
     }
 
+    @PostMapping("/auth/request-signup-code")
+    public AuthMessageResponse requestSignupCode(@Valid @RequestBody EmailCodeRequest request) {
+        users.findByEmailIgnoreCase(request.email()).ifPresent(user -> {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email ja cadastrado");
+        });
+        emailCodes.requestSignupCode(request.email());
+        return new AuthMessageResponse(true, "Codigo de validacao enviado para o email informado.");
+    }
+
     @PostMapping("/auth/verify-code")
     public LoginResponse verifyCode(@Valid @RequestBody VerifyEmailCodeRequest request) {
         return emailCodes.verifyLoginCode(request.email(), request.code())
@@ -110,5 +121,39 @@ public class AuthController {
         return ok
                 ? new AuthMessageResponse(true, "Senha redefinida.")
                 : new AuthMessageResponse(false, "Codigo invalido, expirado ou senha fraca.");
+    }
+
+    @PostMapping("/auth/signup")
+    @ResponseStatus(HttpStatus.CREATED)
+    public LoginResponse signup(@Valid @RequestBody SignupRequest request) {
+        users.findByEmailIgnoreCase(request.email()).ifPresent(user -> {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email ja cadastrado");
+        });
+
+        if (!emailCodes.verifySignupCode(request.email(), request.code())) {
+            return new LoginResponse(false, "Codigo invalido ou expirado", null);
+        }
+
+        Store store = new Store(UUID.randomUUID(), request.tradeName(), request.ownerName(), request.email().trim().toLowerCase(), request.phone(), request.taxId(), request.category());
+        store.setStreet(request.street());
+        store.setNumber(request.number());
+        store.setDistrict(request.district());
+        store.setCityName(request.cityName());
+        store.setState(request.state());
+        store.setSchedule(request.schedule());
+        store.setMinimumOrder(request.minimumOrder() == null ? BigDecimal.ZERO : request.minimumOrder());
+        store.setDeliveryRadiusKm(request.deliveryRadiusKm() == null ? BigDecimal.valueOf(5) : request.deliveryRadiusKm());
+        Store savedStore = stores.save(store);
+
+        StoreUser user = new StoreUser(
+                UUID.randomUUID(),
+                savedStore,
+                request.ownerName(),
+                request.email().trim().toLowerCase(),
+                encoder.encode(request.password()),
+                "owner");
+        StoreUser savedUser = users.save(user);
+        logService.record(savedStore.getId(), "INFO", "auth", "Conta criada com email validado: " + savedUser.getEmail());
+        return new LoginResponse(true, "Conta criada", StoreUserResponse.from(savedUser));
     }
 }

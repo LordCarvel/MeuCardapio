@@ -9,5 +9,3 @@ create table auth_codes (
 );
 
 create index idx_auth_codes_email_purpose_created on auth_codes(email, purpose, created_at desc);
-
-alter table if exists public.auth_codes enable row level security;
