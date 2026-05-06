@@ -15,6 +15,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.meucardapio.dev.vinis.meuCardapio.domain.AuthCode;
 import com.meucardapio.dev.vinis.meuCardapio.domain.StoreUser;
@@ -217,6 +218,12 @@ public class EmailAuthCodeService {
                             "text", getEmailText(code)))
                     .retrieve()
                     .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            String response = ex.getResponseBodyAsString();
+            String detail = response == null || response.isBlank()
+                    ? ex.getStatusCode().toString()
+                    : response.substring(0, Math.min(response.length(), 300));
+            throw new IllegalStateException("Resend recusou o envio: " + detail, ex);
         } catch (RestClientException ex) {
             throw new IllegalStateException("Nao foi possivel enviar pelo Resend. Confira RESEND_API_KEY e RESEND_FROM no Render.", ex);
         }
