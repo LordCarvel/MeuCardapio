@@ -73,27 +73,6 @@ function getStorefrontIdFromPath() {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
-async function copyText(value) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return true
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-
-  try {
-    return document.execCommand('copy')
-  } finally {
-    document.body.removeChild(textarea)
-  }
-}
-
 function normalizeBackendStore(store = {}) {
   return normalizeStoreProfile({
     tradeName: store.tradeName,
@@ -1222,17 +1201,6 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
   }
 
-  async function shareStorefront() {
-    const link = `${window.location.origin}${window.location.pathname}`
-
-    try {
-      await copyText(link)
-      setStatus({ type: 'success', message: 'Link da loja copiado.' })
-    } catch {
-      setStatus({ type: 'error', message: `Link da loja: ${link}` })
-    }
-  }
-
   if (!data) {
     return (
       <main className="customer-page customer-page--empty">
@@ -1263,7 +1231,6 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               <div className="customer-logo">{(storeProfile.name || 'MC').slice(0, 2).toUpperCase()}</div>
               <strong>{storeProfile.name || 'Minha loja'}</strong>
               <button type="button" aria-label="Buscar" onClick={() => document.querySelector('.customer-search input')?.focus()}>⌕</button>
-              <button type="button" aria-label="Compartilhar" onClick={shareStorefront}>↗</button>
             </div>
           </header>
 

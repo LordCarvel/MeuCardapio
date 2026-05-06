@@ -2783,8 +2783,6 @@ function buildInvoicePrintBody(invoice, order, storeProfile, config = {}) {
 
 function buildQrPrintBody(qr, storeProfile, config = {}) {
   const normalizedConfig = normalizePrinterConfig(config)
-  const path = `/cardapio/${qr.url || qr.table || ''}`
-  const fullUrl = buildPublicAppUrl(path)
   const cut = normalizedConfig.cutPaper ? '<div class="receipt-cut">Corte aqui</div>' : ''
 
   return `
@@ -2798,8 +2796,7 @@ function buildQrPrintBody(qr, storeProfile, config = {}) {
       <section class="receipt-qr">
         <div class="receipt-qr__code">QR</div>
         <strong>${escapeHtml(qr.table || 'Mesa')}</strong>
-        <span>${escapeHtml(path)}</span>
-        <small>${escapeHtml(fullUrl)}</small>
+        <span>Autoatendimento da mesa</span>
       </section>
       ${cut}
     </article>
@@ -4155,8 +4152,6 @@ function Toolbar({
   onSearch,
   onOpenModal,
   blockedCount,
-  storefrontUrl,
-  onCopyStorefrontUrl,
 }) {
   return (
     <section className="toolbar" aria-label="Ferramentas de pedidos">
@@ -4193,16 +4188,6 @@ function Toolbar({
           <Icon name="plus" size={18} />
           Novo pedido
         </Button>
-        <Button data-testid="copy-storefront-link" disabled={!storefrontUrl} onClick={onCopyStorefrontUrl}>
-          <Icon name="share" size={18} />
-          Compartilhar vitrine
-        </Button>
-        {storefrontUrl ? (
-          <a className="btn toolbar-storefront-link" href={storefrontUrl} target="_blank" rel="noreferrer">
-            <Icon name="arrow" size={18} />
-            Abrir vitrine
-          </a>
-        ) : null}
         <Button data-testid="blocked-orders" onClick={() => onOpenModal('blocked')}>
           <Icon name="bag" size={18} />
           Bloqueados
@@ -4673,7 +4658,6 @@ function ServiceInbox({ orders, chatMessages, onOpenModal }) {
             <button type="button">Confirmar endereco</button>
             <button type="button">Oferecer upsell</button>
             <button type="button">Transferir para humano</button>
-            <button type="button">Enviar link do cardapio</button>
           </footer>
         </section>
       </div>
@@ -5187,11 +5171,8 @@ function MenuSection({
   products,
   selectedCategory,
   menuSearch,
-  storefrontUrl,
   onSelectCategory,
   onMenuSearch,
-  onCopyStorefrontUrl,
-  onCopyProductLink,
   onToggleCategory,
   onToggleProduct,
   onUpdateProductConfig,
@@ -5306,8 +5287,6 @@ function MenuSection({
         >
           Acoes
         </Button>
-        <Button variant="primary" onClick={onCopyStorefrontUrl}>Copiar link da loja</Button>
-        {storefrontUrl ? <a className="btn menu-action-button" href={storefrontUrl} target="_blank" rel="noreferrer">Abrir vitrine</a> : null}
         <Button variant="primary" data-testid="menu-new-category" onClick={() => onOpenModal('newCategory')}>
           <Icon name="plus" size={18} />
           Nova categoria
@@ -5402,10 +5381,6 @@ function MenuSection({
                             </div>
 
                             <div className="menu-product-row__controls">
-                              <button className="link-button" type="button" title="Copiar link do item" onClick={() => onCopyProductLink(product)}>
-                                <Icon name="chain" size={16} />
-                              </button>
-
                               <div className="price-cell">
                                 <span>A partir de</span>
                                 <strong>{formatCurrency(product.price)}</strong>
@@ -6056,7 +6031,7 @@ function MarketingSection({ coupons, qrCodes, onToggleCoupon, onOpenModal }) {
         <header className="module-card__header">
           <div>
             <h2>QR Code de mesa</h2>
-            <p>Links para autoatendimento no salao.</p>
+            <p>Autoatendimento no salao.</p>
           </div>
           <Button data-testid="new-qr" onClick={() => onOpenModal('newQr')}>Gerar QR</Button>
         </header>
@@ -6065,7 +6040,7 @@ function MarketingSection({ coupons, qrCodes, onToggleCoupon, onOpenModal }) {
             <article className="data-row" key={qr.id}>
               <span>
                 <strong>{qr.table}</strong>
-                <small>/cardapio/{qr.url} - {qr.scans} leitura(s)</small>
+                <small>{qr.scans} leitura(s)</small>
               </span>
               <Button onClick={() => onOpenModal('printQr', qr)}>Imprimir</Button>
             </article>
@@ -6661,13 +6636,13 @@ function App() {
 
   async function copyStorefrontShareUrl() {
     if (!storefrontUrl) {
-      notify('Vincule a loja ao backend antes de compartilhar a vitrine.', 'warning')
+      notify('Vincule a loja ao backend antes de compartilhar o perfil publico.', 'warning')
       return
     }
 
     try {
       const copied = await copyText(storefrontUrl)
-      notify(copied ? 'Link da vitrine copiado.' : `Link pronto: ${storefrontUrl}`)
+      notify(copied ? 'Link do perfil publico copiado.' : `Link pronto: ${storefrontUrl}`)
     } catch {
       notify(`Link pronto: ${storefrontUrl}`, 'warning')
     }
@@ -7870,25 +7845,6 @@ function App() {
 
   function reopenOrderEditor() {
     setModal({ type: 'newOrder' })
-  }
-
-  async function copyProductLink(product) {
-    const storeSlug = storeProfile.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-    const productSlug = product.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-    const link = buildPublicAppUrl(`/cardapio/${storeSlug}/${productSlug}`)
-
-    try {
-      const copied = await copyText(link)
-      notify(copied ? 'Link do item copiado.' : `Link pronto: ${link}`)
-    } catch {
-      notify(`Link pronto: ${link}`, 'warning')
-    }
   }
 
   function completePrintJob(jobId) {
@@ -10339,11 +10295,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           products={products}
           selectedCategory={selectedCategory}
           menuSearch={menuSearch}
-          storefrontUrl={storefrontUrl}
           onSelectCategory={setSelectedCategory}
           onMenuSearch={setMenuSearch}
-          onCopyStorefrontUrl={copyStorefrontShareUrl}
-          onCopyProductLink={copyProductLink}
           onToggleCategory={toggleCategory}
           onToggleProduct={toggleProduct}
           onUpdateProductConfig={updateProductConfig}
@@ -10426,8 +10379,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           onSearch={setSearch}
           onOpenModal={openModal}
           blockedCount={blockedOrders.length}
-          storefrontUrl={storefrontUrl}
-          onCopyStorefrontUrl={copyStorefrontShareUrl}
         />
 
         <div className="operations-grid">
@@ -11845,7 +11796,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       return (
         <Modal
           title="Gerar QR Code"
-          subtitle="Cria um link de mesa para autoatendimento."
+          subtitle="Cria um acesso de mesa para autoatendimento."
           onClose={closeModal}
           footer={<><Button onClick={closeModal}>Cancelar</Button><Button variant="primary" form="qr-form" type="submit">Gerar QR</Button></>}
         >
@@ -11853,7 +11804,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <Field label="Mesa">
               <input data-testid="qr-table" value={qrForm.table} onChange={(event) => setQrForm({ ...qrForm, table: event.target.value })} />
             </Field>
-            <Field label="Slug">
+            <Field label="Codigo interno">
               <input data-testid="qr-url" value={qrForm.url} onChange={(event) => setQrForm({ ...qrForm, url: event.target.value })} />
             </Field>
           </form>
@@ -11867,7 +11818,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <div className="qr-preview">
             <span>{payload.table}</span>
             <b>QR</b>
-            <small>/cardapio/{payload.url}</small>
+            <small>Autoatendimento da mesa</small>
             <Button variant="primary" onClick={() => printQrCode(payload)}>Imprimir</Button>
           </div>
         </Modal>
@@ -13055,6 +13006,76 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       )
     }
 
+    if (modal.type === 'publicProfile') {
+      const publicStoreName = storeProfile.name || storeProfile.tradeName || 'Minha loja'
+      const publicStoreCategory = storeProfile.category || 'Cardapio digital'
+      const publicStoreAddress = [
+        storeProfile.street,
+        storeProfile.number,
+        storeProfile.district,
+        storeProfile.cityName || storeProfile.city,
+      ].filter(Boolean).join(', ')
+      const shareText = `Faca seu pedido no cardapio digital da ${publicStoreName}: ${storefrontUrl || ''}`
+      const whatsappShareUrl = storefrontUrl
+        ? `https://wa.me/?text=${encodeURIComponent(shareText)}`
+        : ''
+
+      return (
+        <Modal title="Perfil publico da loja" subtitle="Link unico do cardapio digital para enviar aos clientes." onClose={closeModal}>
+          <section className="public-profile-share">
+            <div className="public-profile-share__hero">
+              <div className="public-profile-share__phone">
+                <span />
+                <strong>{publicStoreName}</strong>
+                <small>{storeOpen ? 'Aberta para pedidos' : 'Pausada agora'}</small>
+              </div>
+            </div>
+
+            <div className="public-profile-share__content">
+              <div className="public-profile-share__title">
+                <strong>O link do seu Cardapio Digital</strong>
+                <span>Copie o link e cole onde quiser para compartilhar.</span>
+              </div>
+
+              <div className="public-profile-share__link">
+                {storefrontUrl || 'Vincule a loja ao backend para gerar o link publico.'}
+              </div>
+
+              <div className="public-profile-share__actions">
+                <a className={`btn ${whatsappShareUrl ? '' : 'is-disabled'}`.trim()} href={whatsappShareUrl || undefined} target="_blank" rel="noreferrer" aria-disabled={!whatsappShareUrl}>
+                  <Icon name="message" size={18} />
+                  Enviar link
+                </a>
+                <Button variant="primary" disabled={!storefrontUrl} onClick={copyStorefrontShareUrl}>
+                  Copiar
+                </Button>
+              </div>
+
+              {storefrontUrl ? (
+                <a className="public-profile-share__open" href={storefrontUrl} target="_blank" rel="noreferrer">
+                  <Icon name="arrow" size={15} />
+                  Abrir cardapio
+                </a>
+              ) : null}
+
+              <div className="public-profile-share__card">
+                <div className="public-profile-share__qr" aria-hidden="true">
+                  {Array.from({ length: 25 }, (_, index) => (
+                    <span key={index} className={index % 2 === 0 || index % 7 === 0 ? 'is-dark' : ''} />
+                  ))}
+                </div>
+                <span>
+                  <strong>CARDAPIO DIGITAL PARA REDES SOCIAIS</strong>
+                  <small>{publicStoreCategory}</small>
+                  <small>{publicStoreAddress || storeProfile.phone || 'Perfil publico da loja'}</small>
+                </span>
+              </div>
+            </div>
+          </section>
+        </Modal>
+      )
+    }
+
     if (modal.type === 'store') {
       return (
         <Modal
@@ -13549,10 +13570,16 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               <h1>{activeTitle}</h1>
               <p>{toast}</p>
             </div>
-            <Button variant="primary" onClick={() => openModal('newOrder')}>
-              <Icon name="plus" size={18} />
-              Novo pedido
-            </Button>
+            <div className="content__top-actions">
+              <Button onClick={() => openModal('publicProfile')}>
+                <Icon name="store" size={18} />
+                Perfil publico
+              </Button>
+              <Button variant="primary" onClick={() => openModal('newOrder')}>
+                <Icon name="plus" size={18} />
+                Novo pedido
+              </Button>
+            </div>
           </div>
 
           <Notice
