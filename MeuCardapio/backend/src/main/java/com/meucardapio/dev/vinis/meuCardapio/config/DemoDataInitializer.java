@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,8 +32,13 @@ public class DemoDataInitializer {
             CategoryRepository categories,
             ProductRepository products,
             CustomerOrderRepository orders,
-            AppLogService logs) {
+            AppLogService logs,
+            @Value("${app.demo.seed-enabled:false}") boolean seedEnabled) {
         return args -> {
+            if (!seedEnabled) {
+                return;
+            }
+
             if (stores.count() > 0) {
                 return;
             }

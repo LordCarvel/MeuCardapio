@@ -253,6 +253,33 @@ Invoke-RestMethod -Method Post `
 
 Se voce testou cadastro por email e quer liberar um email que ficou cadastrado antes de concluir o teste, apague a loja desse email pelo `SQL Editor` do Supabase. Isso remove a loja e, por cascata, tambem remove o usuario, cardapio e pedidos dessa loja.
 
+Para zerar todo o backend e manter apenas a estrutura das tabelas, rode:
+
+```sql
+begin;
+
+truncate table
+  public.auth_codes,
+  public.app_logs,
+  public.order_items,
+  public.orders,
+  public.products,
+  public.categories,
+  public.store_users,
+  public.stores
+restart identity cascade;
+
+commit;
+```
+
+Nao apague a tabela `flyway_schema_history`. Ela registra quais migrations ja foram executadas.
+
+O backend nao recria mais a loja demo automaticamente por padrao. Se algum dia quiser ligar o seed demo de novo no Render, configure:
+
+```text
+APP_DEMO_SEED_ENABLED=true
+```
+
 Troque os emails do exemplo pelos emails que voce quer liberar:
 
 ```sql
