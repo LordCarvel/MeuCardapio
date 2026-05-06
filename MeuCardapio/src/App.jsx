@@ -3,6 +3,7 @@ import { StoreAccess } from './modules/store/StoreAccess'
 import { StoreDeletePrompt } from './modules/store/StoreDeletePrompt'
 import { StoreProfileForm } from './modules/store/StoreProfileForm'
 import { BackendDiagnostics } from './modules/backend/BackendDiagnostics'
+import { CustomerStorefront } from './modules/customer/CustomerStorefront'
 import {
   API_BASE_URL,
   checkBackendHealth,
@@ -34,6 +35,16 @@ import {
   normalizeStoreProfile,
 } from './modules/store/storeProfile'
 import './App.css'
+
+function getCustomerStoreIdFromPath() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const match = window.location.pathname.match(/\/loja\/([^/?#]+)/i)
+
+  return match ? decodeURIComponent(match[1]) : ''
+}
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
@@ -5130,6 +5141,7 @@ function MenuSection({
   products,
   selectedCategory,
   menuSearch,
+  storefrontUrl,
   onSelectCategory,
   onMenuSearch,
   onCopyProductLink,
@@ -5210,6 +5222,14 @@ function MenuSection({
     setExpandedProducts((current) => ({ ...current, [productId]: !current[productId] }))
   }
 
+  function copyStorefrontUrl() {
+    if (!storefrontUrl) {
+      return
+    }
+
+    void navigator.clipboard?.writeText(storefrontUrl)
+  }
+
   return (
     <section className="menu-manager">
       <header className="menu-manager__title">
@@ -5247,6 +5267,8 @@ function MenuSection({
         >
           Acoes
         </Button>
+        <Button variant="primary" onClick={copyStorefrontUrl}>Copiar link da loja</Button>
+        {storefrontUrl ? <a className="btn menu-action-button" href={storefrontUrl} target="_blank" rel="noreferrer">Abrir vitrine</a> : null}
         <Button variant="primary" data-testid="menu-new-category" onClick={() => onOpenModal('newCategory')}>
           <Icon name="plus" size={18} />
           Nova categoria
@@ -6545,6 +6567,14 @@ function App() {
     activeStoreId,
     currentStoreUser,
   }), [resolvedStores, activeStoreId, currentStoreUser])
+  const storefrontShareId = pilotSync.storeId || activeStoreId || ''
+  const storefrontUrl = storefrontShareId && typeof window !== 'undefined'
+    ? `${window.location.origin}/loja/${encodeURIComponent(storefrontShareId)}`
+    : ''
+  const customerStoreId = getCustomerStoreIdFromPath()
+  const customerStore = customerStoreId
+    ? resolvedStores.find((store) => store.id === customerStoreId) || null
+    : null
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceSnapshot))
@@ -6577,6 +6607,18 @@ function App() {
       setDeliveryFeeDraft(selectedAddress.deliveryFee)
     }
   }, [deliveryTabDraft, orderAddresses, selectedAddressDraftId])
+
+  useEffect(() => {
+    if (customerStoreId || !hasValidStoreSession || !isStoreReady || !pilotSync.enabled || !pilotSync.storeId) {
+      return undefined
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshPilotFromBackend({ silent: true })
+    }, 6000)
+
+    return () => window.clearInterval(intervalId)
+  }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
 
   const visibleOrders = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -9129,6 +9171,59 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     notify(`Venda PDV virou pedido #${nextId}.`)
   }
 
+  async function createCustomerStorefrontOrder(request) {
+    const subtotal = request.items.reduce((sum, item) => (
+      sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1)
+    ), 0)
+    const deliveryFee = request.fulfillment === 'delivery' ? Number(request.deliveryFee) || 0 : 0
+    const nextId = getNextOrderId(orders)
+    const createdOrder = normalizeOrderRecord({
+      id: nextId,
+      customer: request.customerName || 'Cliente cardapio',
+      phone: request.customerPhone || '',
+      channel: request.fulfillment === 'delivery' ? 'delivery' : 'pickup',
+      fulfillment: request.fulfillment || 'delivery',
+      source: 'Cardapio Digital',
+      status: 'analysis',
+      subtotal,
+      total: subtotal + deliveryFee,
+      payment: request.payment || 'Cartao',
+      time: nowTime(),
+      address: request.fulfillment === 'delivery'
+        ? request.note?.match(/Endereco:\s*([^|]+)/)?.[1]?.trim() || 'Endereco informado no pedido'
+        : 'Retirada no balcao',
+      addressLat: request.addressLat || '',
+      addressLng: request.addressLng || '',
+      deliveryZoneId: request.deliveryZoneId || '',
+      deliveryZoneName: request.deliveryZoneName || '',
+      deliveryFee: formatCurrencyInput(deliveryFee),
+      note: request.note || 'Pedido vindo do cardapio digital.',
+      items: request.items.map((item) => `${item.quantity}x ${item.productName}`),
+      printItems: request.items.map((item) => ({
+        qty: item.quantity,
+        name: item.productName,
+        details: [],
+        price: (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1),
+      })),
+    })
+
+    setOrders((current) => [createdOrder, ...current])
+    registerOrderFinanceEntry(createdOrder, 'Cardapio digital')
+
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(createdOrder, { silent: true })
+    } else {
+      markOrderSyncState(createdOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Aguardando modo piloto.',
+      })
+    }
+
+    setActiveNav('orders')
+    notify(`Pedido #${nextId} recebido pelo cardapio digital.`)
+    return createdOrder
+  }
+
   function saveProduct(event, productId = null) {
     event.preventDefault()
 
@@ -10192,6 +10287,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           products={products}
           selectedCategory={selectedCategory}
           menuSearch={menuSearch}
+          storefrontUrl={storefrontUrl}
           onSelectCategory={setSelectedCategory}
           onMenuSearch={setMenuSearch}
           onCopyProductLink={copyProductLink}
@@ -13346,6 +13442,15 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <p>Botao testavel, modal funcional e pronto para conectar ao backend real.</p>
         </div>
       </Modal>
+    )
+  }
+
+  if (customerStoreId) {
+    return (
+      <CustomerStorefront
+        localStore={customerStore}
+        onCreateLocalOrder={createCustomerStorefrontOrder}
+      />
     )
   }
 

@@ -124,11 +124,25 @@ export async function loadBackendWorkspace(storeId = '') {
   return { health, stores, store, summary, products, categories, orders, logs }
 }
 
+export async function loadPublicStorefront(storeId) {
+  const [store, products, categories] = await Promise.all([
+    request(`/stores/${storeId}`),
+    request(`/stores/${storeId}/products`),
+    request(`/stores/${storeId}/categories`),
+  ])
+
+  return { store, products, categories }
+}
+
 export async function createBackendOrder(storeId, order) {
   return request(`/stores/${storeId}/orders`, {
     method: 'POST',
     body: JSON.stringify(order),
   })
+}
+
+export async function getBackendOrders(storeId) {
+  return request(`/stores/${storeId}/orders`)
 }
 
 export async function updateBackendOrder(storeId, orderId, order) {
