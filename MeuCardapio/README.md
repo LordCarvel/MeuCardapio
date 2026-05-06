@@ -105,7 +105,7 @@ npm run build
 npm run preview
 ```
 
-O Vite esta configurado com `base: './'`, entao o `dist/` funciona em subpastas como GitHub Pages.
+O Vite usa `base: './'` no build local e `/MeuCardapio/` no build do GitHub Pages. O deploy tambem gera `404.html` igual ao `index.html`, para rotas diretas da SPA como `/MeuCardapio/loja/{id}` abrirem no mesmo front.
 
 ## Deploy
 

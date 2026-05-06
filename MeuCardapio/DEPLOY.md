@@ -28,7 +28,7 @@ Arquivos importantes deste deploy:
 
 - `render.yaml`, na raiz do repositorio.
 - `.github/workflows/deploy-pages.yml`, na raiz do repositorio.
-- `MeuCardapio/vite.config.js`, com `base: './'`, necessario para funcionar no GitHub Pages.
+- `MeuCardapio/vite.config.js`, com base `/MeuCardapio/` no build do GitHub Pages para rotas da SPA como `/loja/{id}`.
 - `MeuCardapio/backend/Dockerfile`, usado pelo Render.
 
 ## 1. Supabase: banco PostgreSQL
@@ -466,7 +466,8 @@ Esse workflow:
 
 - roda quando houver push na branch `main`;
 - instala dependencias em `MeuCardapio/`;
-- faz build com `npm run build`;
+- faz build com `npm run build:pages`;
+- gera `404.html` igual ao `index.html`, para o GitHub Pages entregar a mesma SPA em rotas diretas como `/MeuCardapio/loja/{id}`;
 - publica `MeuCardapio/dist` no GitHub Pages;
 - falha de proposito se `VITE_API_BASE_URL` estiver vazio ou apontando para `localhost`.
 
