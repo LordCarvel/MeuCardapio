@@ -46,6 +46,39 @@ function getCustomerStoreIdFromPath() {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function normalizePublicBasePath(value = '') {
+  const normalized = `/${String(value).trim().replace(/^\/+|\/+$/g, '')}`
+
+  return normalized === '/' ? '' : normalized
+}
+
+function getPublicBasePath() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const viteBase = import.meta.env.BASE_URL || ''
+  if (viteBase && viteBase !== '/' && viteBase !== './') {
+    return normalizePublicBasePath(viteBase)
+  }
+
+  const pathname = window.location.pathname || '/'
+  const routeMatch = pathname.match(/^(.*?)(?:\/(?:loja|cardapio)(?:\/|$).*)/i)
+  if (routeMatch) {
+    return normalizePublicBasePath(routeMatch[1])
+  }
+
+  const withoutFile = pathname.replace(/\/[^/]*\.[^/]*$/, '/').replace(/\/$/, '')
+  return normalizePublicBasePath(withoutFile)
+}
+
+function buildPublicAppUrl(path = '/') {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'
+
+  return `${origin}${getPublicBasePath()}${cleanPath}`
+}
+
 const NOMINATIM_MIN_INTERVAL_MS = 1100
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
 const OSM_TILE_SIZE = 256
@@ -2750,9 +2783,8 @@ function buildInvoicePrintBody(invoice, order, storeProfile, config = {}) {
 
 function buildQrPrintBody(qr, storeProfile, config = {}) {
   const normalizedConfig = normalizePrinterConfig(config)
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const path = `/cardapio/${qr.url || qr.table || ''}`
-  const fullUrl = `${baseUrl}${path}`
+  const fullUrl = buildPublicAppUrl(path)
   const cut = normalizedConfig.cutPaper ? '<div class="receipt-cut">Corte aqui</div>' : ''
 
   return `
@@ -5158,6 +5190,7 @@ function MenuSection({
   storefrontUrl,
   onSelectCategory,
   onMenuSearch,
+  onCopyStorefrontUrl,
   onCopyProductLink,
   onToggleCategory,
   onToggleProduct,
@@ -5236,14 +5269,6 @@ function MenuSection({
     setExpandedProducts((current) => ({ ...current, [productId]: !current[productId] }))
   }
 
-  function copyStorefrontUrl() {
-    if (!storefrontUrl) {
-      return
-    }
-
-    void navigator.clipboard?.writeText(storefrontUrl)
-  }
-
   return (
     <section className="menu-manager">
       <header className="menu-manager__title">
@@ -5281,7 +5306,7 @@ function MenuSection({
         >
           Acoes
         </Button>
-        <Button variant="primary" onClick={copyStorefrontUrl}>Copiar link da loja</Button>
+        <Button variant="primary" onClick={onCopyStorefrontUrl}>Copiar link da loja</Button>
         {storefrontUrl ? <a className="btn menu-action-button" href={storefrontUrl} target="_blank" rel="noreferrer">Abrir vitrine</a> : null}
         <Button variant="primary" data-testid="menu-new-category" onClick={() => onOpenModal('newCategory')}>
           <Icon name="plus" size={18} />
@@ -6583,7 +6608,7 @@ function App() {
   }), [resolvedStores, activeStoreId, currentStoreUser])
   const storefrontShareId = pilotSync.storeId || activeStoreId || ''
   const storefrontUrl = storefrontShareId && typeof window !== 'undefined'
-    ? `${window.location.origin}/loja/${encodeURIComponent(storefrontShareId)}`
+    ? buildPublicAppUrl(`/loja/${encodeURIComponent(storefrontShareId)}`)
     : ''
   const customerStoreId = getCustomerStoreIdFromPath()
   const customerStore = customerStoreId
@@ -6634,14 +6659,18 @@ function App() {
     return () => window.clearInterval(intervalId)
   }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
 
-  function copyStorefrontShareUrl() {
+  async function copyStorefrontShareUrl() {
     if (!storefrontUrl) {
       notify('Vincule a loja ao backend antes de compartilhar a vitrine.', 'warning')
       return
     }
 
-    void navigator.clipboard?.writeText(storefrontUrl)
-    notify('Link da vitrine copiado.')
+    try {
+      const copied = await copyText(storefrontUrl)
+      notify(copied ? 'Link da vitrine copiado.' : `Link pronto: ${storefrontUrl}`)
+    } catch {
+      notify(`Link pronto: ${storefrontUrl}`, 'warning')
+    }
   }
 
   const visibleOrders = useMemo(() => {
@@ -7852,8 +7881,7 @@ function App() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'
-    const link = `${baseUrl}/cardapio/${storeSlug}/${productSlug}`
+    const link = buildPublicAppUrl(`/cardapio/${storeSlug}/${productSlug}`)
 
     try {
       const copied = await copyText(link)
@@ -10314,6 +10342,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           storefrontUrl={storefrontUrl}
           onSelectCategory={setSelectedCategory}
           onMenuSearch={setMenuSearch}
+          onCopyStorefrontUrl={copyStorefrontShareUrl}
           onCopyProductLink={copyProductLink}
           onToggleCategory={toggleCategory}
           onToggleProduct={toggleProduct}
