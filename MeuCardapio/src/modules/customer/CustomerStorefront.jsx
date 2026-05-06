@@ -555,7 +555,32 @@ function buildMapTiles(center, zoom) {
 
 function CustomerAddressMap({ center, zoom, selectedAddress, onPan, onZoom, onUseCenter }) {
   const dragRef = useRef(null)
+  const mapRef = useRef(null)
   const tiles = useMemo(() => buildMapTiles(center, zoom), [center, zoom])
+  const zoomRef = useRef(zoom)
+  const onZoomRef = useRef(onZoom)
+
+  useEffect(() => {
+    zoomRef.current = zoom
+    onZoomRef.current = onZoom
+  }, [onZoom, zoom])
+
+  useEffect(() => {
+    const mapElement = mapRef.current
+
+    if (!mapElement) {
+      return undefined
+    }
+
+    function handleWheel(event) {
+      event.preventDefault()
+      onZoomRef.current(clampMapZoom(zoomRef.current + (event.deltaY > 0 ? -1 : 1)))
+    }
+
+    mapElement.addEventListener('wheel', handleWheel, { passive: false })
+
+    return () => mapElement.removeEventListener('wheel', handleWheel)
+  }, [])
 
   function panByPixels(deltaX, deltaY) {
     const centerPixel = latLngToMapPixel(center.lat, center.lng, zoom)
@@ -569,6 +594,7 @@ function CustomerAddressMap({ center, zoom, selectedAddress, onPan, onZoom, onUs
 
   return (
     <div
+      ref={mapRef}
       className="customer-address-map"
       onPointerDown={(event) => {
         if (event.target.closest('button')) {
@@ -590,10 +616,6 @@ function CustomerAddressMap({ center, zoom, selectedAddress, onPan, onZoom, onUs
       }}
       onPointerUp={() => { dragRef.current = null }}
       onPointerCancel={() => { dragRef.current = null }}
-      onWheel={(event) => {
-        event.preventDefault()
-        onZoom(clampMapZoom(zoom + (event.deltaY > 0 ? -1 : 1)))
-      }}
       role="application"
       aria-label="Mapa para escolher ponto de entrega"
     >

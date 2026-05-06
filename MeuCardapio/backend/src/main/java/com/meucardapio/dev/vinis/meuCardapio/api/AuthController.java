@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -156,16 +157,18 @@ public class AuthController {
 
     @PostMapping("/auth/signup")
     @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
     public LoginResponse signup(@Valid @RequestBody SignupRequest request) {
-        users.findByEmailIgnoreCase(request.email()).ifPresent(user -> {
+        String normalizedEmail = request.email().trim().toLowerCase();
+        users.findByEmailIgnoreCase(normalizedEmail).ifPresent(user -> {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email ja cadastrado");
         });
 
-        if (!emailCodes.verifySignupCode(request.email(), request.code())) {
+        if (!emailCodes.verifySignupCode(normalizedEmail, request.code())) {
             return new LoginResponse(false, "Codigo invalido ou expirado", null);
         }
 
-        Store store = new Store(UUID.randomUUID(), request.tradeName(), request.ownerName(), request.email().trim().toLowerCase(), request.phone(), request.taxId(), request.category());
+        Store store = new Store(UUID.randomUUID(), request.tradeName(), request.ownerName(), normalizedEmail, request.phone(), request.taxId(), request.category());
         store.setStreet(request.street());
         store.setNumber(request.number());
         store.setDistrict(request.district());
@@ -180,7 +183,7 @@ public class AuthController {
                 UUID.randomUUID(),
                 savedStore,
                 request.ownerName(),
-                request.email().trim().toLowerCase(),
+                normalizedEmail,
                 encoder.encode(request.password()),
                 "owner");
         StoreUser savedUser = users.save(user);

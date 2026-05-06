@@ -249,6 +249,41 @@ Invoke-RestMethod -Method Post `
   -Body $body
 ```
 
+### Limpar cadastros de teste travados
+
+Se voce testou cadastro por email e quer liberar um email que ficou cadastrado antes de concluir o teste, apague a loja desse email pelo `SQL Editor` do Supabase. Isso remove a loja e, por cascata, tambem remove o usuario, cardapio e pedidos dessa loja.
+
+Troque os emails do exemplo pelos emails que voce quer liberar:
+
+```sql
+begin;
+
+delete from public.stores
+where id in (
+  select store_id
+  from public.store_users
+  where lower(email) in (
+    lower('email-de-teste@exemplo.com')
+  )
+);
+
+delete from public.auth_codes
+where lower(email) in (
+  lower('email-de-teste@exemplo.com')
+);
+
+commit;
+```
+
+Para limpar apenas codigos de cadastro expirados, sem apagar nenhuma loja criada:
+
+```sql
+delete from public.auth_codes
+where purpose = 'SIGNUP'
+  and used_at is null
+  and expires_at < now();
+```
+
 Para recuperacao de senha:
 
 ```powershell

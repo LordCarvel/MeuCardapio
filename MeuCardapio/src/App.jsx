@@ -7221,6 +7221,35 @@ function App() {
     }
 
     try {
+      const localStore = createStoreRecord({
+        profile: {
+          tradeName: account.tradeName,
+          owner: account.ownerName,
+          phone: account.phone,
+          whatsapp: account.phone,
+          email,
+          taxId: account.taxId,
+          category: account.category || 'Restaurante',
+          street: account.street,
+          number: account.number,
+          district: '',
+          cityName: account.cityName,
+          state: account.state || 'SC',
+          schedule: account.schedule,
+          minimumOrder: '0,00',
+          deliveryRadius: '5',
+        },
+        owner: {
+          name: account.ownerName,
+          email,
+          password,
+        },
+      }, resolvedStores.length)
+
+      if (localStore.ok === false) {
+        return localStore
+      }
+
       const signup = await signupBackendAccount({
         tradeName: account.tradeName,
         ownerName: account.ownerName,
@@ -7245,35 +7274,6 @@ function App() {
       }
 
       const storeId = signup.user.storeId
-      const localStore = createStoreRecord({
-        profile: {
-          tradeName: account.tradeName,
-          owner: account.ownerName,
-          phone: account.phone,
-          whatsapp: account.phone,
-          email,
-          taxId: account.taxId,
-          category: account.category || 'Restaurante',
-          street: account.street,
-          number: account.number,
-          district: '',
-          cityName: account.cityName,
-          state: account.state || 'SC',
-          schedule: account.schedule,
-          minimumOrder: '0,00',
-          deliveryRadius: '5',
-        },
-        owner: {
-          name: signup.user.name || account.ownerName,
-          email: signup.user.email || email,
-          password,
-        },
-      }, resolvedStores.length)
-
-      if (localStore.ok === false) {
-        return localStore
-      }
-
       const nextStore = {
         ...localStore.store,
         id: storeId,
