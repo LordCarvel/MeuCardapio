@@ -3399,6 +3399,8 @@ function Icon({ name, size = 20, className = '' }) {
       return <svg {...props}><path d="M4 6h16v12H4z" /><path d="M4 10h16" /></svg>
     case 'chain':
       return <svg {...props}><path d="M10 13a5 5 0 0 0 7.1.1l1.4-1.4a5 5 0 0 0-7.1-7.1l-.8.8" /><path d="M14 11a5 5 0 0 0-7.1-.1l-1.4 1.4a5 5 0 0 0 7.1 7.1l.8-.8" /></svg>
+    case 'share':
+      return <svg {...props}><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.3 10.7 7.4-4.4M8.3 13.3l7.4 4.4" /></svg>
     case 'check':
       return <svg {...props}><path d="m5 12.5 4.2 4L19 7" /></svg>
     case 'x':
@@ -4121,6 +4123,8 @@ function Toolbar({
   onSearch,
   onOpenModal,
   blockedCount,
+  storefrontUrl,
+  onCopyStorefrontUrl,
 }) {
   return (
     <section className="toolbar" aria-label="Ferramentas de pedidos">
@@ -4157,6 +4161,16 @@ function Toolbar({
           <Icon name="plus" size={18} />
           Novo pedido
         </Button>
+        <Button data-testid="copy-storefront-link" disabled={!storefrontUrl} onClick={onCopyStorefrontUrl}>
+          <Icon name="share" size={18} />
+          Compartilhar vitrine
+        </Button>
+        {storefrontUrl ? (
+          <a className="btn toolbar-storefront-link" href={storefrontUrl} target="_blank" rel="noreferrer">
+            <Icon name="arrow" size={18} />
+            Abrir vitrine
+          </a>
+        ) : null}
         <Button data-testid="blocked-orders" onClick={() => onOpenModal('blocked')}>
           <Icon name="bag" size={18} />
           Bloqueados
@@ -6619,6 +6633,16 @@ function App() {
 
     return () => window.clearInterval(intervalId)
   }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
+
+  function copyStorefrontShareUrl() {
+    if (!storefrontUrl) {
+      notify('Vincule a loja ao backend antes de compartilhar a vitrine.', 'warning')
+      return
+    }
+
+    void navigator.clipboard?.writeText(storefrontUrl)
+    notify('Link da vitrine copiado.')
+  }
 
   const visibleOrders = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -10373,6 +10397,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           onSearch={setSearch}
           onOpenModal={openModal}
           blockedCount={blockedOrders.length}
+          storefrontUrl={storefrontUrl}
+          onCopyStorefrontUrl={copyStorefrontShareUrl}
         />
 
         <div className="operations-grid">
