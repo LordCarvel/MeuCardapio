@@ -54,6 +54,6 @@ public class ApiExceptionHandler {
     public Map<String, Object> handleMail(MailException ex) {
         return Map.of(
                 "ok", false,
-                "message", "Nao foi possivel enviar o email agora. Confira SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD e SMTP_FROM no Render.");
+                "message", "Nao foi possivel enviar o email agora. Confira RESEND_API_KEY/RESEND_FROM ou SMTP_HOST/SMTP_USERNAME/SMTP_PASSWORD no Render.");
     }
 }

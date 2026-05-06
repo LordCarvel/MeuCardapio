@@ -2,15 +2,19 @@ package com.meucardapio.dev.vinis.meuCardapio.service;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import com.meucardapio.dev.vinis.meuCardapio.domain.AuthCode;
 import com.meucardapio.dev.vinis.meuCardapio.domain.StoreUser;
@@ -32,6 +36,8 @@ public class EmailAuthCodeService {
     private final int codeMinutes;
     private final String mailFrom;
     private final String smtpHost;
+    private final String resendApiKey;
+    private final String resendFrom;
 
     public EmailAuthCodeService(
             AuthCodeRepository codes,
@@ -40,7 +46,9 @@ public class EmailAuthCodeService {
             ObjectProvider<JavaMailSender> mailSenderProvider,
             @Value("${app.auth.code-minutes}") int codeMinutes,
             @Value("${app.mail.from}") String mailFrom,
-            @Value("${spring.mail.host:}") String smtpHost) {
+            @Value("${spring.mail.host:}") String smtpHost,
+            @Value("${app.resend.api-key:}") String resendApiKey,
+            @Value("${app.resend.from:}") String resendFrom) {
         this.codes = codes;
         this.users = users;
         this.logs = logs;
@@ -48,6 +56,8 @@ public class EmailAuthCodeService {
         this.codeMinutes = codeMinutes;
         this.mailFrom = mailFrom;
         this.smtpHost = smtpHost;
+        this.resendApiKey = resendApiKey;
+        this.resendFrom = resendFrom;
     }
 
     public void requestLoginCode(String email) {
@@ -155,8 +165,13 @@ public class EmailAuthCodeService {
     }
 
     private void sendCodeEmail(String email, String purpose, String code) {
+        if (resendApiKey != null && !resendApiKey.isBlank()) {
+            sendCodeEmailWithResend(email, purpose, code);
+            return;
+        }
+
         if (smtpHost == null || smtpHost.isBlank()) {
-            throw new IllegalStateException("SMTP_HOST nao configurado");
+            throw new IllegalStateException("Configure RESEND_API_KEY no Render ou SMTP_HOST para envio por SMTP.");
         }
 
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
@@ -178,6 +193,49 @@ public class EmailAuthCodeService {
                 Ele expira em %d minutos. Se voce nao pediu este codigo, ignore este email.
                 """.formatted(code, Math.max(1, codeMinutes)));
         mailSender.send(message);
+    }
+
+    private void sendCodeEmailWithResend(String email, String purpose, String code) {
+        String from = resendFrom == null || resendFrom.isBlank() ? mailFrom : resendFrom;
+
+        if (from == null || from.isBlank() || from.endsWith("@meucardapio.local")) {
+            throw new IllegalStateException("Configure RESEND_FROM com um remetente valido no Render.");
+        }
+
+        try {
+            RestClient.builder()
+                    .baseUrl("https://api.resend.com")
+                    .defaultHeader("Authorization", "Bearer " + resendApiKey.trim())
+                    .build()
+                    .post()
+                    .uri("/emails")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of(
+                            "from", from,
+                            "to", email,
+                            "subject", getEmailSubject(purpose),
+                            "text", getEmailText(code)))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Nao foi possivel enviar pelo Resend. Confira RESEND_API_KEY e RESEND_FROM no Render.", ex);
+        }
+    }
+
+    private String getEmailSubject(String purpose) {
+        return switch (purpose) {
+            case PURPOSE_PASSWORD_RESET -> "Codigo para redefinir sua senha";
+            case PURPOSE_SIGNUP -> "Codigo para validar seu email";
+            default -> "Codigo de acesso MeuCardapio";
+        };
+    }
+
+    private String getEmailText(String code) {
+        return """
+                Seu codigo MeuCardapio e: %s
+
+                Ele expira em %d minutos. Se voce nao pediu este codigo, ignore este email.
+                """.formatted(code, Math.max(1, codeMinutes));
     }
 
     private String generateCode() {

@@ -183,6 +183,8 @@ SMTP_PORT
 SMTP_USERNAME
 SMTP_PASSWORD
 SMTP_FROM
+RESEND_API_KEY
+RESEND_FROM
 ```
 
 O `render.yaml` ja define:
@@ -199,7 +201,26 @@ org.postgresql.Driver
 
 ### Envio de codigo por email
 
-O login por codigo e a recuperacao de senha usam SMTP. Para manter gratuito, use uma conta de email sua com SMTP, por exemplo Gmail com senha de app, Outlook ou email do seu dominio.
+O login por codigo e a recuperacao de senha podem usar Resend por API HTTP ou SMTP. No Render free, prefira Resend, porque servicos gratuitos do Render podem bloquear trafego SMTP nas portas `25`, `465` e `587`.
+
+#### Opcao recomendada no Render free: Resend
+
+1. Crie uma conta em `https://resend.com`.
+2. Crie uma API key.
+3. No Render, configure:
+
+```text
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+RESEND_FROM=MeuCardapio <onboarding@resend.dev>
+```
+
+Para teste inicial, `onboarding@resend.dev` funciona como remetente de sandbox do Resend. Para producao, valide um dominio seu no Resend e use um remetente desse dominio, por exemplo:
+
+```text
+RESEND_FROM=MeuCardapio <noreply@seudominio.com>
+```
+
+#### Opcao alternativa: Gmail SMTP
 
 No Render, configure:
 
@@ -211,7 +232,7 @@ SMTP_PASSWORD=SENHA_DE_APP_DO_EMAIL
 SMTP_FROM=seu-email@gmail.com
 ```
 
-Para Gmail, nao use a senha normal da conta. Use uma senha de app criada nas configuracoes de seguranca da conta Google.
+Para Gmail, nao use a senha normal da conta. Use uma senha de app criada nas configuracoes de seguranca da conta Google. Esta opcao pode exigir plano pago no Render porque depende de SMTP na porta `587`.
 
 Endpoints disponiveis:
 
@@ -420,11 +441,8 @@ DATABASE_USERNAME=postgres.PROJECT_REF
 DATABASE_PASSWORD=SUA_SENHA_DO_SUPABASE
 DATABASE_DRIVER=org.postgresql.Driver
 APP_CORS_ALLOWED_ORIGINS=https://lordcarvel.github.io
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=seu-email@gmail.com
-SMTP_PASSWORD=SENHA_DE_APP_DO_EMAIL
-SMTP_FROM=seu-email@gmail.com
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+RESEND_FROM=MeuCardapio <onboarding@resend.dev>
 ```
 
 9. Clique em deploy.
