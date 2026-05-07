@@ -46,6 +46,8 @@ const ORDER_STATUS_STEPS = [
   { id: 'completed', label: 'Finalizado' },
 ]
 
+const ORDER_TERMINAL_STATUSES = new Set(['completed', 'canceled', 'cancelled', 'rejected'])
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -365,11 +367,54 @@ function getLocalTrackedOrder(storeId, orderId) {
 }
 
 function getOrderStatusIndex(status = '') {
-  return Math.max(0, ORDER_STATUS_STEPS.findIndex((step) => step.id === status))
+  const normalizedStatus = normalizePublicOrderStatus(status)
+
+  if (normalizedStatus === 'canceled') {
+    return 0
+  }
+
+  return Math.max(0, ORDER_STATUS_STEPS.findIndex((step) => step.id === normalizedStatus))
 }
 
 function getOrderStatusLabel(status = '') {
-  return ORDER_STATUS_STEPS.find((step) => step.id === status)?.label || 'Recebido'
+  const normalizedStatus = normalizePublicOrderStatus(status)
+
+  if (normalizedStatus === 'canceled') {
+    return 'Pedido recusado'
+  }
+
+  return ORDER_STATUS_STEPS.find((step) => step.id === normalizedStatus)?.label || 'Recebido'
+}
+
+function normalizePublicOrderStatus(status = '') {
+  const normalized = String(status || '').toLowerCase()
+
+  if (['canceled', 'cancelled', 'rejected', 'deleted', 'blocked'].includes(normalized)) {
+    return 'canceled'
+  }
+
+  if (['accepted', 'confirmed', 'preparing'].includes(normalized)) {
+    return 'production'
+  }
+
+  if (['done', 'delivered', 'finished'].includes(normalized)) {
+    return 'completed'
+  }
+
+  return ORDER_STATUS_STEPS.some((step) => step.id === normalized) ? normalized : 'analysis'
+}
+
+function getOrderStatusMessage(status = '') {
+  const normalizedStatus = normalizePublicOrderStatus(status)
+  const messages = {
+    analysis: 'Pedido enviado. Aguarde a loja aceitar.',
+    production: 'A loja aceitou seu pedido e iniciou o preparo.',
+    ready: 'Seu pedido ficou pronto.',
+    completed: 'Pedido finalizado pela loja.',
+    canceled: 'A loja recusou ou cancelou este pedido.',
+  }
+
+  return messages[normalizedStatus] || messages.analysis
 }
 
 function formatCustomerAddress(address = {}) {
@@ -728,30 +773,71 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
   }, [localStore, storeId])
 
+  function applyTrackedOrderUpdate(nextOrder) {
+    setTracking((current) => {
+      if (!current) {
+        return current
+      }
+
+      const nextStatus = normalizePublicOrderStatus(nextOrder.status || current.status)
+      const currentStatus = normalizePublicOrderStatus(current.status)
+
+      if (nextStatus !== currentStatus) {
+        setStatus({
+          type: nextStatus === 'canceled' ? 'error' : 'success',
+          message: getOrderStatusMessage(nextStatus),
+        })
+      }
+
+      return { ...current, order: nextOrder, status: nextStatus }
+    })
+  }
+
+  function markTrackedOrderUnavailable() {
+    setTracking((current) => {
+      if (!current || normalizePublicOrderStatus(current.status) === 'canceled') {
+        return current
+      }
+
+      setStatus({ type: 'error', message: getOrderStatusMessage('canceled') })
+      return { ...current, status: 'canceled', order: { ...current.order, status: 'canceled' } }
+    })
+  }
+
+  const trackingId = tracking?.id || ''
+  const trackingSource = tracking?.source || ''
+  const trackingStatus = normalizePublicOrderStatus(tracking?.status)
+  const trackingStoreId = tracking?.storeId || ''
+
   useEffect(() => {
-    if (!tracking || tracking.status === 'completed') {
+
+    if (!trackingId || ORDER_TERMINAL_STATUSES.has(trackingStatus)) {
       return undefined
     }
 
     let cancelled = false
 
     async function refreshTrackedOrder() {
-      if (tracking.source === 'local') {
-        const nextOrder = getLocalTrackedOrder(tracking.storeId, tracking.id)
+      if (trackingSource === 'local') {
+        const nextOrder = getLocalTrackedOrder(trackingStoreId, trackingId)
 
         if (!cancelled && nextOrder) {
-          setTracking((current) => current ? { ...current, order: nextOrder, status: nextOrder.status || current.status } : current)
+          applyTrackedOrderUpdate(nextOrder)
+        } else if (!cancelled) {
+          markTrackedOrderUnavailable()
         }
 
         return
       }
 
       try {
-        const backendOrders = await getBackendOrders(tracking.storeId)
-        const nextOrder = backendOrders.find((order) => String(order.id) === String(tracking.id))
+        const backendOrders = await getBackendOrders(trackingStoreId)
+        const nextOrder = backendOrders.find((order) => String(order.id) === String(trackingId))
 
         if (!cancelled && nextOrder) {
-          setTracking((current) => current ? { ...current, order: nextOrder, status: nextOrder.status || current.status } : current)
+          applyTrackedOrderUpdate(nextOrder)
+        } else if (!cancelled) {
+          markTrackedOrderUnavailable()
         }
       } catch {
         if (!cancelled) {
@@ -767,7 +853,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [tracking])
+  }, [trackingId, trackingSource, trackingStatus, trackingStoreId])
 
   const data = useMemo(() => {
     if (localStore?.snapshot) {
@@ -820,12 +906,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     ? parseCurrency(address.deliveryFee || serviceArea.fee || storeProfile?.serviceFee || '0')
     : 0
   const total = subtotal + deliveryFee
+  const minimumOrder = Math.max(0, parseCurrency(storeProfile?.minimumOrder))
+  const minimumRemaining = Math.max(0, minimumOrder - subtotal)
+  const hasMinimumOrder = minimumOrder > 0
+  const reachedMinimumOrder = !hasMinimumOrder || subtotal >= minimumOrder
+  const minimumOrderMessage = reachedMinimumOrder
+    ? `Pedido minimo atingido: ${formatCurrency(minimumOrder)}.`
+    : `Pedido minimo de ${formatCurrency(minimumOrder)}. Faltam ${formatCurrency(minimumRemaining)} em produtos.`
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
-  const canIdentify = cart.length > 0
+  const canIdentify = cart.length > 0 && reachedMinimumOrder
   const formattedAddress = formatCustomerAddress(address)
   const hasDeliveryAddress = Boolean(address.street.trim() && address.number.trim() && address.district.trim() && address.city.trim())
   const hasConfirmedDeliveryPoint = Boolean(address.pointConfirmed && address.lat && address.lng)
-  const canFinish = customer.name.trim() && customer.phone.trim() && (fulfillment === 'pickup' || (hasDeliveryAddress && hasConfirmedDeliveryPoint && serviceArea.ok)) && payment
+  const canFinish = reachedMinimumOrder && customer.name.trim() && customer.phone.trim() && (fulfillment === 'pickup' || (hasDeliveryAddress && hasConfirmedDeliveryPoint && serviceArea.ok)) && payment
 
   function openProductConfig(product, nextScreen = 'item') {
     const steps = getCartConfigurationSteps(product)
@@ -1149,7 +1242,10 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
 
     if (!canFinish) {
-      setStatus({ type: 'error', message: 'Complete identificacao, entrega e pagamento.' })
+      setStatus({
+        type: 'error',
+        message: reachedMinimumOrder ? 'Complete identificacao, entrega e pagamento.' : minimumOrderMessage,
+      })
       return
     }
 
@@ -1196,11 +1292,11 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
         id: savedOrder?.id || savedOrder?.backendId || `pedido-${Date.now()}`,
         storeId,
         source: data.source,
-        status: savedOrder?.status || 'analysis',
+        status: normalizePublicOrderStatus(savedOrder?.status || 'analysis'),
         order: savedOrder,
       })
       setScreen('tracking')
-      setStatus({ type: 'success', message: 'Pedido enviado. A loja recebeu sua solicitacao.' })
+      setStatus({ type: 'success', message: getOrderStatusMessage(savedOrder?.status || 'analysis') })
     } catch (err) {
       setStatus({
         type: 'error',
@@ -1245,7 +1341,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
           <section className="customer-home">
             <div className="customer-store-meta">
               <span>Aberto ate {storeProfile.schedule || '23h30'}</span>
-              <span>Pedido min. {formatCurrency(parseCurrency(storeProfile.minimumOrder) || 25)}</span>
+              {hasMinimumOrder ? <span>Pedido min. {formatCurrency(minimumOrder)}</span> : null}
               <button type="button">Perfil da loja</button>
             </div>
             {status.message ? <p className={`customer-status customer-status--${status.type}`}>{status.message}</p> : null}
@@ -1424,6 +1520,12 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               </article>
             ))}
             {cart.length === 0 ? <p className="customer-empty-list">Seu carrinho esta vazio.</p> : null}
+            {cart.length > 0 && hasMinimumOrder ? (
+              <div className={`customer-minimum-order ${reachedMinimumOrder ? 'is-ok' : ''}`.trim()}>
+                <span>Pedido minimo</span>
+                <strong>{minimumOrderMessage}</strong>
+              </div>
+            ) : null}
 
             {suggestedProducts.length > 0 ? (
               <section className="customer-upsell">
@@ -1442,7 +1544,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
             ) : null}
 
             <button className="customer-outline-action" type="button" onClick={() => setScreen('home')}>Adicionar mais produtos</button>
-            <StickyAction disabled={!canIdentify} label="Avancar" total={subtotal} onClick={() => setScreen('identify')} />
+            <StickyAction
+              disabled={!canIdentify}
+              label={!reachedMinimumOrder && hasMinimumOrder ? `Faltam ${formatCurrency(minimumRemaining)}` : 'Avancar'}
+              total={subtotal}
+              onClick={() => {
+                if (!reachedMinimumOrder) {
+                  setStatus({ type: 'error', message: minimumOrderMessage })
+                  return
+                }
+
+                setScreen('identify')
+              }}
+            />
           </div>
         </CustomerScreen>
       ) : null}
@@ -1537,8 +1651,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
             </label>
 
             <OrderTotals subtotal={subtotal} deliveryFee={deliveryFee} total={total} />
+            {hasMinimumOrder ? (
+              <div className={`customer-minimum-order ${reachedMinimumOrder ? 'is-ok' : ''}`.trim()}>
+                <span>Pedido minimo</span>
+                <strong>{minimumOrderMessage}</strong>
+              </div>
+            ) : null}
             {status.message ? <p className={`customer-status customer-status--${status.type}`}>{status.message}</p> : null}
-            <StickyAction disabled={!canFinish || status.type === 'loading'} label={status.type === 'loading' ? 'Enviando...' : 'Finalizar pedido'} total={total} onClick={submitOrder} />
+            <StickyAction
+              disabled={!canFinish || status.type === 'loading'}
+              label={status.type === 'loading' ? 'Enviando...' : !reachedMinimumOrder && hasMinimumOrder ? `Faltam ${formatCurrency(minimumRemaining)}` : 'Finalizar pedido'}
+              total={total}
+              onClick={submitOrder}
+            />
           </section>
         </CustomerScreen>
       ) : null}
@@ -1552,14 +1677,18 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               <p>{status.message || 'Pedido conectado ao sistema da loja.'}</p>
             </article>
 
-            <div className="customer-tracking-steps">
-              {ORDER_STATUS_STEPS.map((step, index) => (
-                <article className={index <= getOrderStatusIndex(tracking.status) ? 'is-done' : ''} key={step.id}>
-                  <b>{index + 1}</b>
-                  <span>{step.label}</span>
-                </article>
-              ))}
-            </div>
+            {normalizePublicOrderStatus(tracking.status) === 'canceled' ? (
+              <p className="customer-status customer-status--error">{getOrderStatusMessage('canceled')}</p>
+            ) : (
+              <div className="customer-tracking-steps">
+                {ORDER_STATUS_STEPS.map((step, index) => (
+                  <article className={index <= getOrderStatusIndex(tracking.status) ? 'is-done' : ''} key={step.id}>
+                    <b>{index + 1}</b>
+                    <span>{step.label}</span>
+                  </article>
+                ))}
+              </div>
+            )}
 
             <section className="customer-tracking-summary">
               <div>

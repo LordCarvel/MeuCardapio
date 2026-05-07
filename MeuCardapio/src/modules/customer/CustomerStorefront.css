@@ -1209,6 +1209,37 @@
   color: #075985;
 }
 
+.customer-status--warning {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.customer-minimum-order {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.customer-minimum-order span {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.customer-minimum-order strong {
+  font-size: 13px;
+}
+
+.customer-minimum-order.is-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
 .customer-tracking {
   display: grid;
   gap: 14px;
