@@ -34,6 +34,7 @@ import {
   isStoreConfigured,
   normalizeStoreProfile,
 } from './modules/store/storeProfile'
+import { parseMenuImportContent } from './modules/menu/menuImport'
 import './App.css'
 
 function getCustomerStoreIdFromPath() {
@@ -3416,6 +3417,8 @@ function Icon({ name, size = 20, className = '' }) {
       return <svg {...props}><path d="M4 6h16l-6.4 7.4V19l-3.2-1.7v-3.9L4 6Z" /></svg>
     case 'plus':
       return <svg {...props}><path d="M12 5v14M5 12h14" /></svg>
+    case 'upload':
+      return <svg {...props}><path d="M12 16V4" /><path d="m7 9 5-5 5 5" /><path d="M5 20h14" /></svg>
     case 'edit':
       return <svg {...props}><path d="M4 20h16" /><path d="M13.7 5.3 6 13v3h3l7.7-7.7a2.1 2.1 0 0 0-3-3Z" /></svg>
     case 'trash':
@@ -5193,6 +5196,7 @@ function MenuSection({
   onUpdateProductAddonOption,
   onRemoveProductAddonOption,
   onToggleProductAvailabilityDay,
+  onImportMenu,
   onOpenModal,
 }) {
   const [expandedCategories, setExpandedCategories] = useState(() =>
@@ -5294,6 +5298,10 @@ function MenuSection({
           onClick={() => onOpenModal('newProduct', selectedCategory === 'all' ? null : { category: selectedCategory })}
         >
           Acoes
+        </Button>
+        <Button className="menu-action-button" data-testid="menu-import-catalog" onClick={onImportMenu}>
+          <Icon name="upload" size={18} />
+          Importar cardapio
         </Button>
         <Button variant="primary" data-testid="menu-new-category" onClick={() => onOpenModal('newCategory')}>
           <Icon name="plus" size={18} />
@@ -6331,6 +6339,7 @@ function App() {
   const initialWorkspace = initialWorkspaceRef.current
   const initialData = initialWorkspace.activeSnapshot
   const importInputRef = useRef(null)
+  const menuImportInputRef = useRef(null)
   const geocodeCacheRef = useRef(new Map())
   const nominatimLastRequestRef = useRef(0)
   const [stores, setStores] = useState(initialWorkspace.stores)
@@ -7584,6 +7593,82 @@ function App() {
   function openImportPicker() {
     setDataImportError('')
     importInputRef.current?.click()
+  }
+
+  function openMenuImportPicker() {
+    setDataImportError('')
+    menuImportInputRef.current?.click()
+  }
+
+  function getUniqueImportId(value, fallback, usedIds) {
+    const base = String(value || fallback).trim() || fallback
+    let candidate = base
+    let suffix = 2
+
+    while (usedIds.has(candidate)) {
+      candidate = `${base}-${suffix}`
+      suffix += 1
+    }
+
+    usedIds.add(candidate)
+    return candidate
+  }
+
+  function applyMenuImport(importedMenu, fileName = '') {
+    const rawCategories = Array.isArray(importedMenu?.categories) ? importedMenu.categories : []
+    const rawProducts = Array.isArray(importedMenu?.products) ? importedMenu.products : []
+
+    if (rawProducts.length === 0) {
+      throw new Error('Nenhum produto encontrado.')
+    }
+
+    const usedCategoryIds = new Set()
+    const nextCategories = rawCategories
+      .filter((category) => category?.name)
+      .map((category, index) => ({
+        id: getUniqueImportId(category.id, `import-cat-${index + 1}`, usedCategoryIds),
+        name: category.name,
+        imageUrl: category.imageUrl || '',
+        active: category.active !== false,
+      }))
+    const fallbackCategory = nextCategories[0]?.name || 'Importados'
+    const validCategoryNames = new Set(nextCategories.map((category) => category.name))
+    const usedProductIds = new Set()
+    const nextProducts = rawProducts
+      .filter((product) => product?.name)
+      .map((product, index) => normalizeProduct({
+        ...product,
+        id: getUniqueImportId(product.id, `import-prod-${index + 1}`, usedProductIds),
+        category: validCategoryNames.has(product.category) ? product.category : fallbackCategory,
+      }, fallbackCategory))
+
+    setCategories(nextCategories.length > 0 ? nextCategories : [{ id: 'import-cat-1', name: fallbackCategory, active: true }])
+    setProducts(nextProducts)
+    setSelectedCategory('all')
+    setMenuSearch('')
+    setCounterCart([])
+    setOrderCart([])
+    setSelectedCartItemId(null)
+    setDataImportError('')
+    notify(`${nextProducts.length} item(ns) importado(s) para o cardapio${fileName ? ` de ${fileName}` : ''}.`)
+  }
+
+  async function handleMenuImportData(event) {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    try {
+      const content = await file.text()
+      applyMenuImport(parseMenuImportContent(content), file.name)
+    } catch {
+      setDataImportError('Nao foi possivel desserializar este cardapio.')
+      notify('Nao foi possivel importar este cardapio.', 'warning')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   async function handleImportData(event) {
@@ -10327,6 +10412,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           onUpdateProductAddonOption={updateProductAddonOption}
           onRemoveProductAddonOption={removeProductAddonOption}
           onToggleProductAvailabilityDay={toggleProductAvailabilityDay}
+          onImportMenu={openMenuImportPicker}
           onOpenModal={openModal}
         />
       )
@@ -13624,6 +13710,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       </div>
 
       <input ref={importInputRef} type="file" accept="application/json" className="sr-only-input" onChange={handleImportData} />
+      <input ref={menuImportInputRef} type="file" accept="application/json,.json,.har" className="sr-only-input" onChange={handleMenuImportData} />
       {renderModal()}
       <GuidedTutorial
         step={currentTutorialStep}

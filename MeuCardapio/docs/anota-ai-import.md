@@ -19,3 +19,7 @@ npm run import:anota -- "$env:USERPROFILE\Downloads\pedido.anota.ai.har" meucard
 
 O arquivo `meucardapio-backup-anota.json` pode ser importado no painel local do MeuCardapio.
 
+## Importar pelo painel
+
+No painel, abra **Cardapio** e clique em **Importar cardapio**.
+O botao aceita o HAR capturado do Anota AI ou um JSON ja convertido, importa categorias e produtos para a loja atual e preserva pedidos, usuarios e configuracoes.
