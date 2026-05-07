@@ -1393,29 +1393,6 @@ function getOrderFulfillmentMeta(order = {}) {
   return { fulfillment, label: 'Balcao', icon: 'store' }
 }
 
-function orderToForm(order) {
-  const normalizedOrder = normalizeOrderRecord(order)
-
-  return {
-    customer: normalizedOrder.customer || '',
-    phone: normalizedOrder.phone || '',
-    channel: normalizedOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
-    fulfillment: normalizedOrder.fulfillment,
-    subtotal: formatCurrencyInput(normalizedOrder.subtotal),
-    total: String(normalizedOrder.total).replace('.', ','),
-    payment: normalizedOrder.payment,
-    items: normalizedOrder.items.join(', '),
-    note: normalizedOrder.note || '',
-    address: normalizedOrder.address || '',
-    deliveryFee: normalizedOrder.deliveryFee || '0,00',
-    document: normalizedOrder.document || '',
-    discountType: normalizedOrder.discountType,
-    discountValue: normalizedOrder.discountValue,
-    surchargeType: normalizedOrder.surchargeType,
-    surchargeValue: normalizedOrder.surchargeValue,
-  }
-}
-
 function productToForm(product) {
   return {
     name: product.name,
@@ -1932,6 +1909,66 @@ function normalizeStoredOrderCartItem(item, productList = []) {
     addonSelections: item?.addonSelections || {},
     addonEntries,
     maxFlavors: Math.max(1, Number(item?.maxFlavors) || 1),
+  }
+}
+
+function orderToCartItems(order = {}, productList = []) {
+  const normalizedOrder = normalizeOrderRecord(order)
+  const receiptItems = getReceiptItems(normalizedOrder)
+  const totalQuantity = receiptItems.reduce((sum, item) => sum + Math.max(1, Number(item.qty) || 1), 0) || 1
+  const fallbackUnitPrice = normalizedOrder.subtotal > 0 ? normalizedOrder.subtotal / totalQuantity : 0
+
+  return receiptItems.map((item, index) => {
+    const qty = Math.max(1, Number(item.qty) || 1)
+    const matchedProduct = productList.find((product) => normalizeSearchText(product.name) === normalizeSearchText(item.name))
+    const lineTotal = item.price === null || item.price === undefined
+      ? ((matchedProduct ? Number(matchedProduct.price) || 0 : fallbackUnitPrice) * qty)
+      : Number(item.price) || 0
+
+    return normalizeStoredOrderCartItem({
+      id: `cart-${normalizedOrder.id}-${index + 1}`,
+      productId: matchedProduct?.id || '',
+      name: item.name || matchedProduct?.name || 'Item do pedido',
+      category: matchedProduct?.category || '',
+      qty,
+      basePrice: qty > 0 ? lineTotal / qty : lineTotal,
+      price: qty > 0 ? lineTotal / qty : lineTotal,
+      flavorNames: Array.isArray(item.details) ? item.details.filter(Boolean) : [],
+      flavorLabel: Array.isArray(item.details) ? item.details.filter(Boolean).join(', ') : '',
+    }, productList)
+  })
+}
+
+function orderToPosDraft(order = {}) {
+  const normalizedOrder = normalizeOrderRecord(order)
+  const editableNote = String(normalizedOrder.note || '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter((part) => !/^CPF\/CNPJ:/i.test(part))
+    .join(' | ')
+
+  return {
+    ...blankOrder,
+    customer: normalizedOrder.customer || '',
+    phone: normalizedOrder.phone || '',
+    channel: normalizedOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
+    fulfillment: normalizedOrder.fulfillment,
+    total: formatCurrencyInput(normalizedOrder.total),
+    payment: normalizedOrder.payment || blankOrder.payment,
+    items: normalizedOrder.items,
+    note: editableNote,
+    addressId: normalizedOrder.addressId || '',
+    addressLat: normalizedOrder.addressLat || '',
+    addressLng: normalizedOrder.addressLng || '',
+    deliveryZoneId: normalizedOrder.deliveryZoneId || '',
+    deliveryZoneName: normalizedOrder.deliveryZoneName || '',
+    address: normalizedOrder.address || '',
+    deliveryFee: normalizedOrder.deliveryFee || '0,00',
+    document: normalizedOrder.document || '',
+    discountType: normalizedOrder.discountType,
+    discountValue: normalizedOrder.discountValue,
+    surchargeType: normalizedOrder.surchargeType,
+    surchargeValue: normalizedOrder.surchargeValue,
   }
 }
 
@@ -6367,6 +6404,7 @@ function App() {
   const [showManualTotalInput, setShowManualTotalInput] = useState(false)
   const [showFiscalField, setShowFiscalField] = useState(false)
   const [orderPanel, setOrderPanel] = useState(null)
+  const [editingOrderId, setEditingOrderId] = useState(null)
   const [paymentDraft, setPaymentDraft] = useState(blankOrder.payment)
   const [deliveryTabDraft, setDeliveryTabDraft] = useState(blankOrder.fulfillment)
   const [deliveryFeeDraft, setDeliveryFeeDraft] = useState(blankOrder.deliveryFee)
@@ -6731,7 +6769,21 @@ function App() {
     }
 
     if (type === 'editOrder' && payload) {
-      setOrderForm(orderToForm(payload))
+      const editableCart = orderToCartItems(payload, products)
+
+      setEditingOrderId(payload.id)
+      setNewOrder(orderToPosDraft(payload))
+      setOrderCart(editableCart)
+      setSelectedCartItemId(editableCart[0]?.id || null)
+      setCartItemForm(blankCartItemForm)
+      setCartItemStepIndex(0)
+      setPosCategory('all')
+      setPosSearch('')
+      setShowManualTotalInput(false)
+      setShowFiscalField(Boolean(payload.document))
+      setOrderPanel(null)
+      setModal({ type: 'newOrder', payload })
+      return
     }
 
     if (type === 'editProduct' && payload) {
@@ -6776,6 +6828,7 @@ function App() {
     }
 
     if (type === 'newOrder') {
+      setEditingOrderId(null)
       setNewOrder(blankOrder)
       setOrderCart([])
       setSelectedCartItemId(null)
@@ -6937,6 +6990,7 @@ function App() {
 
   function closeModal() {
     setOrderPanel(null)
+    setEditingOrderId(null)
     setModal(null)
   }
 
@@ -8838,19 +8892,25 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       return
     }
 
-    const nextId = getNextOrderId(orders)
+    const editedSourceOrder = editingOrderId
+      ? orders.find((order) => order.id === editingOrderId)
+      : null
+    const nextId = editedSourceOrder?.id || getNextOrderId(orders)
     const createdOrder = {
+      ...(editedSourceOrder || {}),
       id: nextId,
       customer: newOrder.customer || 'Cliente balcao',
       phone: newOrder.phone || '(47) 9 0000-0000',
       channel: newOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
       fulfillment: newOrder.fulfillment,
-      source: resolveOrderSourceForFulfillment(newOrder.fulfillment),
-      status: settings.autoAccept ? 'production' : 'analysis',
+      source: newOrder.fulfillment === 'dinein' && normalizeOrderPayment(newOrder.payment) === 'Mesa'
+        ? 'Mesa'
+        : resolveOrderSourceForFulfillment(newOrder.fulfillment, editedSourceOrder?.source),
+      status: editedSourceOrder?.status || (settings.autoAccept ? 'production' : 'analysis'),
       total,
       payment: normalizeOrderPayment(newOrder.payment),
       document: normalizedDocument,
-      time: nowTime(),
+      time: editedSourceOrder?.time || nowTime(),
       addressId: newOrder.addressId || '',
       addressLat: newOrder.addressLat || '',
       addressLng: newOrder.addressLng || '',
@@ -8869,7 +8929,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       surchargeType: adjustments.surchargeType,
       surchargeValue: adjustments.surchargeValue,
       surchargeAmount: formatCurrencyInput(financialBreakdown.surchargeAmount),
-      note: normalizedNote || 'Pedido criado pelo painel.',
+      note: normalizedNote || (editedSourceOrder ? 'Pedido editado pelo painel.' : 'Pedido criado pelo painel.'),
       items: orderCart.length
         ? orderCart.map(getOrderCartItemLabel)
         : typedItems,
@@ -8877,12 +8937,21 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         ? orderCart.map(getOrderCartPrintItem)
         : [],
     }
+    const normalizedCreatedOrder = normalizeOrderRecord(createdOrder)
 
-    setOrders((current) => [createdOrder, ...current])
-    registerOrderFinanceEntry(createdOrder)
-    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
-      void syncSingleOrderToBackend(createdOrder, { silent: true })
+    if (editedSourceOrder) {
+      setOrders((current) =>
+        current.map((order) => (order.id === editedSourceOrder.id ? normalizedCreatedOrder : order)),
+      )
+      syncOrderFinanceEntry(normalizedCreatedOrder)
     } else {
+      setOrders((current) => [normalizedCreatedOrder, ...current])
+      registerOrderFinanceEntry(normalizedCreatedOrder)
+    }
+
+    if (pilotSync.enabled && pilotSync.autoSyncOrders) {
+      void syncSingleOrderToBackend(normalizedCreatedOrder, { silent: true })
+    } else if (!editedSourceOrder) {
       markOrderSyncState(createdOrder.id, {
         syncStatus: 'pending',
         syncMessage: 'Aguardando modo piloto.',
@@ -8895,8 +8964,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setOrderCart([])
     setSelectedCartItemId(null)
     setOrderPanel(null)
+    setEditingOrderId(null)
     closeModal()
-    notify(`Pedido #${nextId} criado no front.`)
+    notify(editedSourceOrder ? `Pedido #${nextId} editado.` : `Pedido #${nextId} criado no front.`)
   }
 
   function updateOrder(event, orderId) {
@@ -10604,6 +10674,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         : getOrderFulfillmentLabel(newOrder.fulfillment)
       const hasOrderAdjustments = orderBreakdown.discountAmount > 0 || orderBreakdown.surchargeAmount > 0
       const hasOrderItems = orderCart.length > 0
+      const isEditingOrder = Boolean(editingOrderId)
 
       return (
         <div className="pos-backdrop" role="presentation" onMouseDown={closeModal}>
@@ -10611,7 +10682,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             className="pos-shell"
             role="dialog"
             aria-modal="true"
-            aria-label="Criar pedido no PDV"
+            aria-label={isEditingOrder ? `Editar pedido #${editingOrderId}` : 'Criar pedido no PDV'}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <form id="new-order-form" onSubmit={createOrder} className="pos-shell__form">
@@ -11037,8 +11108,10 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 </div>
 
                 <footer className="pos-submit-row">
-                  <Button variant="primary" form="new-order-form" type="submit">[ ENTER ] Gerar pedido</Button>
-                  <button type="button" className="save-draft" onClick={saveOrderDraft}><Icon name="printer" size={22} /></button>
+                  <Button variant="primary" form="new-order-form" type="submit">
+                    [ ENTER ] {isEditingOrder ? 'Salvar pedido' : 'Gerar pedido'}
+                  </Button>
+                  <button type="button" className="save-draft" disabled={isEditingOrder} onClick={saveOrderDraft}><Icon name="printer" size={22} /></button>
                 </footer>
               </aside>
             </form>
