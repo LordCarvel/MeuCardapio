@@ -51,7 +51,7 @@ public class CatalogController {
     @ResponseStatus(HttpStatus.CREATED)
     public CategoryResponse createCategory(@PathVariable UUID storeId, @Valid @RequestBody CategoryRequest request) {
         Store store = findStore(storeId);
-        Category category = categories.save(new Category(UUID.randomUUID(), store, request.name(), request.active() == null || request.active()));
+        Category category = categories.save(new Category(UUID.randomUUID(), store, request.name(), request.imageUrl(), request.active() == null || request.active()));
         logService.record(storeId, "INFO", "catalog", "Categoria criada: " + category.getName());
         return CategoryResponse.from(category);
     }
@@ -73,6 +73,7 @@ public class CatalogController {
                 category,
                 request.name(),
                 request.description(),
+                request.imageUrl(),
                 request.price(),
                 request.stock() == null ? 0 : request.stock(),
                 request.active() == null || request.active()));

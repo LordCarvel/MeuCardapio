@@ -11,6 +11,7 @@
     "predeploy": "npm run deploy:build",
     "deploy": "gh-pages -d dist",
     "lint": "eslint .",
+    "import:anota": "node scripts/anota-to-meucardapio.mjs",
     "smoke": "node scripts/smoke.mjs",
     "preview": "vite preview"
   },

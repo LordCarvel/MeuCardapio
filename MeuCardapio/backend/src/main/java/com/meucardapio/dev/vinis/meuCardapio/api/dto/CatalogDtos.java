@@ -15,12 +15,12 @@ public final class CatalogDtos {
     private CatalogDtos() {
     }
 
-    public record CategoryRequest(@NotBlank String name, Boolean active) {
+    public record CategoryRequest(@NotBlank String name, String imageUrl, Boolean active) {
     }
 
-    public record CategoryResponse(UUID id, String name, boolean active, LocalDateTime createdAt) {
+    public record CategoryResponse(UUID id, String name, String imageUrl, boolean active, LocalDateTime createdAt) {
         public static CategoryResponse from(Category category) {
-            return new CategoryResponse(category.getId(), category.getName(), category.isActive(), category.getCreatedAt());
+            return new CategoryResponse(category.getId(), category.getName(), category.getImageUrl(), category.isActive(), category.getCreatedAt());
         }
     }
 
@@ -28,6 +28,7 @@ public final class CatalogDtos {
             UUID categoryId,
             @NotBlank String name,
             String description,
+            String imageUrl,
             @NotNull @PositiveOrZero BigDecimal price,
             @PositiveOrZero Integer stock,
             Boolean active) {
@@ -39,6 +40,7 @@ public final class CatalogDtos {
             String categoryName,
             String name,
             String description,
+            String imageUrl,
             BigDecimal price,
             int stock,
             boolean active,
@@ -50,6 +52,7 @@ public final class CatalogDtos {
                     product.getCategory() == null ? "" : product.getCategory().getName(),
                     product.getName(),
                     product.getDescription(),
+                    product.getImageUrl(),
                     product.getPrice(),
                     product.getStock(),
                     product.isActive(),

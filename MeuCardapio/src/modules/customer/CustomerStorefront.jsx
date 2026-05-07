@@ -98,6 +98,7 @@ function normalizeBackendProduct(product = {}) {
     id: product.id,
     name: product.name || 'Produto sem nome',
     description: product.description || '',
+    imageUrl: product.imageUrl || '',
     category: product.categoryName || 'Cardapio',
     price: Number(product.price) || 0,
     active: product.active !== false,
@@ -108,6 +109,7 @@ function normalizeBackendCategory(category = {}) {
   return {
     id: category.id,
     name: category.name || 'Cardapio',
+    imageUrl: category.imageUrl || '',
     active: category.active !== false,
   }
 }
@@ -152,6 +154,7 @@ function buildCartLine(product) {
     productId: product.id,
     name: product.name,
     category: product.category,
+    imageUrl: product.imageUrl || '',
     quantity: 1,
     unitPrice: Number(product.price) || 0,
     flavorIds: [],
@@ -340,7 +343,12 @@ function cartToOrderItems(cart) {
 }
 
 function ProductThumb({ product, small = false }) {
-  return <span className={`customer-thumb ${small ? 'customer-thumb--small' : ''} ${getThumbClass(product)}`} />
+  return (
+    <span
+      className={`customer-thumb ${small ? 'customer-thumb--small' : ''} ${getThumbClass(product)} ${product?.imageUrl ? 'customer-thumb--photo' : ''}`.trim()}
+      style={product?.imageUrl ? { backgroundImage: `url("${product.imageUrl}")` } : undefined}
+    />
+  )
 }
 
 function getLocalTrackedOrder(storeId, orderId) {
@@ -1265,11 +1273,12 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               <button className={activeCategory === 'all' ? 'is-active' : ''} type="button" onClick={() => setActiveCategory('all')}>Todos</button>
               {categories.map((category) => (
                 <button
-                  className={activeCategory === category.name ? 'is-active' : ''}
+                  className={`customer-category-tab ${activeCategory === category.name ? 'is-active' : ''}`.trim()}
                   key={category.id || category.name}
                   type="button"
                   onClick={() => setActiveCategory(category.name)}
                 >
+                  {category.imageUrl ? <span style={{ backgroundImage: `url("${category.imageUrl}")` }} /> : null}
                   {category.name}
                 </button>
               ))}

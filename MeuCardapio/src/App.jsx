@@ -440,9 +440,11 @@ const initialQrCodes = [
 
 const blankProduct = {
   name: '',
+  description: '',
   category: 'Pizzas',
   extraCategories: [],
   price: '',
+  imageUrl: '',
   maxFlavors: '2',
   availableFrom: '18:00',
   availableTo: '23:30',
@@ -462,6 +464,7 @@ const blankFlavor = {
 
 const blankCategory = {
   name: '',
+  imageUrl: '',
   active: true,
 }
 
@@ -1415,9 +1418,11 @@ function orderToForm(order) {
 function productToForm(product) {
   return {
     name: product.name,
+    description: product.description || '',
     category: product.category,
     extraCategories: Array.isArray(product.extraCategories) ? product.extraCategories : [],
     price: formatCurrencyInput(product.price),
+    imageUrl: product.imageUrl || '',
     maxFlavors: String(product.maxFlavors ?? 2),
     availableFrom: product.availableFrom || '18:00',
     availableTo: product.availableTo || '23:30',
@@ -1436,6 +1441,7 @@ function flavorToForm(flavor) {
 function categoryToForm(category) {
   return {
     name: category.name,
+    imageUrl: category.imageUrl || '',
     active: category.active,
   }
 }
@@ -1684,6 +1690,8 @@ function normalizeProduct(product, fallbackCategory = 'Pizzas') {
   return {
     id: product?.id,
     name: product?.name || 'Produto sem nome',
+    description: product?.description || '',
+    imageUrl: product?.imageUrl || '',
     category,
     extraCategories,
     exhaustedCategories,
@@ -5302,6 +5310,11 @@ function MenuSection({
               <article className={`menu-category-card ${isCategoryExpanded ? 'is-open' : ''}`.trim()} key={category.id}>
                 <header className="menu-category-card__header">
                   <span className="drag-handle" aria-hidden="true" />
+                  <span
+                    className={`menu-category-image ${category.imageUrl ? 'menu-category-image--photo' : ''}`.trim()}
+                    style={category.imageUrl ? { backgroundImage: `url("${category.imageUrl}")` } : undefined}
+                    aria-hidden="true"
+                  />
 
                   <div className="menu-category-card__lead">
                     <div className="menu-category-card__meta">
@@ -5373,7 +5386,10 @@ function MenuSection({
                         <article className={`menu-product-card ${isProductExpanded ? 'is-open' : ''}`.trim()} key={product.id}>
                           <div className="menu-product-row" data-testid={`product-${product.id}`}>
                             <span className="drag-handle" aria-hidden="true" />
-                            <span className={`product-thumb ${thumbClass}`.trim()} />
+                            <span
+                              className={`product-thumb ${thumbClass} ${product.imageUrl ? 'product-thumb--photo' : ''}`.trim()}
+                              style={product.imageUrl ? { backgroundImage: `url("${product.imageUrl}")` } : undefined}
+                            />
 
                             <div className="menu-product-row__name">
                               <strong>{product.name}</strong>
@@ -9247,6 +9263,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const normalizedProduct = normalizeProduct({
       ...baseProduct,
       name: productForm.name || 'Produto sem nome',
+      description: productForm.description || '',
+      imageUrl: productForm.imageUrl || '',
       category: primaryCategory,
       extraCategories: Array.isArray(productForm.extraCategories)
         ? productForm.extraCategories.filter((category) => category !== primaryCategory)
@@ -9606,7 +9624,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
       setCategories((current) =>
         current.map((category) =>
-          category.id === categoryId ? { ...category, name, active: categoryForm.active } : category,
+          category.id === categoryId ? { ...category, name, imageUrl: categoryForm.imageUrl || '', active: categoryForm.active } : category,
         ),
       )
 
@@ -9627,7 +9645,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       notify('Categoria atualizada.')
     } else {
       setCategories((current) => [
-        { id: `cat-${Date.now()}`, name, active: categoryForm.active },
+        { id: `cat-${Date.now()}`, name, imageUrl: categoryForm.imageUrl || '', active: categoryForm.active },
         ...current,
       ])
       notify('Categoria criada.')
@@ -11381,6 +11399,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <Field label="Nome">
               <input data-testid="product-name" value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Nome do produto" />
             </Field>
+            <Field label="Descricao">
+              <input value={productForm.description} onChange={(event) => setProductForm({ ...productForm, description: event.target.value })} placeholder="Ingredientes ou detalhe do item" />
+            </Field>
             <Field label="Categoria">
               <select
                 value={productForm.category}
@@ -11398,6 +11419,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             </Field>
             <Field label="Preco">
               <input data-testid="product-price" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: formatCurrencyTypingInput(event.target.value) })} placeholder="49,90" />
+            </Field>
+            <Field label="Foto do produto">
+              <input value={productForm.imageUrl} onChange={(event) => setProductForm({ ...productForm, imageUrl: event.target.value })} placeholder="https://..." />
             </Field>
             <Field label="Maximo de sabores">
               <input
@@ -11578,6 +11602,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <form className="form-grid" id="category-form" onSubmit={(event) => saveCategory(event, isEdit ? payload.id : null)}>
             <Field label="Nome">
               <input data-testid="category-name" value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} placeholder="Ex: Promocoes" />
+            </Field>
+            <Field label="Foto da secao">
+              <input value={categoryForm.imageUrl} onChange={(event) => setCategoryForm({ ...categoryForm, imageUrl: event.target.value })} placeholder="https://..." />
             </Field>
             <Field label="Status">
               <select value={categoryForm.active ? 'yes' : 'no'} onChange={(event) => setCategoryForm({ ...categoryForm, active: event.target.value === 'yes' })}>

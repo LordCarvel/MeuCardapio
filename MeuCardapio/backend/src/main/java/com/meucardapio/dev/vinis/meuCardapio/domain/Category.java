@@ -21,6 +21,8 @@ public class Category {
     private Store store;
     @Column(nullable = false)
     private String name;
+    @Column(name = "image_url", length = 1000)
+    private String imageUrl;
     @Column(nullable = false)
     private boolean active;
     @Column(nullable = false)
@@ -30,9 +32,14 @@ public class Category {
     }
 
     public Category(UUID id, Store store, String name, boolean active) {
+        this(id, store, name, null, active);
+    }
+
+    public Category(UUID id, Store store, String name, String imageUrl, boolean active) {
         this.id = id;
         this.store = store;
         this.name = name;
+        this.imageUrl = imageUrl;
         this.active = active;
         this.createdAt = LocalDateTime.now();
     }
@@ -41,6 +48,8 @@ public class Category {
     public Store getStore() { return store; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public LocalDateTime getCreatedAt() { return createdAt; }

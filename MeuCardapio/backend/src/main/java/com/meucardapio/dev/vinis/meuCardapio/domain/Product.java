@@ -26,6 +26,8 @@ public class Product {
     @Column(nullable = false)
     private String name;
     private String description;
+    @Column(name = "image_url", length = 1000)
+    private String imageUrl;
     @Column(nullable = false)
     private BigDecimal price;
     @Column(nullable = false)
@@ -39,11 +41,16 @@ public class Product {
     }
 
     public Product(UUID id, Store store, Category category, String name, String description, BigDecimal price, int stock, boolean active) {
+        this(id, store, category, name, description, null, price, stock, active);
+    }
+
+    public Product(UUID id, Store store, Category category, String name, String description, String imageUrl, BigDecimal price, int stock, boolean active) {
         this.id = id;
         this.store = store;
         this.category = category;
         this.name = name;
         this.description = description;
+        this.imageUrl = imageUrl;
         this.price = price;
         this.stock = stock;
         this.active = active;
@@ -58,6 +65,8 @@ public class Product {
     public void setName(String name) { this.name = name; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
     public int getStock() { return stock; }
