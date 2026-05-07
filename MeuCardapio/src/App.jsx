@@ -3717,6 +3717,17 @@ function OsmDeliveryMap({
     setZoomAt(viewZoom + (event.deltaY < 0 ? 1 : -1), event)
   }
 
+  useEffect(() => {
+    const canvas = canvasRef.current
+
+    if (!canvas) {
+      return undefined
+    }
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', handleWheel)
+  })
+
   function handleMapClick(event) {
     if (suppressClickRef.current) {
       suppressClickRef.current = false
@@ -3814,7 +3825,6 @@ function OsmDeliveryMap({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPointerInteraction}
-        onWheelCapture={handleWheel}
       >
         {tiles.map((tile) => (
           <img
@@ -6416,6 +6426,7 @@ function App() {
   const [deliveryZoneStep, setDeliveryZoneStep] = useState(1)
   const [deliveryZonePoints, setDeliveryZonePoints] = useState([])
   const [selectedDeliveryZonePointIndex, setSelectedDeliveryZonePointIndex] = useState(null)
+  const [deliveryZoneFeedback, setDeliveryZoneFeedback] = useState('')
   const [couponForm, setCouponForm] = useState(blankCoupon)
   const [stockForm, setStockForm] = useState(blankStock)
   const [financeForm, setFinanceForm] = useState(blankFinance)
@@ -6850,6 +6861,7 @@ function App() {
       setDeliveryZoneStep(1)
       setDeliveryZonePoints([])
       setSelectedDeliveryZonePointIndex(null)
+      setDeliveryZoneFeedback('')
     }
 
     if (type === 'editDeliveryZone' && payload) {
@@ -6858,6 +6870,7 @@ function App() {
       setDeliveryZoneStep(1)
       setDeliveryZonePoints((payload.polygon || []).slice(0, -1))
       setSelectedDeliveryZonePointIndex(null)
+      setDeliveryZoneFeedback('')
     }
 
     if (type === 'newRecovery') {
@@ -9898,6 +9911,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
   }
 
   function updateDeliveryZonePoint(pointIndex, nextPoint) {
+    setDeliveryZoneFeedback('')
     setDeliveryZonePoints((current) =>
       current.map((point, index) => (index === pointIndex ? nextPoint : point)),
     )
@@ -9906,9 +9920,11 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
   function removeSelectedDeliveryZonePoint() {
     if (selectedDeliveryZonePointIndex === null) {
       notify('Selecione um ponto para remover.', 'warning')
+      setDeliveryZoneFeedback('Selecione um ponto para remover.')
       return
     }
 
+    setDeliveryZoneFeedback('')
     setDeliveryZonePoints((current) =>
       current.filter((_, pointIndex) => pointIndex !== selectedDeliveryZonePointIndex),
     )
@@ -9918,23 +9934,54 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
   function trimDeliveryZoneFromSelectedPoint() {
     if (selectedDeliveryZonePointIndex === null) {
       notify('Selecione um ponto para cortar a area a partir dele.', 'warning')
+      setDeliveryZoneFeedback('Selecione um ponto para cortar a area a partir dele.')
       return
     }
 
     setDeliveryZonePoints((current) => current.slice(0, selectedDeliveryZonePointIndex + 1))
+    setDeliveryZoneFeedback('')
     notify('Area cortada a partir do ponto selecionado.')
+  }
+
+  function validateDeliveryZoneDetails() {
+    if (!deliveryZoneForm.name.trim()) {
+      return 'Informe o nome da zona.'
+    }
+
+    if (Number.isNaN(parseCurrencyInput(deliveryZoneForm.fee)) || parseCurrencyInput(deliveryZoneForm.fee) < 0) {
+      return 'Informe uma taxa valida para a zona.'
+    }
+
+    return ''
+  }
+
+  function advanceDeliveryZoneToMap() {
+    const feedback = validateDeliveryZoneDetails()
+
+    if (feedback) {
+      setDeliveryZoneFeedback(feedback)
+      notify(feedback, 'warning')
+      return
+    }
+
+    setDeliveryZoneFeedback('')
+    setDeliveryZoneStep(2)
   }
 
   function saveDeliveryZone(zoneId = editingDeliveryZoneId) {
     const polygon = getDeliveryZoneDraftPolygon(deliveryZonePoints, deliveryZoneForm.coordinates)
+    const detailsFeedback = validateDeliveryZoneDetails()
 
-    if (!deliveryZoneForm.name.trim() || parseCurrencyInput(deliveryZoneForm.fee) < 0) {
-      notify('Informe nome e taxa da zona.', 'warning')
+    if (detailsFeedback) {
+      setDeliveryZoneFeedback(detailsFeedback)
+      notify(detailsFeedback, 'warning')
       return
     }
 
     if (!polygon || polygon.length < 4) {
-      notify('Informe pelo menos 3 coordenadas validas para a zona.', 'warning')
+      const feedback = 'Marque pelo menos 3 pontos no mapa para formar a zona.'
+      setDeliveryZoneFeedback(feedback)
+      notify(feedback, 'warning')
       return
     }
 
@@ -9962,6 +10009,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setDeliveryZoneStep(1)
     setDeliveryZonePoints([])
     setSelectedDeliveryZonePointIndex(null)
+    setDeliveryZoneFeedback('')
     setModal({ type: 'deliveryZones', payload: null })
   }
 
@@ -12475,26 +12523,31 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             deliveryZoneStep === 1 ? (
               <>
                 <Button onClick={() => setModal({ type: 'deliveryZones', payload: null })}>Cancelar</Button>
-                <Button variant="primary" onClick={() => setDeliveryZoneStep(2)}>Avancar para o mapa</Button>
+                <Button variant="primary" onClick={advanceDeliveryZoneToMap}>Avancar para o mapa</Button>
               </>
             ) : (
               <>
-                <Button onClick={() => setDeliveryZoneStep(1)}>Voltar</Button>
+                <Button onClick={() => { setDeliveryZoneFeedback(''); setDeliveryZoneStep(1) }}>Voltar</Button>
                 <Button variant="primary" onClick={() => saveDeliveryZone(isEdit ? payload.id : null)}>Salvar zona</Button>
               </>
             )
           }
         >
+          {deliveryZoneFeedback ? (
+            <div className="delivery-zone-feedback" role="alert">
+              {deliveryZoneFeedback}
+            </div>
+          ) : null}
           {deliveryZoneStep === 1 ? (
             <div className="form-grid">
               <Field label="Nome da zona">
-                <input value={deliveryZoneForm.name} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, name: event.target.value })} placeholder="Centro" />
+                <input value={deliveryZoneForm.name} onChange={(event) => { setDeliveryZoneFeedback(''); setDeliveryZoneForm({ ...deliveryZoneForm, name: event.target.value }) }} placeholder="Centro" />
               </Field>
               <Field label="Taxa">
-                <input inputMode="decimal" value={deliveryZoneForm.fee} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, fee: formatCurrencyTypingInput(event.target.value) })} placeholder="5,00" />
+                <input inputMode="decimal" value={deliveryZoneForm.fee} onChange={(event) => { setDeliveryZoneFeedback(''); setDeliveryZoneForm({ ...deliveryZoneForm, fee: formatCurrencyTypingInput(event.target.value) }) }} placeholder="5,00" />
               </Field>
               <Field label="Status">
-                <select value={deliveryZoneForm.active} onChange={(event) => setDeliveryZoneForm({ ...deliveryZoneForm, active: event.target.value })}>
+                <select value={deliveryZoneForm.active} onChange={(event) => { setDeliveryZoneFeedback(''); setDeliveryZoneForm({ ...deliveryZoneForm, active: event.target.value }) }}>
                   <option value="yes">Ativa</option>
                   <option value="no">Off</option>
                 </select>
@@ -12508,7 +12561,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                       key={color}
                       style={{ backgroundColor: color }}
                       type="button"
-                      onClick={() => setDeliveryZoneForm({ ...deliveryZoneForm, color })}
+                      onClick={() => { setDeliveryZoneFeedback(''); setDeliveryZoneForm({ ...deliveryZoneForm, color }) }}
                     />
                   ))}
                 </div>
@@ -12528,6 +12581,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 <div>
                   <Button
                     onClick={() => {
+                      setDeliveryZoneFeedback('')
                       setSelectedDeliveryZonePointIndex(null)
                       setDeliveryZonePoints((current) => current.slice(0, -1))
                     }}
@@ -12539,6 +12593,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                   <Button
                     variant="danger"
                     onClick={() => {
+                      setDeliveryZoneFeedback('')
                       setSelectedDeliveryZonePointIndex(null)
                       setDeliveryZonePoints([])
                     }}
@@ -12552,6 +12607,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 editingZoneId={editingDeliveryZoneId || ''}
                 editorPoints={deliveryZonePoints}
                 onMapClick={(point) => {
+                  setDeliveryZoneFeedback('')
                   setSelectedDeliveryZonePointIndex(null)
                   setDeliveryZonePoints((current) => [...current, point])
                 }}
