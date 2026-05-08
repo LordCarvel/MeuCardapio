@@ -2758,6 +2758,18 @@ function getReceiptItems(order = {}) {
   return (Array.isArray(order.items) ? order.items : []).map(splitReceiptItemLabel)
 }
 
+function getNoteSegmentLabel(segment = '') {
+  const [, label = ''] = String(segment || '').match(/^([^:]+):\s*(.*)$/) || []
+  return normalizeSearchText(label)
+}
+
+function splitOrderNoteSegments(note = '') {
+  return String(note || '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
 function getReceiptDetailRows(details = []) {
   const counts = new Map()
 
@@ -2806,16 +2818,30 @@ function getPrintableOrderNote(order = {}) {
     'pedido vindo do salao.',
   ])
 
-  return String(order.note || '')
-    .split('|')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !/^pedido local\s*#/i.test(part))
-    .map((part) => {
+  const noteSegments = splitOrderNoteSegments(order.note)
+  const printableParts = []
+
+  for (let index = 0; index < noteSegments.length; index += 1) {
+    const part = noteSegments[index]
+
+    if (/^pedido local\s*#/i.test(part)) {
+      continue
+    }
+
+    const parsedPart = (() => {
       const [, label = '', value = ''] = part.match(/^([^:]+):\s*(.*)$/) || []
       const normalizedLabel = normalizeSearchText(label)
 
       if (ignoredLabels.has(normalizedLabel)) {
+        while (
+          normalizedLabel === 'endereco'
+          && index + 1 < noteSegments.length
+          && !getNoteSegmentLabel(noteSegments[index + 1])
+          && !/^pedido local\s*#/i.test(noteSegments[index + 1])
+        ) {
+          index += 1
+        }
+
         return ''
       }
 
@@ -2824,22 +2850,25 @@ function getPrintableOrderNote(order = {}) {
       }
 
       return part
-    })
-    .filter(Boolean)
-    .filter((part) => !ignoredExactNotes.has(normalizeSearchText(part)))
-    .join(' | ')
+    })()
+
+    if (parsedPart && !ignoredExactNotes.has(normalizeSearchText(parsedPart))) {
+      printableParts.push(parsedPart)
+    }
+  }
+
+  return printableParts.join(' | ')
 }
 
 function getReceiptCustomerAddress(order = {}) {
   const normalizedAddress = String(order.address || '').trim()
   const noteAddress = getBackendNoteValue(order.note, 'Endereco')
   const fallbackAddress = order.fulfillment === 'pickup' ? 'Retirada no balcao' : ''
+  const receiptAddress = noteAddress && (!normalizedAddress || noteAddress.length > normalizedAddress.length)
+    ? noteAddress
+    : normalizedAddress || fallbackAddress
 
-  if (noteAddress && (!normalizedAddress || noteAddress.length > normalizedAddress.length)) {
-    return noteAddress
-  }
-
-  return normalizedAddress || fallbackAddress
+  return receiptAddress.replace(/\s*\|\s*/g, ' - ')
 }
 
 function createPrinterTestOrder() {
@@ -3407,10 +3436,32 @@ function getBackendLocalReference(order = {}) {
 }
 
 function getBackendNoteValue(note = '', label = '') {
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const [, value] = String(note || '').match(new RegExp(`${escapedLabel}:\\s*([^|\\n]+)`, 'i')) || []
+  const normalizedTargetLabel = normalizeSearchText(label)
+  const noteSegments = splitOrderNoteSegments(note)
 
-  return value ? value.trim() : ''
+  for (let index = 0; index < noteSegments.length; index += 1) {
+    const segment = noteSegments[index]
+    const [, currentLabel = '', currentValue = ''] = segment.match(/^([^:]+):\s*(.*)$/) || []
+
+    if (normalizeSearchText(currentLabel) !== normalizedTargetLabel) {
+      continue
+    }
+
+    const valueParts = [currentValue.trim()].filter(Boolean)
+
+    while (
+      index + 1 < noteSegments.length
+      && !getNoteSegmentLabel(noteSegments[index + 1])
+      && !/^pedido local\s*#/i.test(noteSegments[index + 1])
+    ) {
+      index += 1
+      valueParts.push(noteSegments[index])
+    }
+
+    return valueParts.join(' | ').trim()
+  }
+
+  return ''
 }
 
 function getPilotStatusMeta(sync = {}) {
@@ -11082,6 +11133,49 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                             const selectedCount = selectedIds.filter((selectedId) => selectedId === option.id).length
                             const isSelected = selectedCount > 0
                             const allowsRepeatedFlavor = currentConfigStep.type === 'flavors' && isComboProduct(configuredProduct) && configuredFlavorLimit > 1
+                            const canAddRepeatedFlavor = selectedIds.length < configuredFlavorLimit
+
+                            if (allowsRepeatedFlavor) {
+                              return (
+                                <article
+                                  className={`pos-flavor-card pos-flavor-card--quantity ${isSelected ? 'is-active' : ''}`.trim()}
+                                  data-testid={`cart-flavor-${option.id}`}
+                                  key={option.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => canAddRepeatedFlavor && toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)}
+                                  onKeyDown={(event) => {
+                                    if ((event.key === 'Enter' || event.key === ' ') && canAddRepeatedFlavor) {
+                                      event.preventDefault()
+                                      toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)
+                                    }
+                                  }}
+                                >
+                                  <strong>{option.name}</strong>
+                                  <small className="pos-flavor-card__price">{option.price > 0 ? formatCurrency(option.price) : 'R$ 0,00'}</small>
+                                  <div className="pos-flavor-card__stepper" onClick={(event) => event.stopPropagation()}>
+                                    <button
+                                      aria-label={`Remover ${option.name}`}
+                                      disabled={selectedCount <= 0}
+                                      type="button"
+                                      onClick={() => removeCartItemFlavor(option.id)}
+                                    >
+                                      -
+                                    </button>
+                                    <b>{selectedCount}</b>
+                                    <button
+                                      aria-label={`Adicionar ${option.name}`}
+                                      disabled={!canAddRepeatedFlavor}
+                                      type="button"
+                                      onClick={() => toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                  <small className="pos-flavor-card__limit">Maximo {configuredFlavorLimit}</small>
+                                </article>
+                              )
+                            }
 
                             return (
                               <button
@@ -11101,26 +11195,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                                 <strong>{option.name}</strong>
                                 <small>{option.price > 0 ? `+${formatCurrency(option.price)}` : 'Sem adicional'}</small>
                                 <span>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</span>
-                                {allowsRepeatedFlavor && selectedCount > 0 ? (
-                                  <span
-                                    className="pos-flavor-card__remove"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={(event) => {
-                                      event.stopPropagation()
-                                      removeCartItemFlavor(option.id)
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if (event.key === 'Enter' || event.key === ' ') {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        removeCartItemFlavor(option.id)
-                                      }
-                                    }}
-                                  >
-                                    Remover 1
-                                  </span>
-                                ) : null}
                               </button>
                             )
                           }) : (
@@ -11133,7 +11207,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
                       <div className="pos-config__footer">
                         <label className="pos-config__qty">
-                          <span>Quantidade</span>
+                          <span>{isComboProduct(configuredProduct) ? 'Quantidade do combo' : 'Quantidade'}</span>
                           <input
                             data-testid="cart-item-qty"
                             min="1"
@@ -13226,12 +13300,13 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const activeFlavors = getActiveProductFlavors(product)
       const selectedFlavorCount = cartItemForm.flavorIds.length
       const flavorEntity = getFlavorEntityLabel(product, true)
+      const flavorLimit = Math.max(1, Number(product.maxFlavors) || 1)
       const unitPrice = getCartItemUnitPrice(product, cartItemForm.flavorIds)
 
       return (
         <Modal
           title={isEdit ? `Editar ${product.name}` : `Adicionar ${product.name}`}
-          subtitle={activeFlavors.length > 0 ? `Escolha de 1 a ${product.maxFlavors} ${flavorEntity}.` : 'Ajuste a quantidade deste item no pedido.'}
+          subtitle={activeFlavors.length > 0 ? `Escolha de 1 a ${flavorLimit} ${flavorEntity}.` : 'Ajuste a quantidade deste item no pedido.'}
           onClose={reopenOrderEditor}
           footer={
             <>
@@ -13251,13 +13326,58 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               <section className="cart-config">
                 <header className="cart-config__header">
                   <strong>{isComboProduct(product) ? 'Escolha os subsabores' : 'Escolha os sabores'}</strong>
-                  <small>{selectedFlavorCount} selecionado(s) de no maximo {product.maxFlavors}</small>
+                  <small>{selectedFlavorCount} selecionado(s) de no maximo {flavorLimit}</small>
                 </header>
                 <div className="cart-config__list">
                   {activeFlavors.map((flavor) => {
                     const selectedCount = cartItemForm.flavorIds.filter((flavorId) => flavorId === flavor.id).length
                     const isSelected = selectedCount > 0
-                    const allowsRepeatedFlavor = isComboProduct(product) && product.maxFlavors > 1
+                    const allowsRepeatedFlavor = isComboProduct(product) && flavorLimit > 1
+                    const canAddRepeatedFlavor = cartItemForm.flavorIds.length < flavorLimit
+
+                    if (allowsRepeatedFlavor) {
+                      return (
+                        <article
+                          className={`cart-config__option cart-config__option--quantity ${isSelected ? 'is-active' : ''}`.trim()}
+                          data-testid={`cart-flavor-${flavor.id}`}
+                          key={flavor.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => canAddRepeatedFlavor && toggleCartItemFlavor(flavor.id, flavorLimit, product)}
+                          onKeyDown={(event) => {
+                            if ((event.key === 'Enter' || event.key === ' ') && canAddRepeatedFlavor) {
+                              event.preventDefault()
+                              toggleCartItemFlavor(flavor.id, flavorLimit, product)
+                            }
+                          }}
+                        >
+                          <span>
+                            <strong>{flavor.name}</strong>
+                            <small>{flavor.price > 0 ? formatCurrency(flavor.price) : 'R$ 0,00'}</small>
+                          </span>
+                          <div className="cart-config__stepper" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              aria-label={`Remover ${flavor.name}`}
+                              disabled={selectedCount <= 0}
+                              type="button"
+                              onClick={() => removeCartItemFlavor(flavor.id)}
+                            >
+                              -
+                            </button>
+                            <b>{selectedCount}</b>
+                            <button
+                              aria-label={`Adicionar ${flavor.name}`}
+                              disabled={!canAddRepeatedFlavor}
+                              type="button"
+                              onClick={() => toggleCartItemFlavor(flavor.id, flavorLimit, product)}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <small className="cart-config__limit">Maximo {flavorLimit}</small>
+                        </article>
+                      )
+                    }
 
                     return (
                       <button
@@ -13265,33 +13385,13 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                         data-testid={`cart-flavor-${flavor.id}`}
                         key={flavor.id}
                         type="button"
-                        onClick={() => toggleCartItemFlavor(flavor.id, product.maxFlavors, product)}
+                        onClick={() => toggleCartItemFlavor(flavor.id, flavorLimit, product)}
                       >
                         <span>
                           <strong>{flavor.name}</strong>
                           <small>{flavor.price > 0 ? `+${formatCurrency(flavor.price)}` : 'Sem adicional'}</small>
                         </span>
                         <b>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</b>
-                        {allowsRepeatedFlavor && selectedCount > 0 ? (
-                          <small
-                            className="cart-config__remove"
-                            role="button"
-                            tabIndex={0}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              removeCartItemFlavor(flavor.id)
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                removeCartItemFlavor(flavor.id)
-                              }
-                            }}
-                          >
-                            Remover 1
-                          </small>
-                        ) : null}
                       </button>
                     )
                   })}
@@ -13299,7 +13399,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               </section>
             ) : null}
 
-            <Field label="Quantidade">
+            <Field label={isComboProduct(product) ? 'Quantidade do combo' : 'Quantidade'}>
               <input
                 data-testid="cart-item-qty"
                 min="1"

@@ -2514,6 +2514,79 @@
   color: #506671;
 }
 
+.pos-flavor-card--quantity {
+  grid-template-rows: minmax(42px, 1fr) auto auto;
+  min-height: 150px;
+  cursor: pointer;
+}
+
+.pos-flavor-card--quantity.is-active {
+  border-color: #0a5f82;
+  background: #074765;
+  box-shadow: 0 0 0 2px rgba(7, 71, 101, 0.18);
+}
+
+.pos-flavor-card--quantity.is-active strong,
+.pos-flavor-card--quantity.is-active small {
+  color: #ffffff;
+}
+
+.pos-flavor-card__price {
+  justify-self: center;
+  align-self: end;
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #00567a;
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.pos-flavor-card__stepper {
+  display: grid;
+  grid-template-columns: 24px minmax(34px, 1fr) 24px;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #eef2f5;
+}
+
+.pos-flavor-card__stepper button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: #c9d1d7;
+  color: #42515a;
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.pos-flavor-card__stepper button:not(:disabled) {
+  cursor: pointer;
+}
+
+.pos-flavor-card__stepper button:disabled {
+  opacity: 0.45;
+}
+
+.pos-flavor-card__stepper b {
+  color: #1b2b33;
+  font-size: 13px;
+  text-align: center;
+}
+
+.pos-flavor-card__limit {
+  justify-self: center;
+  color: #6d7880;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .pos-config__footer {
   grid-row: 4;
   display: flex;
@@ -4325,6 +4398,54 @@
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.cart-config__option--quantity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.cart-config__stepper {
+  display: grid;
+  grid-template-columns: 26px 36px 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px;
+  border-radius: 7px;
+  background: #edf2f5;
+}
+
+.cart-config__stepper button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: #cbd4da;
+  color: #465660;
+  font-weight: 900;
+}
+
+.cart-config__stepper button:not(:disabled) {
+  cursor: pointer;
+}
+
+.cart-config__stepper button:disabled {
+  opacity: 0.45;
+}
+
+.cart-config__stepper b {
+  color: #1f3137;
+  text-align: center;
+}
+
+.cart-config__limit {
+  grid-column: 1 / -1;
+  justify-self: end;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .list-row span,
