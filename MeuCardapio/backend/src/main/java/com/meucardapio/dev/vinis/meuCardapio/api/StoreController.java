@@ -45,6 +45,12 @@ public class StoreController {
         return StoreResponse.from(findStore(id));
     }
 
+    @GetMapping("/access/{accessKey}")
+    public StoreResponse getByAccessKey(@PathVariable String accessKey) {
+        return StoreResponse.from(stores.findByAccessKeyIgnoreCase(accessKey.trim())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chave de acesso nao encontrada")));
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public StoreResponse create(@Valid @RequestBody StoreRequest request) {

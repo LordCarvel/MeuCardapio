@@ -124,6 +124,25 @@ export async function loadBackendWorkspace(storeId = '') {
   return { health, stores, store, summary, products, categories, orders, logs }
 }
 
+export async function loadBackendWorkspaceByAccessKey(accessKey) {
+  const health = await checkBackendHealth()
+  const store = await request(`/stores/access/${encodeURIComponent(accessKey)}`)
+
+  if (!store) {
+    return { health, stores: [], store: null, summary: null, products: [], categories: [], orders: [], logs: [] }
+  }
+
+  const [summary, products, categories, orders, logs] = await Promise.all([
+    request(`/reports/summary?storeId=${store.id}`),
+    request(`/stores/${store.id}/products`),
+    request(`/stores/${store.id}/categories`),
+    request(`/stores/${store.id}/orders`),
+    request(`/logs?storeId=${store.id}`),
+  ])
+
+  return { health, stores: [store], store, summary, products, categories, orders, logs }
+}
+
 export async function loadPublicStorefront(storeId) {
   const [store, products, categories] = await Promise.all([
     request(`/stores/${storeId}`),

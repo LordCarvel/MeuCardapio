@@ -12,6 +12,7 @@ import {
   deleteBackendOrder,
   getBackendStore,
   loadBackendWorkspace,
+  loadBackendWorkspaceByAccessKey,
   loginBackendUser,
   requestPasswordResetCode,
   requestSignupCode,
@@ -113,17 +114,14 @@ function generateStoreAccessKey(profile = {}) {
   return `${base}-${suffix}`
 }
 
-function buildStoreAccessUrl(accessKey = '', storeId = '') {
+function buildStoreAccessUrl(accessKey = '') {
   const normalizedKey = String(accessKey || '').trim()
-  const normalizedStoreId = String(storeId || '').trim()
 
   if (!normalizedKey) {
     return ''
   }
 
-  return normalizedStoreId
-    ? buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedStoreId)}/${encodeURIComponent(normalizedKey)}`)
-    : buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedKey)}`)
+  return buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedKey)}`)
 }
 
 function buildQrImageUrl(value = '') {
@@ -7050,7 +7048,7 @@ function App() {
   const storefrontUrl = storefrontShareId && typeof window !== 'undefined'
     ? buildPublicAppUrl(`/loja/${encodeURIComponent(storefrontShareId)}`)
     : ''
-  const storeAccessUrl = buildStoreAccessUrl(storeProfile.accessKey, pilotSync.storeId || activeStoreId)
+  const storeAccessUrl = buildStoreAccessUrl(storeProfile.accessKey)
   const storeAccessFromPath = getStoreAccessFromPath()
   const storeAccessKeyFromPath = storeAccessFromPath.accessKey
   const storeAccessIdFromPath = storeAccessFromPath.storeId
@@ -7973,12 +7971,10 @@ function App() {
         return { ok: true }
       }
 
-      if (!storeId) {
-        return { ok: false, message: 'Link antigo sem ID da loja. Gere um novo QR/link em Perfil publico.' }
-      }
-
       try {
-        const workspace = await loadBackendWorkspace(storeId)
+        const workspace = storeId
+          ? await loadBackendWorkspace(storeId)
+          : await loadBackendWorkspaceByAccessKey(accessKey)
         if (!workspace.store) {
           return { ok: false, message: 'Loja nao encontrada na API.' }
         }
@@ -14018,7 +14014,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               </header>
               <div className="settings-inline-panel__grid">
                 <Field label="Link liberado pela chave">
-                  <input readOnly value={buildStoreAccessUrl(storeForm.accessKey, pilotSync.storeId || activeStoreId)} placeholder="Gere ou preencha uma chave unica acima" />
+                  <input readOnly value={buildStoreAccessUrl(storeForm.accessKey)} placeholder="Gere ou preencha uma chave unica acima" />
                 </Field>
                 <Field label="Gerador">
                   <Button onClick={generateAccessKeyForStore} type="button">Gerar chave</Button>
