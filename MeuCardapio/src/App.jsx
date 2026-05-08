@@ -9399,7 +9399,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       printItems: request.items.map((item) => ({
         qty: item.quantity,
         name: item.productName,
-        details: [],
+        details: item.note ? [`Obs: ${item.note}`] : [],
         price: (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1),
       })),
     })

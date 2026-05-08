@@ -617,7 +617,7 @@
   height: 30px;
 }
 
-.customer-cart-line div:nth-child(2) {
+.customer-cart-line__content {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -645,6 +645,32 @@
 .customer-cart-line small {
   color: #6b7280;
   font-size: 10px;
+}
+
+.customer-item-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.customer-item-note span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.customer-item-note textarea {
+  width: 100%;
+  min-height: 42px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: 7px 8px;
+  color: #111827;
+  font: inherit;
+  font-size: 12px;
+  outline-color: #1697e8;
 }
 
 .customer-qty {

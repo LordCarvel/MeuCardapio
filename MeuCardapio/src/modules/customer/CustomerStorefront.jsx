@@ -281,6 +281,7 @@ function buildCartLine(product) {
     flavorLabel: '',
     addonSelections: {},
     addonEntries: [],
+    note: '',
   }
 }
 
@@ -450,6 +451,7 @@ function getCartLineDetails(item) {
   return [
     item.flavorLabel ? `Sabores: ${item.flavorLabel}` : '',
     ...(Array.isArray(item.addonEntries) ? item.addonEntries.map((entry) => `${entry.groupName}: ${entry.label}`) : []),
+    item.note?.trim() ? `Obs: ${item.note.trim()}` : '',
   ].filter(Boolean)
 }
 
@@ -458,6 +460,7 @@ function cartToOrderItems(cart) {
     productName: [item.name, ...getCartLineDetails(item)].join(' - '),
     quantity: item.quantity,
     unitPrice: item.unitPrice,
+    note: item.note?.trim() || '',
   }))
 }
 
@@ -1278,6 +1281,10 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     setCart((current) => current.map((item) => (item.id === lineId ? { ...item, quantity } : item)))
   }
 
+  function updateCartLineNote(lineId, note) {
+    setCart((current) => current.map((item) => (item.id === lineId ? { ...item, note } : item)))
+  }
+
   function updateAddressField(field, value) {
     setAddress((current) => ({
       ...current,
@@ -1732,7 +1739,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
             {cart.map((item) => (
               <article className="customer-cart-line" key={item.id}>
                 <ProductThumb product={item} small />
-                <div>
+                <div className="customer-cart-line__content">
                   <button className="customer-cart-line__edit" type="button" onClick={() => openCartLineConfig(item)}>
                     <strong>{item.quantity}x {item.name}</strong>
                   </button>
@@ -1740,6 +1747,14 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
                   {getCartLineDetails(item).length > 0
                     ? getCartLineDetails(item).map((detail) => <small key={detail}>{detail}</small>)
                     : <small>Sem adicionais</small>}
+                  <label className="customer-item-note">
+                    <span>Observacao deste item</span>
+                    <textarea
+                      value={item.note || ''}
+                      onChange={(event) => updateCartLineNote(item.id, event.target.value)}
+                      placeholder="Ex: sem cebola, ponto da carne, embalagem separada..."
+                    />
+                  </label>
                 </div>
                 <div className="customer-qty">
                   <button type="button" onClick={() => updateQuantity(item.id, item.quantity - 1)}>−</button>
