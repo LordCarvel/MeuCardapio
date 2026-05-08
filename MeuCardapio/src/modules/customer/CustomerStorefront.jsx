@@ -892,10 +892,16 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
           return
         }
 
+        const snapshot = data.menuSnapshot || {}
         setBackendData({
           storeProfile: normalizeBackendStore(data.store),
-          categories: data.categories.map(normalizeBackendCategory),
-          products: data.products.map(normalizeBackendProduct),
+          categories: Array.isArray(snapshot.categories)
+            ? snapshot.categories
+            : data.categories.map(normalizeBackendCategory),
+          products: Array.isArray(snapshot.products)
+            ? snapshot.products
+            : data.products.map(normalizeBackendProduct),
+          deliveryZones: Array.isArray(snapshot.deliveryZones) ? snapshot.deliveryZones : [],
         })
         setStatus({ type: 'idle', message: '' })
       })

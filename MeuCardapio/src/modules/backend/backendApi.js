@@ -79,6 +79,29 @@ async function requestFirstAvailable(paths, options = {}) {
   throw lastError || new Error('Endpoint da API nao encontrado.')
 }
 
+function parseMenuSnapshot(value) {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function attachMenuSnapshot(workspace) {
+  return {
+    ...workspace,
+    menuSnapshot: parseMenuSnapshot(workspace.store?.menuSnapshot),
+  }
+}
+
 export async function checkBackendHealth() {
   return request('/health')
 }
@@ -121,7 +144,7 @@ export async function loadBackendWorkspace(storeId = '') {
     request(`/logs?storeId=${store.id}`),
   ])
 
-  return { health, stores, store, summary, products, categories, orders, logs }
+  return attachMenuSnapshot({ health, stores, store, summary, products, categories, orders, logs })
 }
 
 export async function loadBackendWorkspaceByAccessKey(accessKey) {
@@ -140,7 +163,7 @@ export async function loadBackendWorkspaceByAccessKey(accessKey) {
     request(`/logs?storeId=${store.id}`),
   ])
 
-  return { health, stores: [store], store, summary, products, categories, orders, logs }
+  return attachMenuSnapshot({ health, stores: [store], store, summary, products, categories, orders, logs })
 }
 
 export async function loadPublicStorefront(storeId) {
@@ -150,7 +173,7 @@ export async function loadPublicStorefront(storeId) {
     request(`/stores/${storeId}/categories`),
   ])
 
-  return { store, products, categories }
+  return attachMenuSnapshot({ store, products, categories })
 }
 
 export async function createBackendOrder(storeId, order) {
@@ -216,6 +239,13 @@ export async function updateBackendStore(storeId, store) {
   return request(`/stores/${storeId}`, {
     method: 'PUT',
     body: JSON.stringify(store),
+  })
+}
+
+export async function updateBackendMenuSnapshot(storeId, snapshot) {
+  return request(`/stores/${storeId}/menu-snapshot`, {
+    method: 'PUT',
+    body: JSON.stringify({ menuSnapshot: JSON.stringify(snapshot) }),
   })
 }
 

@@ -27,6 +27,7 @@ public final class StoreDtos {
             String state,
             String schedule,
             String accessKey,
+            String menuSnapshot,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm) {
     }
@@ -46,6 +47,7 @@ public final class StoreDtos {
             String state,
             String schedule,
             String accessKey,
+            String menuSnapshot,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm,
             LocalDateTime createdAt) {
@@ -65,9 +67,13 @@ public final class StoreDtos {
                     store.getState(),
                     store.getSchedule(),
                     store.getAccessKey(),
+                    store.getMenuSnapshot(),
                     store.getMinimumOrder(),
                     store.getDeliveryRadiusKm(),
                     store.getCreatedAt());
         }
+    }
+
+    public record MenuSnapshotRequest(String menuSnapshot) {
     }
 }

@@ -19,6 +19,7 @@ import {
   resetBackendPassword,
   signupBackendAccount,
   updateBackendStore,
+  updateBackendMenuSnapshot,
   updateBackendOrder,
   updateBackendOrderStatus,
 } from './modules/backend/backendApi'
@@ -3729,12 +3730,39 @@ function storeProfileToBackendRequest(profile = {}) {
   }
 }
 
+function buildMenuSnapshot({ categories = [], products = [], deliveryZones = [] } = {}) {
+  return {
+    version: 1,
+    categories: cloneData(categories),
+    products: cloneData(products),
+    deliveryZones: cloneData(deliveryZones),
+  }
+}
+
+function getWorkspaceMenuSnapshot(workspace = {}) {
+  const snapshot = workspace.menuSnapshot || {}
+
+  return {
+    categories: Array.isArray(snapshot.categories) ? snapshot.categories : null,
+    products: Array.isArray(snapshot.products) ? snapshot.products : null,
+    deliveryZones: Array.isArray(snapshot.deliveryZones) ? snapshot.deliveryZones : null,
+  }
+}
+
 function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
   const profile = backendStoreToProfile({
     ...(workspace.store || {}),
     accessKey: workspace.store?.accessKey || accessKey,
   })
-  const categories = Array.isArray(workspace.categories)
+  const menuSnapshot = getWorkspaceMenuSnapshot(workspace)
+  const categories = menuSnapshot.categories
+    ? menuSnapshot.categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        imageUrl: category.imageUrl || '',
+        active: category.active !== false,
+      }))
+    : Array.isArray(workspace.categories)
     ? workspace.categories.map((category) => ({
         id: category.id,
         name: category.name,
@@ -3743,7 +3771,9 @@ function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
       }))
     : []
   const fallbackCategory = categories[0]?.name || 'Cardapio'
-  const products = Array.isArray(workspace.products)
+  const products = menuSnapshot.products
+    ? menuSnapshot.products.map((product) => normalizeProduct(product, fallbackCategory))
+    : Array.isArray(workspace.products)
     ? workspace.products.map((product) => normalizeProduct({
         id: product.id,
         name: product.name,
@@ -3754,6 +3784,7 @@ function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
         active: product.active !== false,
       }, fallbackCategory))
     : []
+  const deliveryZones = menuSnapshot.deliveryZones || []
   const orders = Array.isArray(workspace.orders) ? workspace.orders.map(backendOrderToFrontOrder) : []
   const accessUser = normalizeStoreUser({
     id: `access-${workspace.store?.id || Date.now()}`,
@@ -3768,6 +3799,7 @@ function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
     storeProfile: profile,
     categories,
     products,
+    deliveryZones,
     orders,
     storeUsers: [accessUser],
     pilotSync: normalizePilotSync({
@@ -6860,6 +6892,7 @@ function App() {
   const [storeMapMode, setStoreMapMode] = useState('view')
   const storeFormRef = useRef(initialData.storeProfile)
   const accessKeyAttemptRef = useRef('')
+  const lastMenuSnapshotRef = useRef('')
   const [printerConfig, setPrinterConfig] = useState(normalizePrinterConfig(initialData.printerConfig))
   const [printerForm, setPrinterForm] = useState(printerConfigToForm(initialData.printerConfig))
   const [pilotSync, setPilotSync] = useState(normalizePilotSync(initialData.pilotSync))
@@ -7060,6 +7093,33 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceSnapshot))
   }, [workspaceSnapshot])
+
+  useEffect(() => {
+    const backendStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')
+
+    if (!backendStoreId || !hasValidStoreSession || !isStoreReady) {
+      return undefined
+    }
+
+    const snapshot = buildMenuSnapshot({ categories, products, deliveryZones })
+    const serialized = JSON.stringify(snapshot)
+
+    if (serialized === lastMenuSnapshotRef.current) {
+      return undefined
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      updateBackendMenuSnapshot(backendStoreId, snapshot)
+        .then(() => {
+          lastMenuSnapshotRef.current = serialized
+        })
+        .catch((err) => {
+          notify(`Cardapio salvo localmente, mas nao sincronizou com a API: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
+        })
+    }, 900)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeStoreId, categories, deliveryZones, hasValidStoreSession, isStoreReady, pilotSync.storeId, products])
 
   useEffect(() => {
     const accessAttemptKey = `${storeAccessIdFromPath}:${storeAccessKeyFromPath}`
@@ -7492,6 +7552,17 @@ function App() {
       }
 
       setOrders((current) => mergeBackendOrders(current, workspace.orders))
+      const snapshot = getWorkspaceMenuSnapshot(workspace)
+      if (snapshot.categories) {
+        setCategories(snapshot.categories)
+      }
+      if (snapshot.products) {
+        const fallbackCategory = snapshot.categories?.[0]?.name || categories[0]?.name || 'Cardapio'
+        setProducts(snapshot.products.map((product) => normalizeProduct(product, fallbackCategory)))
+      }
+      if (snapshot.deliveryZones) {
+        setDeliveryZones(snapshot.deliveryZones)
+      }
       updatePilotSync({
         enabled: enable ? true : pilotSync.enabled,
         status: 'online',
@@ -7819,6 +7890,7 @@ function App() {
         state: account.state || 'SC',
         schedule: account.schedule,
         accessKey: initialAccessKey,
+        menuSnapshot: JSON.stringify(buildMenuSnapshot(localStore.store.snapshot)),
         minimumOrder: 0,
         deliveryRadiusKm: 5,
         password,
@@ -7900,27 +7972,24 @@ function App() {
         return { ok: false, message: login.message || 'Email ou senha invalidos.' }
       }
 
-      const backendStore = await getBackendStore(login.user.storeId)
-      const localStore = createStoreRecord({
-        profile: backendStoreToProfile(backendStore),
-        owner: {
-          name: login.user.name,
-          email: login.user.email,
-          password: credentials.password,
-        },
-      }, resolvedStores.length)
-
-      if (localStore.ok === false) {
-        return localStore
-      }
-
+      const workspace = await loadBackendWorkspace(login.user.storeId)
+      const backendStore = workspace.store || await getBackendStore(login.user.storeId)
+      const localUser = normalizeStoreUser({
+        id: login.user.id,
+        name: login.user.name,
+        email: login.user.email,
+        password: credentials.password,
+        role: login.user.role || 'owner',
+        createdAt: login.user.createdAt || nowDateTime(),
+      })
+      const loadedStore = backendWorkspaceToStoreRecord({ ...workspace, store: backendStore }, backendStore.accessKey || '')
       const nextStore = {
-        ...localStore.store,
         id: login.user.storeId,
         snapshot: {
-          ...localStore.store.snapshot,
+          ...loadedStore.snapshot,
+          storeUsers: [localUser],
           pilotSync: normalizePilotSync({
-            ...localStore.store.snapshot.pilotSync,
+            ...loadedStore.snapshot.pilotSync,
             enabled: true,
             status: 'online',
             storeId: login.user.storeId,
@@ -7936,8 +8005,8 @@ function App() {
       setActiveStoreId(nextStore.id)
       applySnapshot(nextStore.snapshot, 'Conta carregada.')
       setPilotSync(nextStore.snapshot.pilotSync)
-      setCurrentStoreUser(buildStoreSession(localStore.user, nowDateTime, nextStore.id))
-      setToast(`Bem-vindo, ${localStore.user.name}.`)
+      setCurrentStoreUser(buildStoreSession(localUser, nowDateTime, nextStore.id))
+      setToast(`Bem-vindo, ${localUser.name}.`)
       notify('Conta carregada do backend.')
       return { ok: true }
     } catch (err) {

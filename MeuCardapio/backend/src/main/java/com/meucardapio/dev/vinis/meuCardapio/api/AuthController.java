@@ -176,6 +176,7 @@ public class AuthController {
         store.setState(request.state());
         store.setSchedule(request.schedule());
         store.setAccessKey(request.accessKey());
+        store.setMenuSnapshot(request.menuSnapshot());
         store.setMinimumOrder(request.minimumOrder() == null ? BigDecimal.ZERO : request.minimumOrder());
         store.setDeliveryRadiusKm(request.deliveryRadiusKm() == null ? BigDecimal.valueOf(5) : request.deliveryRadiusKm());
         Store savedStore = stores.save(store);

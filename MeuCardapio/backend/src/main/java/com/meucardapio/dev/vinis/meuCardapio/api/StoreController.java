@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.StoreDtos.StoreRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.StoreDtos.StoreResponse;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.StoreDtos.MenuSnapshotRequest;
 import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
 import com.meucardapio.dev.vinis.meuCardapio.repository.StoreRepository;
 import com.meucardapio.dev.vinis.meuCardapio.service.AppLogService;
@@ -76,6 +77,15 @@ public class StoreController {
         return StoreResponse.from(saved);
     }
 
+    @PutMapping("/{id}/menu-snapshot")
+    public StoreResponse updateMenuSnapshot(@PathVariable UUID id, @RequestBody MenuSnapshotRequest request) {
+        Store store = findStore(id);
+        store.setMenuSnapshot(request.menuSnapshot());
+        Store saved = stores.save(store);
+        logService.record(saved.getId(), "INFO", "catalog", "Snapshot do cardapio atualizado");
+        return StoreResponse.from(saved);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
@@ -91,6 +101,9 @@ public class StoreController {
         store.setState(request.state());
         store.setSchedule(request.schedule());
         store.setAccessKey(request.accessKey());
+        if (request.menuSnapshot() != null) {
+            store.setMenuSnapshot(request.menuSnapshot());
+        }
         store.setMinimumOrder(request.minimumOrder() == null ? BigDecimal.ZERO : request.minimumOrder());
         store.setDeliveryRadiusKm(request.deliveryRadiusKm() == null ? BigDecimal.valueOf(5) : request.deliveryRadiusKm());
     }
