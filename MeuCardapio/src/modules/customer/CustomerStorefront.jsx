@@ -31,6 +31,7 @@ const emptyAddress = {
 
 const DEFAULT_MAP_CENTER = { lat: -26.7693, lng: -48.6452 }
 const MAP_TILE_SIZE = 256
+const CUSTOMER_DIRECTORY_VERSION = 'v1'
 
 const PAYMENT_OPTIONS = [
   { id: 'Pix', title: 'Pix', subtitle: 'Pague agora', group: 'Pagar agora' },
@@ -63,6 +64,122 @@ function parseCurrency(value) {
     .replace(',', '.')
 
   return Number(normalized) || 0
+}
+
+function normalizePhoneKey(value = '') {
+  const digits = String(value || '').replace(/\D/g, '')
+
+  if (digits.length <= 11) {
+    return digits
+  }
+
+  return digits.slice(-11)
+}
+
+function getCustomerDirectoryKey(storeId = '') {
+  return `${STORAGE_KEY}:customer-directory:${CUSTOMER_DIRECTORY_VERSION}:${storeId || 'local'}`
+}
+
+function normalizeCustomerAddress(address = {}) {
+  return {
+    ...emptyAddress,
+    ...address,
+    id: address.id || `customer-address-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    pointConfirmed: address.pointConfirmed === true,
+    numberMatched: address.numberMatched === true,
+  }
+}
+
+function normalizeCustomerProfile(profile = {}) {
+  const phoneKey = normalizePhoneKey(profile.phoneKey || profile.phone)
+
+  return {
+    phoneKey,
+    phone: profile.phone || phoneKey,
+    name: profile.name || '',
+    addresses: Array.isArray(profile.addresses) ? profile.addresses.map(normalizeCustomerAddress) : [],
+    selectedAddressId: profile.selectedAddressId || '',
+    orderCount: Math.max(0, Number(profile.orderCount) || 0),
+    discountType: ['fixed', 'percent'].includes(profile.discountType) ? profile.discountType : 'fixed',
+    discountValue: String(profile.discountValue || ''),
+    notes: profile.notes || '',
+    lastOrderAt: profile.lastOrderAt || '',
+    updatedAt: profile.updatedAt || '',
+  }
+}
+
+function loadCustomerDirectory(storeId = '') {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(getCustomerDirectoryKey(storeId)) || '[]')
+    const rawProfiles = Array.isArray(parsed)
+      ? parsed
+      : Object.values(parsed || {})
+
+    return rawProfiles
+      .map(normalizeCustomerProfile)
+      .filter((profile) => profile.phoneKey)
+  } catch {
+    return []
+  }
+}
+
+function saveCustomerDirectory(storeId = '', profiles = []) {
+  window.localStorage.setItem(getCustomerDirectoryKey(storeId), JSON.stringify(profiles.map(normalizeCustomerProfile)))
+}
+
+function upsertCustomerProfile(profiles = [], profile = {}) {
+  const normalizedProfile = normalizeCustomerProfile({ ...profile, updatedAt: new Date().toISOString() })
+
+  if (!normalizedProfile.phoneKey) {
+    return profiles
+  }
+
+  const exists = profiles.some((item) => item.phoneKey === normalizedProfile.phoneKey)
+
+  return exists
+    ? profiles.map((item) => (item.phoneKey === normalizedProfile.phoneKey ? normalizeCustomerProfile({ ...item, ...normalizedProfile }) : item))
+    : [normalizedProfile, ...profiles]
+}
+
+function mergeCustomerAddress(profile = {}, address = {}) {
+  const normalizedAddress = normalizeCustomerAddress(address)
+  const addresses = Array.isArray(profile.addresses) ? profile.addresses : []
+  const matchingAddress = addresses.find((item) => (
+    item.id === normalizedAddress.id
+    || (
+      item.street === normalizedAddress.street
+      && item.number === normalizedAddress.number
+      && item.district === normalizedAddress.district
+      && item.city === normalizedAddress.city
+    )
+  ))
+  const nextAddress = { ...matchingAddress, ...normalizedAddress, id: matchingAddress?.id || normalizedAddress.id }
+
+  return {
+    ...profile,
+    addresses: matchingAddress
+      ? addresses.map((item) => (item.id === matchingAddress.id ? nextAddress : item))
+      : [nextAddress, ...addresses],
+    selectedAddressId: nextAddress.id,
+  }
+}
+
+function getSelectedCustomerAddress(profile = {}) {
+  const addresses = Array.isArray(profile.addresses) ? profile.addresses : []
+
+  return addresses.find((item) => item.id === profile.selectedAddressId) || addresses[0] || null
+}
+
+function getCustomerDiscountAmount(subtotal, profile = {}) {
+  const discountValue = parseCurrency(profile.discountValue)
+
+  if (discountValue <= 0) {
+    return 0
+  }
+
+  return profile.discountType === 'percent'
+    ? Math.min(subtotal, subtotal * (discountValue / 100))
+    : Math.min(subtotal, discountValue)
 }
 
 function isBackendStoreId(value = '') {
@@ -721,6 +838,9 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const [query, setQuery] = useState('')
   const [cart, setCart] = useState([])
   const [customer, setCustomer] = useState(emptyCustomer)
+  const [customerProfiles, setCustomerProfiles] = useState(() => loadCustomerDirectory(storeId))
+  const [selectedCustomerKey, setSelectedCustomerKey] = useState('')
+  const [customerLookup, setCustomerLookup] = useState('')
   const [address, setAddress] = useState(emptyAddress)
   const [addressStatus, setAddressStatus] = useState({ type: 'idle', message: '' })
   const [mapCenter, setMapCenter] = useState(DEFAULT_MAP_CENTER)
@@ -736,6 +856,16 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     addonSelections: {},
   })
   const [configStepIndex, setConfigStepIndex] = useState(0)
+
+  useEffect(() => {
+    setCustomerProfiles(loadCustomerDirectory(storeId))
+    setSelectedCustomerKey('')
+    setCustomerLookup('')
+  }, [storeId])
+
+  useEffect(() => {
+    saveCustomerDirectory(storeId, customerProfiles)
+  }, [customerProfiles, storeId])
 
   useEffect(() => {
     if (localStore || !isBackendStoreId(storeId)) {
@@ -898,6 +1028,8 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     .filter((product) => !cart.some((item) => item.productId === product.id))
     .slice(0, 10)
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+  const selectedCustomerProfile = customerProfiles.find((profile) => profile.phoneKey === selectedCustomerKey) || null
+  const customerDiscount = selectedCustomerProfile ? getCustomerDiscountAmount(subtotal, selectedCustomerProfile) : 0
   const serviceArea = useMemo(
     () => getServiceAreaResult(address, storeProfile || {}, deliveryZones),
     [address, deliveryZones, storeProfile],
@@ -905,7 +1037,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const deliveryFee = fulfillment === 'delivery'
     ? parseCurrency(address.deliveryFee || serviceArea.fee || storeProfile?.serviceFee || '0')
     : 0
-  const total = subtotal + deliveryFee
+  const total = Math.max(0, subtotal - customerDiscount) + deliveryFee
   const minimumOrder = Math.max(0, parseCurrency(storeProfile?.minimumOrder))
   const minimumRemaining = Math.max(0, minimumOrder - subtotal)
   const hasMinimumOrder = minimumOrder > 0
@@ -919,6 +1051,16 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const hasDeliveryAddress = Boolean(address.street.trim() && address.number.trim() && address.district.trim() && address.city.trim())
   const hasConfirmedDeliveryPoint = Boolean(address.pointConfirmed && address.lat && address.lng)
   const canFinish = reachedMinimumOrder && customer.name.trim() && customer.phone.trim() && (fulfillment === 'pickup' || (hasDeliveryAddress && hasConfirmedDeliveryPoint && serviceArea.ok)) && payment
+  const normalizedCustomerLookup = customerLookup.trim().toLowerCase()
+  const customerMatches = normalizedCustomerLookup
+    ? customerProfiles
+      .filter((profile) => (
+        profile.name.toLowerCase().includes(normalizedCustomerLookup)
+        || profile.phone.includes(normalizedCustomerLookup)
+        || profile.phoneKey.includes(normalizePhoneKey(normalizedCustomerLookup))
+      ))
+      .slice(0, 5)
+    : []
 
   function openProductConfig(product, nextScreen = 'item') {
     const steps = getCartConfigurationSteps(product)
@@ -977,6 +1119,70 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
 
   function addProduct(product, nextScreen = '') {
     openProductConfig(product, nextScreen)
+  }
+
+  function applyCustomerProfile(profile) {
+    const normalizedProfile = normalizeCustomerProfile(profile)
+    const selectedAddress = getSelectedCustomerAddress(normalizedProfile)
+
+    setSelectedCustomerKey(normalizedProfile.phoneKey)
+    setCustomer((current) => ({
+      ...current,
+      name: normalizedProfile.name || current.name,
+      phone: normalizedProfile.phone || current.phone,
+      address: selectedAddress ? formatCustomerAddress(selectedAddress) : current.address,
+    }))
+
+    if (selectedAddress) {
+      const normalizedAddress = normalizeCustomerAddress(selectedAddress)
+      setAddress(normalizedAddress)
+      setMapCenter(getMapCenter(normalizedAddress, storeProfile || {}))
+    }
+
+    setStatus({
+      type: 'success',
+      message: `${normalizedProfile.name || 'Cliente'} identificado pelo telefone. ${normalizedProfile.orderCount} pedido(s) anteriores.`,
+    })
+  }
+
+  function updateCustomerPhone(value) {
+    const phoneKey = normalizePhoneKey(value)
+    const profile = phoneKey ? customerProfiles.find((item) => item.phoneKey === phoneKey) : null
+
+    setCustomer((current) => ({ ...current, phone: value }))
+    setCustomerLookup(value)
+
+    if (profile) {
+      applyCustomerProfile(profile)
+      return
+    }
+
+    setSelectedCustomerKey('')
+  }
+
+  function saveCustomerIdentity() {
+    const phoneKey = normalizePhoneKey(customer.phone)
+
+    if (!phoneKey || !customer.name.trim()) {
+      return null
+    }
+
+    const existingProfile = customerProfiles.find((profile) => profile.phoneKey === phoneKey)
+    const selectedAddress = hasDeliveryAddress ? normalizeCustomerAddress(address) : null
+    const nextProfileBase = {
+      ...(existingProfile || {}),
+      phoneKey,
+      phone: customer.phone.trim(),
+      name: customer.name.trim(),
+    }
+    const nextProfile = selectedAddress
+      ? mergeCustomerAddress(nextProfileBase, selectedAddress)
+      : nextProfileBase
+    const normalizedProfile = normalizeCustomerProfile(nextProfile)
+
+    setCustomerProfiles((current) => upsertCustomerProfile(current, normalizedProfile))
+    setSelectedCustomerKey(normalizedProfile.phoneKey)
+    return normalizedProfile
   }
 
   function toggleConfigOption(step, optionId) {
@@ -1227,6 +1433,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
 
     setAddress(nextAddress)
     setCustomer((current) => ({ ...current, address: formatCustomerAddress(nextAddress) }))
+    if (normalizePhoneKey(customer.phone)) {
+      const phoneKey = normalizePhoneKey(customer.phone)
+      const existingProfile = customerProfiles.find((profile) => profile.phoneKey === phoneKey)
+      const nextProfile = mergeCustomerAddress({
+        ...(existingProfile || {}),
+        phoneKey,
+        phone: customer.phone.trim(),
+        name: customer.name.trim() || existingProfile?.name || '',
+      }, nextAddress)
+
+      setCustomerProfiles((current) => upsertCustomerProfile(current, nextProfile))
+      setSelectedCustomerKey(phoneKey)
+    }
     setAddressStatus({
       type: 'success',
       message: nextServiceArea.zone ? `Endereco salvo na area ${nextServiceArea.zone.name}.` : 'Endereco salvo dentro da area de entrega.',
@@ -1249,11 +1468,14 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       return
     }
 
+    const customerProfile = saveCustomerIdentity()
     const request = {
       customerName: customer.name.trim(),
       customerPhone: customer.phone.trim(),
       fulfillment,
       payment,
+      customerOrderCount: customerProfile ? String(customerProfile.orderCount + 1).padStart(2, '0') : '',
+      customerDiscount: customerDiscount > 0 ? customerDiscount : 0,
       addressLat: address.lat,
       addressLng: address.lng,
       deliveryZoneId: address.deliveryZoneId,
@@ -1283,13 +1505,26 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       }
 
       setCart([])
-      setCustomer(emptyCustomer)
-      setAddress(emptyAddress)
+      setCustomer((current) => ({ ...emptyCustomer, name: current.name, phone: current.phone }))
+      setCustomerProfiles((current) => {
+        const phoneKey = normalizePhoneKey(customer.phone)
+        const existingProfile = current.find((profile) => profile.phoneKey === phoneKey)
+
+        if (!existingProfile) {
+          return current
+        }
+
+        return upsertCustomerProfile(current, {
+          ...existingProfile,
+          orderCount: existingProfile.orderCount + 1,
+          lastOrderAt: new Date().toISOString(),
+        })
+      })
       setAddressStatus({ type: 'idle', message: '' })
       setFulfillment('delivery')
       setPayment('')
       setTracking({
-        id: savedOrder?.id || savedOrder?.backendId || `pedido-${Date.now()}`,
+        id: savedOrder?.id || savedOrder?.backendId || `pedido-${normalizePhoneKey(customer.phone) || 'local'}`,
         storeId,
         source: data.source,
         status: normalizePublicOrderStatus(savedOrder?.status || 'analysis'),
@@ -1565,14 +1800,46 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
         <CustomerScreen title="Identifique-se" onBack={() => setScreen('cart')}>
           <section className="customer-identify">
             <label>
+              <span>Buscar cliente por nome ou numero:</span>
+              <input value={customerLookup} onChange={(event) => setCustomerLookup(event.target.value)} placeholder="Digite nome ou WhatsApp" />
+            </label>
+            {customerMatches.length > 0 ? (
+              <div className="customer-profile-results">
+                {customerMatches.map((profile) => (
+                  <button key={profile.phoneKey} type="button" onClick={() => applyCustomerProfile(profile)}>
+                    <strong>{profile.name || 'Cliente sem nome'}</strong>
+                    <small>{profile.phone} - {profile.orderCount} pedido(s)</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <label>
               <span>Seu numero de WhatsApp e:</span>
-              <input autoFocus value={customer.phone} onChange={(event) => setCustomer((current) => ({ ...current, phone: event.target.value }))} placeholder="(__) _____-____" />
+              <input autoFocus value={customer.phone} onChange={(event) => updateCustomerPhone(event.target.value)} placeholder="(__) _____-____" />
             </label>
             <label>
               <span>Seu nome e sobrenome:</span>
               <input value={customer.name} onChange={(event) => setCustomer((current) => ({ ...current, name: event.target.value }))} placeholder="Nome e sobrenome" />
             </label>
-            <button disabled={!customer.phone.trim() || !customer.name.trim()} type="button" onClick={() => setScreen('checkout')}>Avancar</button>
+            {selectedCustomerProfile ? (
+              <div className="customer-profile-card">
+                <span>Perfil encontrado</span>
+                <strong>{selectedCustomerProfile.name || customer.name}</strong>
+                <small>{selectedCustomerProfile.orderCount} pedido(s) anteriores</small>
+                {selectedCustomerProfile.discountValue ? <small>Desconto no perfil: {selectedCustomerProfile.discountType === 'percent' ? `${selectedCustomerProfile.discountValue}%` : formatCurrency(parseCurrency(selectedCustomerProfile.discountValue))}</small> : null}
+                {getSelectedCustomerAddress(selectedCustomerProfile) ? <small>Endereco salvo: {formatCustomerAddress(getSelectedCustomerAddress(selectedCustomerProfile))}</small> : null}
+              </div>
+            ) : null}
+            <button
+              disabled={!normalizePhoneKey(customer.phone) || !customer.name.trim()}
+              type="button"
+              onClick={() => {
+                saveCustomerIdentity()
+                setScreen('checkout')
+              }}
+            >
+              Avancar
+            </button>
             <p>Para realizar seu pedido vamos precisar de suas informacoes, este e um ambiente protegido.</p>
           </section>
         </CustomerScreen>
@@ -1650,7 +1917,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               <textarea value={customer.note} onChange={(event) => setCustomer((current) => ({ ...current, note: event.target.value }))} placeholder="Ex: sem cebola, troco para 50..." />
             </label>
 
-            <OrderTotals subtotal={subtotal} deliveryFee={deliveryFee} total={total} />
+            <OrderTotals subtotal={subtotal} discount={customerDiscount} deliveryFee={deliveryFee} total={total} />
             {hasMinimumOrder ? (
               <div className={`customer-minimum-order ${reachedMinimumOrder ? 'is-ok' : ''}`.trim()}>
                 <span>Pedido minimo</span>
@@ -1780,13 +2047,19 @@ function CustomerScreen({ title, onBack, children }) {
   )
 }
 
-function OrderTotals({ subtotal, deliveryFee, total }) {
+function OrderTotals({ subtotal, discount = 0, deliveryFee, total }) {
   return (
     <section className="customer-totals">
       <div>
         <span>Subtotal</span>
         <strong>{formatCurrency(subtotal)}</strong>
       </div>
+      {discount > 0 ? (
+        <div>
+          <span>Desconto do cliente</span>
+          <strong>-{formatCurrency(discount)}</strong>
+        </div>
+      ) : null}
       <div>
         <span>Entrega</span>
         <strong>{deliveryFee > 0 ? formatCurrency(deliveryFee) : 'Gratis'}</strong>

@@ -9368,6 +9368,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1)
     ), 0)
     const deliveryFee = request.fulfillment === 'delivery' ? Number(request.deliveryFee) || 0 : 0
+    const customerDiscount = Math.min(subtotal, Math.max(0, Number(request.customerDiscount) || 0))
     const nextId = getNextOrderId(orders)
     const createdOrder = normalizeOrderRecord({
       id: nextId,
@@ -9378,8 +9379,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       source: 'Cardapio Digital',
       status: 'analysis',
       subtotal,
-      total: subtotal + deliveryFee,
+      total: Math.max(0, subtotal - customerDiscount) + deliveryFee,
       payment: request.payment || 'Cartao',
+      customerOrderCount: request.customerOrderCount || '',
       time: nowTime(),
       address: request.fulfillment === 'delivery'
         ? request.note?.match(/Endereco:\s*([^|]+)/)?.[1]?.trim() || 'Endereco informado no pedido'
@@ -9389,6 +9391,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       deliveryZoneId: request.deliveryZoneId || '',
       deliveryZoneName: request.deliveryZoneName || '',
       deliveryFee: formatCurrencyInput(deliveryFee),
+      discountType: customerDiscount > 0 ? 'fixed' : 'fixed',
+      discountValue: customerDiscount > 0 ? formatCurrencyInput(customerDiscount) : '',
+      discountAmount: customerDiscount > 0 ? formatCurrencyInput(customerDiscount) : '0,00',
       note: request.note || 'Pedido vindo do cardapio digital.',
       items: request.items.map((item) => `${item.quantity}x ${item.productName}`),
       printItems: request.items.map((item) => ({

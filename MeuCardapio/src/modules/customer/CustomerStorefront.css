@@ -796,6 +796,42 @@
   text-align: center;
 }
 
+.customer-profile-results,
+.customer-profile-card {
+  display: grid;
+  gap: 8px;
+}
+
+.customer-profile-results button,
+.customer-profile-card {
+  height: auto;
+  padding: 10px 12px;
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #12313b;
+  text-align: left;
+}
+
+.customer-profile-results button {
+  display: grid;
+  gap: 3px;
+}
+
+.customer-profile-results strong,
+.customer-profile-card strong {
+  color: #12313b;
+  font-size: 14px;
+}
+
+.customer-profile-results small,
+.customer-profile-card small,
+.customer-profile-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .customer-checkout-flow {
   display: grid;
   gap: 12px;
