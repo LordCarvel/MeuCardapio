@@ -1,8 +1,13 @@
 .customer-page {
+  height: 100dvh;
   min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   background: #ffffff;
   color: #111827;
   font-family: Inter, Arial, Helvetica, sans-serif;
+  -webkit-overflow-scrolling: touch;
 }
 
 .customer-page button,
