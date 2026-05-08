@@ -475,6 +475,7 @@ const blankCartItemForm = {
   qty: '1',
   flavorIds: [],
   addonSelections: {},
+  note: '',
 }
 
 const blankTable = {
@@ -1854,7 +1855,7 @@ function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
   return (Number(product?.price) || 0) + flavorExtras + addonExtras
 }
 
-function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, qty = 1, flavorIds = [], addonSelections = {} } = {}) {
+function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, qty = 1, flavorIds = [], addonSelections = {}, note = '' } = {}) {
   const normalizedFlavorIds = Array.from(new Set(flavorIds))
   const flavorNames = getSelectedCartFlavorNames(product, normalizedFlavorIds)
   const normalizedAddonSelections = normalizeCartAddonSelections(product, addonSelections)
@@ -1874,6 +1875,7 @@ function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.rand
     addonSelections: normalizedAddonSelections,
     addonEntries,
     maxFlavors: Math.max(1, Number(product.maxFlavors) || 1),
+    note: String(note || '').trim(),
   }
 }
 
@@ -1888,6 +1890,7 @@ function normalizeStoredOrderCartItem(item, productList = []) {
       qty: Number(item?.qty) || 1,
       flavorIds: Array.isArray(item?.flavorIds) ? item.flavorIds : [],
       addonSelections: item?.addonSelections || {},
+      note: item?.note || '',
     })
   }
 
@@ -1909,6 +1912,7 @@ function normalizeStoredOrderCartItem(item, productList = []) {
     addonSelections: item?.addonSelections || {},
     addonEntries,
     maxFlavors: Math.max(1, Number(item?.maxFlavors) || 1),
+    note: String(item?.note || '').trim(),
   }
 }
 
@@ -1935,6 +1939,7 @@ function orderToCartItems(order = {}, productList = []) {
       price: qty > 0 ? lineTotal / qty : lineTotal,
       flavorNames: Array.isArray(item.details) ? item.details.filter(Boolean) : [],
       flavorLabel: Array.isArray(item.details) ? item.details.filter(Boolean).join(', ') : '',
+      note: item.note || '',
     }, productList)
   })
 }
@@ -1979,6 +1984,7 @@ function orderCartItemToForm(product, item = null) {
     qty: String(item?.qty || 1),
     flavorIds: Array.isArray(item?.flavorIds) ? [...item.flavorIds] : [],
     addonSelections: item?.addonSelections ? cloneData(item.addonSelections) : {},
+    note: item?.note || '',
   }
 }
 
@@ -1986,6 +1992,7 @@ function getOrderCartItemLabel(item) {
   const detailParts = [
     item?.flavorLabel ? `Sabores: ${item.flavorLabel}` : '',
     ...(Array.isArray(item?.addonEntries) ? item.addonEntries.map((entry) => `${entry.groupName}: ${entry.label}`) : []),
+    item?.note ? `Obs: ${item.note}` : '',
   ].filter(Boolean)
 
   return detailParts.length > 0
@@ -2008,6 +2015,7 @@ function getOrderCartPrintItem(item) {
     details: [
       ...(Array.isArray(item?.flavorNames) ? item.flavorNames : []),
       ...addonDetails,
+      item?.note ? `Obs: ${item.note}` : '',
     ].filter(Boolean),
     price: (Number(item?.price) || 0) * (Number(item?.qty) || 1),
   }
@@ -6471,6 +6479,7 @@ function App() {
   const [selectedCartItemId, setSelectedCartItemId] = useState(null)
   const [cartItemForm, setCartItemForm] = useState(blankCartItemForm)
   const [cartItemStepIndex, setCartItemStepIndex] = useState(0)
+  const [cartItemNoteOpen, setCartItemNoteOpen] = useState(false)
   const [posCategory, setPosCategory] = useState('all')
   const [posSearch, setPosSearch] = useState('')
   const [tables, setTables] = useState(initialData.tables)
@@ -9178,6 +9187,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
   function resetOrderCatalog(goToCategories = false) {
     setCartItemForm(blankCartItemForm)
     setCartItemStepIndex(0)
+    setCartItemNoteOpen(false)
 
     if (goToCategories) {
       setPosCategory('all')
@@ -9191,6 +9201,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setPosSearch('')
     setCartItemForm(orderCartItemToForm(product))
     setCartItemStepIndex(0)
+    setCartItemNoteOpen(false)
   }
 
   function openExistingOrderCartItem(cartItem) {
@@ -9206,6 +9217,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setPosSearch('')
     setCartItemForm(orderCartItemToForm(product, cartItem))
     setCartItemStepIndex(0)
+    setCartItemNoteOpen(Boolean(cartItem.note))
   }
 
   function addOrderCart(product, categoryName = product.category) {
@@ -9346,6 +9358,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       qty: Math.max(1, Number(cartItemForm.qty) || 1),
       flavorIds: selectedFlavorIds,
       addonSelections: normalizedAddonSelections,
+      note: cartItemForm.note,
     })
 
     setOrderCart((current) => {
@@ -10712,6 +10725,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const configuredFlavorLabel = configuredProduct ? getCartItemFlavorLabel(configuredProduct, cartItemForm.flavorIds) : ''
       const configuredAddonEntries = configuredProduct ? getSelectedCartAddonEntries(configuredProduct, cartItemForm.addonSelections) : []
       const hasConfiguredTrail = Boolean(configuredFlavorLabel) || configuredAddonEntries.length > 0
+      const hasCartItemNote = Boolean(cartItemForm.note.trim())
       const canFinalizeConfiguredItem = configuredProduct
         ? getCartConfigurationSteps(configuredProduct).every((step) => isCartStepSelectionValid(step, cartItemForm))
         : false
@@ -10996,6 +11010,18 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                           </Button>
                         ) : null}
                       </div>
+
+                      {(cartItemNoteOpen || hasCartItemNote) ? (
+                        <label className="pos-config__note">
+                          <span>Observacao do item</span>
+                          <textarea
+                            autoFocus={cartItemNoteOpen && !hasCartItemNote}
+                            placeholder="Ex: pizza sem cebola, ponto da carne, sem gelo..."
+                            value={cartItemForm.note}
+                            onChange={(event) => setCartItemForm({ ...cartItemForm, note: event.target.value })}
+                          />
+                        </label>
+                      ) : null}
                     </div>
                   </section>
                 ) : null}
@@ -11007,6 +11033,13 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                   ) : null}
                   {posStep === 'configure' ? (
                     <>
+                      <button
+                        className={hasCartItemNote ? 'is-active' : ''}
+                        type="button"
+                        onClick={() => setCartItemNoteOpen((current) => !current || !hasCartItemNote)}
+                      >
+                        [ O ] Observacao do item
+                      </button>
                       <button type="button" onClick={() => {
                         if (cartItemStepIndex > 0) {
                           goToPreviousCartItemStep()
@@ -11054,6 +11087,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                               {Array.isArray(item.addonEntries) ? item.addonEntries.map((entry) => (
                                 <small key={`${item.id}-${entry.groupId}`}>{entry.groupName}: {entry.label}</small>
                               )) : null}
+                              {item.note ? <small className="summary-item__note">Observacao: {item.note}</small> : null}
                               <small>{formatCurrency(item.price)} por unidade</small>
                             </span>
                             <b className="summary-item__price">{formatCurrency(item.price * item.qty)}</b>
