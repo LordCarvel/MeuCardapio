@@ -2761,6 +2761,48 @@ function buildReceiptItemsHtml(order = {}) {
   `).join('')
 }
 
+function getPrintableOrderNote(order = {}) {
+  const ignoredLabels = new Set([
+    'pedido local',
+    'origem',
+    'endereco',
+    'mapa',
+    'area',
+    'zona',
+    'documento',
+    'itens',
+  ])
+  const ignoredExactNotes = new Set([
+    'pedido criado pelo painel.',
+    'pedido editado pelo painel.',
+    'pedido vindo do cardapio digital.',
+    'venda criada no pdv.',
+    'pedido vindo do salao.',
+  ])
+
+  return String(order.note || '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [, label = '', value = ''] = part.match(/^([^:]+):\s*(.*)$/) || []
+      const normalizedLabel = normalizeSearchText(label)
+
+      if (ignoredLabels.has(normalizedLabel)) {
+        return ''
+      }
+
+      if (normalizedLabel === 'obs' || normalizedLabel === 'observacao') {
+        return value.trim()
+      }
+
+      return part
+    })
+    .filter(Boolean)
+    .filter((part) => !ignoredExactNotes.has(normalizeSearchText(part)))
+    .join(' | ')
+}
+
 function createPrinterTestOrder() {
   return normalizeOrderRecord({
     id: '8459',
@@ -2804,11 +2846,12 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
   const showFinancials = normalizedConfig.showFinancials && variant !== 'kitchen'
   const storeName = storeProfile.name || storeProfile.tradeName || 'MeuCardapio'
   const customerAddress = normalizedOrder.address || (normalizedOrder.fulfillment === 'pickup' ? 'Retirada no balcao' : '')
-  const note = normalizedOrder.note && normalizedConfig.showNotes
+  const printableNote = getPrintableOrderNote(normalizedOrder)
+  const note = printableNote && normalizedConfig.showNotes
     ? `
       ${buildReceiptDivider()}
       <section class="receipt-section receipt-note">
-        <strong>${escapeHtml(normalizedOrder.note)}</strong>
+        <strong>${escapeHtml(printableNote)}</strong>
       </section>
     `
     : ''
@@ -9499,14 +9542,14 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       channel: request.fulfillment === 'delivery' ? 'delivery' : 'pickup',
       fulfillment: request.fulfillment || 'delivery',
       source: 'Cardapio Digital',
-      status: 'analysis',
+      status: settings.autoAccept ? 'production' : 'analysis',
       subtotal,
       total: Math.max(0, subtotal - customerDiscount) + deliveryFee,
       payment: request.payment || 'Cartao',
       customerOrderCount: request.customerOrderCount || '',
       time: nowTime(),
       address: request.fulfillment === 'delivery'
-        ? request.note?.match(/Endereco:\s*([^|]+)/)?.[1]?.trim() || 'Endereco informado no pedido'
+        ? request.address || request.note?.match(/Endereco:\s*([^|]+)/)?.[1]?.trim() || 'Endereco informado no pedido'
         : 'Retirada no balcao',
       addressLat: request.addressLat || '',
       addressLng: request.addressLng || '',
@@ -9536,6 +9579,10 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         syncStatus: 'pending',
         syncMessage: 'Aguardando modo piloto.',
       })
+    }
+
+    if (settings.autoPrint) {
+      printOrderTicket(createdOrder, 'order')
     }
 
     setActiveNav('orders')
@@ -13514,6 +13561,23 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               showMapTools
               value={storeForm}
             />
+            <section className="form-grid settings-inline-panel">
+              <Field label="Aceitar pedidos automaticamente">
+                <select value={settings.autoAccept ? 'yes' : 'no'} onChange={(event) => setSettings({ ...settings, autoAccept: event.target.value === 'yes' })}>
+                  <option value="yes">Sim, mandar direto para preparo</option>
+                  <option value="no">Nao, revisar antes</option>
+                </select>
+              </Field>
+              <Field label="Imprimir automaticamente">
+                <select
+                  value={settings.autoPrint ? 'yes' : 'no'}
+                  onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes', printer: event.target.value === 'yes' })}
+                >
+                  <option value="yes">Sim, imprimir ao receber</option>
+                  <option value="no">Nao, imprimir manualmente</option>
+                </select>
+              </Field>
+            </section>
           </form>
         </Modal>
       )

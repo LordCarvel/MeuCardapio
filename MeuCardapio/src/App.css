@@ -3618,6 +3618,14 @@
   gap: 10px;
 }
 
+.settings-inline-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dfe6dd;
+  border-radius: 8px;
+  background: #f7faf5;
+}
+
 .field {
   display: grid;
   gap: 6px;
