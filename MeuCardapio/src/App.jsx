@@ -3739,6 +3739,10 @@ function buildMenuSnapshot({ categories = [], products = [], deliveryZones = [] 
   }
 }
 
+function serializeMenuSnapshot({ categories = [], products = [], deliveryZones = [] } = {}) {
+  return JSON.stringify(buildMenuSnapshot({ categories, products, deliveryZones }))
+}
+
 function getWorkspaceMenuSnapshot(workspace = {}) {
   const snapshot = workspace.menuSnapshot || {}
 
@@ -7563,6 +7567,13 @@ function App() {
       if (snapshot.deliveryZones) {
         setDeliveryZones(snapshot.deliveryZones)
       }
+      if (snapshot.categories || snapshot.products || snapshot.deliveryZones) {
+        lastMenuSnapshotRef.current = serializeMenuSnapshot({
+          categories: snapshot.categories || categories,
+          products: snapshot.products || products,
+          deliveryZones: snapshot.deliveryZones || deliveryZones,
+        })
+      }
       updatePilotSync({
         enabled: enable ? true : pilotSync.enabled,
         status: 'online',
@@ -8111,6 +8122,11 @@ function App() {
 
   function applySnapshot(snapshot, toastMessage = 'Backup carregado localmente.') {
     const merged = normalizeAppSnapshot(snapshot)
+    lastMenuSnapshotRef.current = serializeMenuSnapshot({
+      categories: merged.categories,
+      products: merged.products,
+      deliveryZones: merged.deliveryZones,
+    })
 
     setOrders(merged.orders)
     setOrderSequence(merged.orderSequence)
