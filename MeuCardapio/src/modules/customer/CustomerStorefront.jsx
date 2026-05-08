@@ -858,12 +858,6 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const [configStepIndex, setConfigStepIndex] = useState(0)
 
   useEffect(() => {
-    setCustomerProfiles(loadCustomerDirectory(storeId))
-    setSelectedCustomerKey('')
-    setCustomerLookup('')
-  }, [storeId])
-
-  useEffect(() => {
     saveCustomerDirectory(storeId, customerProfiles)
   }, [customerProfiles, storeId])
 
