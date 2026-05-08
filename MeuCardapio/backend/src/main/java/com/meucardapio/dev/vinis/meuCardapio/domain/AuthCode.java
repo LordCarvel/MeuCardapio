@@ -13,11 +13,11 @@ import jakarta.persistence.Table;
 public class AuthCode {
     @Id
     private UUID id;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 160)
     private String email;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 40)
     private String purpose;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String codeHash;
     @Column(nullable = false)
     private LocalDateTime expiresAt;

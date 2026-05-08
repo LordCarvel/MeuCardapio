@@ -23,12 +23,13 @@ public class Product {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String name;
+    @Column(length = 500)
     private String description;
     @Column(name = "image_url", length = 1000)
     private String imageUrl;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
     @Column(nullable = false)
     private int stock;

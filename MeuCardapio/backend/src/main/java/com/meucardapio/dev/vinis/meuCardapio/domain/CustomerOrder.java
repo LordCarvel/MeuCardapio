@@ -24,21 +24,23 @@ public class CustomerOrder {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", nullable = false)
     private Store store;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String customerName;
+    @Column(length = 40)
     private String customerPhone;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 30)
     private String fulfillment;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 30)
     private String status;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal subtotal;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal deliveryFee;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal total;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 40)
     private String payment;
+    @Column(length = 500)
     private String note;
     @Column(nullable = false)
     private LocalDateTime createdAt;

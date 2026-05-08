@@ -19,13 +19,13 @@ public class StoreUser {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", nullable = false)
     private Store store;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String name;
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true, length = 160)
     private String email;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String passwordHash;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 30)
     private String role;
     @Column(nullable = false)
     private LocalDateTime createdAt;

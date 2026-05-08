@@ -19,7 +19,7 @@ public class Category {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", nullable = false)
     private Store store;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String name;
     @Column(name = "image_url", length = 1000)
     private String imageUrl;

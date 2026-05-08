@@ -14,31 +14,37 @@ import jakarta.persistence.Table;
 public class Store {
     @Id
     private UUID id;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String tradeName;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 120)
     private String ownerName;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 160)
     private String email;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 40)
     private String phone;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 40)
     private String taxId;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 80)
     private String category;
+    @Column(length = 160)
     private String street;
+    @Column(length = 30)
     private String number;
+    @Column(length = 100)
     private String district;
+    @Column(length = 100)
     private String cityName;
+    @Column(length = 2)
     private String state;
+    @Column(length = 160)
     private String schedule;
-    @Column(name = "access_key")
+    @Column(name = "access_key", length = 120)
     private String accessKey;
     @Column(name = "menu_snapshot", columnDefinition = "text")
     private String menuSnapshot;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal minimumOrder;
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 8, scale = 2)
     private BigDecimal deliveryRadiusKm;
     @Column(nullable = false)
     private LocalDateTime createdAt;

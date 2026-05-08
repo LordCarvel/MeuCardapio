@@ -14,11 +14,11 @@ public class AppLog {
     @Id
     private UUID id;
     private UUID storeId;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 20)
     private String level;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 80)
     private String area;
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String message;
     @Column(nullable = false)
     private LocalDateTime createdAt;
