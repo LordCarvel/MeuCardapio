@@ -1747,14 +1747,6 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
                   {getCartLineDetails(item).length > 0
                     ? getCartLineDetails(item).map((detail) => <small key={detail}>{detail}</small>)
                     : <small>Sem adicionais</small>}
-                  <label className="customer-item-note">
-                    <span>Observacao deste item</span>
-                    <textarea
-                      value={item.note || ''}
-                      onChange={(event) => updateCartLineNote(item.id, event.target.value)}
-                      placeholder="Ex: sem cebola, ponto da carne, embalagem separada..."
-                    />
-                  </label>
                 </div>
                 <div className="customer-qty">
                   <button type="button" onClick={() => updateQuantity(item.id, item.quantity - 1)}>−</button>
@@ -1920,6 +1912,22 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
                 </label>
               ) : null}
             </section>
+
+            {cart.length > 0 ? (
+              <section className="customer-panel customer-item-notes-panel">
+                <h2>Observacao por item</h2>
+                {cart.map((item) => (
+                  <label className="customer-item-note" key={`note-${item.id}`}>
+                    <span>{item.quantity}x {item.name}</span>
+                    <textarea
+                      value={item.note || ''}
+                      onChange={(event) => updateCartLineNote(item.id, event.target.value)}
+                      placeholder="Ex: sem cebola, ponto da carne, embalagem separada..."
+                    />
+                  </label>
+                ))}
+              </section>
+            ) : null}
 
             <label className="customer-note-field">
               <span>Observacoes</span>

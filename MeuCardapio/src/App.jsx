@@ -2185,6 +2185,7 @@ function createDefaultAppData() {
     orders: initialOrders.map((order) => ({
       ...normalizeOrderRecord(order),
     })),
+    orderSequence: getLastOrderNumber(initialOrders),
     activeNav: 'orders',
     storeOpen: true,
     cashOpen: false,
@@ -2228,6 +2229,7 @@ function createBlankAppData() {
   return cloneData({
     ...defaults,
     orders: [],
+    orderSequence: 8300,
     blockedOrders: [],
     chatMessages: [],
     categories: [],
@@ -2258,13 +2260,21 @@ function createBlankAppData() {
 function normalizeAppSnapshot(snapshot = {}) {
   const defaults = createDefaultAppData()
   const parsed = snapshot ?? {}
+  const normalizedOrders = Array.isArray(parsed.orders)
+    ? parsed.orders.map((order) => normalizeOrderRecord(order))
+    : defaults.orders
+  const parsedOrderSequence = Number(parsed.orderSequence)
+  const fallbackOrderSequence = Array.isArray(parsed.orders) ? 8300 : defaults.orderSequence
+  const orderSequence = Math.max(
+    Number.isFinite(parsedOrderSequence) ? parsedOrderSequence : fallbackOrderSequence,
+    getLastOrderNumber(normalizedOrders),
+  )
 
   return {
     ...defaults,
     ...parsed,
-    orders: Array.isArray(parsed.orders)
-      ? parsed.orders.map((order) => normalizeOrderRecord(order))
-      : defaults.orders,
+    orders: normalizedOrders,
+    orderSequence,
     blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
     settings: {
       ...defaults.settings,
@@ -3125,23 +3135,47 @@ function buildPrintHtml(printDocument, config = {}) {
 }
 
 function openPrintWindow(printDocument, config = {}) {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || !printDocument?.bodyHtml) {
     return false
   }
 
-  const printWindow = window.open('', '_blank', 'popup=yes,width=420,height=760')
+  const printFrame = document.createElement('iframe')
+  printFrame.title = `Impressao pedido ${printDocument.title || ''}`.trim()
+  printFrame.style.position = 'fixed'
+  printFrame.style.right = '0'
+  printFrame.style.bottom = '0'
+  printFrame.style.width = '0'
+  printFrame.style.height = '0'
+  printFrame.style.border = '0'
+  printFrame.style.opacity = '0'
+  printFrame.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(printFrame)
 
-  if (!printWindow) {
+  const printWindow = printFrame.contentWindow
+  const printDocumentRef = printFrame.contentDocument || printWindow?.document
+
+  if (!printWindow || !printDocumentRef) {
+    printFrame.remove()
     return false
   }
 
-  printWindow.document.open()
-  printWindow.document.write(buildPrintHtml(printDocument, config))
-  printWindow.document.close()
-  printWindow.focus()
-  printWindow.setTimeout(() => {
+  printDocumentRef.open()
+  printDocumentRef.write(buildPrintHtml(printDocument, config))
+  printDocumentRef.close()
+  let cleanupTimer = null
+  const cleanupPrintFrame = () => {
+    if (cleanupTimer) {
+      window.clearTimeout(cleanupTimer)
+    }
+    printWindow.removeEventListener('afterprint', cleanupPrintFrame)
+    printFrame.remove()
+  }
+
+  printWindow.addEventListener('afterprint', cleanupPrintFrame, { once: true })
+  window.setTimeout(() => {
     printWindow.focus()
     printWindow.print()
+    cleanupTimer = window.setTimeout(cleanupPrintFrame, 60000)
   }, 180)
   return true
 }
@@ -3186,13 +3220,11 @@ function ordersToCsv(orders) {
   return lines.join('\n')
 }
 
-function getNextOrderId(orders = []) {
-  const maxOrderNumber = orders
+function getLastOrderNumber(orders = [], fallback = 8300) {
+  return orders
     .map((order) => Number(order.id))
     .filter(Number.isFinite)
-    .reduce((max, orderNumber) => Math.max(max, orderNumber), 8300)
-
-  return String(maxOrderNumber + 1)
+    .reduce((max, orderNumber) => Math.max(max, orderNumber), fallback)
 }
 
 function toBackendMoney(value) {
@@ -6393,6 +6425,8 @@ function App() {
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
 
   const [orders, setOrders] = useState(initialData.orders)
+  const [orderSequence, setOrderSequence] = useState(initialData.orderSequence)
+  const orderSequenceRef = useRef(initialData.orderSequence)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -6570,6 +6604,7 @@ function App() {
 
   const currentStoreSnapshot = useMemo(() => ({
     orders,
+    orderSequence,
     activeNav,
     storeOpen,
     cashOpen,
@@ -6603,6 +6638,7 @@ function App() {
     eventLog,
   }), [
     orders,
+    orderSequence,
     activeNav,
     storeOpen,
     cashOpen,
@@ -7581,6 +7617,8 @@ function App() {
     const merged = normalizeAppSnapshot(snapshot)
 
     setOrders(merged.orders)
+    setOrderSequence(merged.orderSequence)
+    orderSequenceRef.current = merged.orderSequence
     setActiveNav(merged.activeNav)
     setStoreOpen(Boolean(merged.storeOpen))
     setCashOpen(Boolean(merged.cashOpen))
@@ -8856,6 +8894,18 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setFinance((current) => current.filter((entry) => !String(entry.title || '').endsWith(`#${orderId}`)))
   }
 
+  function reserveNextOrderId() {
+    const nextOrderNumber = Math.max(
+      Number(orderSequenceRef.current) || 8300,
+      getLastOrderNumber(orders),
+      8300,
+    ) + 1
+
+    orderSequenceRef.current = nextOrderNumber
+    setOrderSequence(nextOrderNumber)
+    return String(nextOrderNumber)
+  }
+
   function createOrder(event) {
     event.preventDefault()
 
@@ -8895,7 +8945,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const editedSourceOrder = editingOrderId
       ? orders.find((order) => order.id === editingOrderId)
       : null
-    const nextId = editedSourceOrder?.id || getNextOrderId(orders)
+    const nextId = editedSourceOrder?.id || reserveNextOrderId()
     const createdOrder = {
       ...(editedSourceOrder || {}),
       id: nextId,
@@ -9319,7 +9369,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
   function checkoutCounter() {
     const subtotal = counterCart.reduce((sum, item) => sum + item.price * item.qty, 0)
-    const nextId = getNextOrderId(orders)
+    const nextId = reserveNextOrderId()
     const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: 'Cliente PDV',
@@ -9369,7 +9419,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     ), 0)
     const deliveryFee = request.fulfillment === 'delivery' ? Number(request.deliveryFee) || 0 : 0
     const customerDiscount = Math.min(subtotal, Math.max(0, Number(request.customerDiscount) || 0))
-    const nextId = getNextOrderId(orders)
+    const nextId = reserveNextOrderId()
     const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: request.customerName || 'Cliente cardapio',
@@ -9921,7 +9971,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
   }
 
   function addTableOrder(table) {
-    const nextId = getNextOrderId(orders)
+    const nextId = reserveNextOrderId()
     const subtotal = table.total || 49.9
     const createdOrder = normalizeOrderRecord({
       id: nextId,
@@ -11023,6 +11073,14 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                               onClick={() => changeOrderCartQuantity(item.id, item.qty + 1)}
                             >
                               +
+                            </button>
+                            <button
+                              className="summary-item__edit"
+                              type="button"
+                              onClick={() => openExistingOrderCartItem(item)}
+                              title="Editar item"
+                            >
+                              <Icon name="edit" size={14} />
                             </button>
                             <button
                               className="summary-item__remove"

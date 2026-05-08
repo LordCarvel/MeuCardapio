@@ -2042,7 +2042,7 @@
   --pos-border-strong: #bdd0de;
   --pos-text: #17303b;
   --pos-text-muted: #5d7380;
-  width: min(1080px, 100%);
+  width: min(1280px, 100%);
   max-height: calc(100dvh - 28px);
   min-width: 0;
   min-height: 0;
@@ -2051,7 +2051,7 @@
 
 .pos-shell__form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.42fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.38fr);
   gap: 8px;
   width: 100%;
   height: min(680px, calc(100dvh - 28px));
@@ -2353,13 +2353,14 @@
 
 .pos-config__body {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 8px;
   min-height: 0;
   padding: 0 10px;
 }
 
 .pos-config__summary {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2374,6 +2375,7 @@
 .pos-config__summary div {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .pos-config__summary b {
@@ -2383,16 +2385,19 @@
 }
 
 .pos-config__trail {
+  grid-row: 2;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
+  max-height: 96px;
+  overflow-y: auto;
 }
 
 .pos-config__trail-item {
   display: grid;
   gap: 4px;
-  min-height: 60px;
-  padding: 12px 14px;
+  min-height: 52px;
+  padding: 9px 11px;
   border: 1px solid #d5e0e9;
   border-radius: 14px;
   background: linear-gradient(180deg, #ffffff, #f4f8fb);
@@ -2423,20 +2428,23 @@
 }
 
 .pos-config__grid {
+  grid-row: 3;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   align-content: start;
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
+  padding-bottom: 4px;
 }
 
 .pos-flavor-card {
   display: grid;
-  align-content: space-between;
+  grid-template-rows: minmax(34px, auto) auto auto;
+  align-content: stretch;
   gap: 8px;
-  min-height: 118px;
-  padding: 12px;
+  min-height: 116px;
+  padding: 10px;
   border: 1px solid #cedae4;
   border-radius: 14px;
   background: linear-gradient(180deg, #ffffff, #f4f8fb);
@@ -2453,8 +2461,9 @@
 
 .pos-flavor-card strong {
   color: var(--pos-text);
-  font-size: 13px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
 }
 
 .pos-flavor-card small {
@@ -2466,7 +2475,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: max-content;
+  width: fit-content;
+  max-width: 100%;
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
@@ -2475,6 +2485,8 @@
   color: #506671;
   font-size: 11px;
   font-weight: 900;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .pos-flavor-card.is-active span {
@@ -2489,10 +2501,15 @@
 }
 
 .pos-config__footer {
+  grid-row: 4;
   display: flex;
   align-items: end;
   justify-content: space-between;
   gap: 10px;
+}
+
+.pos-config__body > .pos-stage-empty {
+  grid-row: 3;
 }
 
 .pos-config__qty {
@@ -2518,7 +2535,7 @@
 
 .pos-summary__header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 68px 70px 36px;
+  grid-template-columns: minmax(0, 1fr) 72px 72px 36px;
   border-bottom: 1px solid #dde6ed;
   background: #f7fafc;
   min-width: 0;
@@ -2589,6 +2606,7 @@
   align-content: start;
   min-height: 0;
   overflow-y: auto;
+  padding-bottom: 8px;
 }
 
 .pos-summary__empty {
@@ -2608,7 +2626,7 @@
   border-bottom: 1px solid #edf1f4;
   background: #ffffff;
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .summary-item.is-selected {
@@ -2644,7 +2662,7 @@
 
 .summary-item__controls {
   display: grid;
-  grid-template-columns: 24px 28px 24px 28px;
+  grid-template-columns: 24px 28px 24px 28px 28px;
   gap: 4px;
   justify-content: end;
   min-width: 0;
@@ -2677,6 +2695,12 @@
   border-radius: 4px;
   background: #fff4f2;
   color: #b4483b;
+}
+
+.summary-item__edit {
+  border-color: #b9d9f0 !important;
+  background: #eaf5ff !important;
+  color: var(--pos-accent-strong) !important;
 }
 
 .order-note {
@@ -5672,7 +5696,7 @@
   }
 
   .summary-item__controls {
-    grid-template-columns: 24px 30px 24px 28px;
+    grid-template-columns: 24px 30px 24px 28px 28px;
     justify-content: start;
   }
 }

@@ -650,7 +650,6 @@
 .customer-item-note {
   display: grid;
   gap: 4px;
-  margin-top: 5px;
 }
 
 .customer-item-note span {
@@ -671,6 +670,10 @@
   font: inherit;
   font-size: 12px;
   outline-color: #1697e8;
+}
+
+.customer-item-notes-panel {
+  gap: 10px;
 }
 
 .customer-qty {
