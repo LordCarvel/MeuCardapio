@@ -372,8 +372,9 @@
   width: min(512px, 100%);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: 0 12px 88px;
+  padding: 0 12px 128px;
   background: #ffffff;
+  overflow-x: hidden;
 }
 
 .customer-step-header {
@@ -412,7 +413,7 @@
 .customer-item-config {
   display: grid;
   gap: 12px;
-  padding: 12px 0 88px;
+  padding: 12px 0 148px;
 }
 
 .customer-item-card {
@@ -484,6 +485,7 @@
 .customer-option-list {
   display: grid;
   gap: 8px;
+  padding-bottom: 10px;
 }
 
 .customer-option-list button {
@@ -670,6 +672,17 @@
   font: inherit;
   font-size: 12px;
   outline-color: #1697e8;
+}
+
+.customer-config-note {
+  padding: 10px;
+  border: 1px solid #dbe4ec;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.customer-config-note textarea {
+  min-height: 64px;
 }
 
 .customer-item-notes-panel {
@@ -1388,8 +1401,9 @@
   z-index: 30;
   display: grid;
   place-items: center;
-  padding: 8px 12px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   background: #ffffff;
+  box-shadow: 0 -1px 12px rgba(15, 23, 42, 0.1);
 }
 
 .customer-sticky-action button {
@@ -1669,7 +1683,7 @@
   .customer-tracking {
     gap: 8px;
     padding-top: 7px;
-    padding-bottom: 64px;
+    padding-bottom: 112px;
   }
 
   .customer-item-card {
@@ -1806,7 +1820,7 @@
   }
 
   .customer-sticky-action {
-    padding: 6px 8px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   }
 }
 
@@ -1851,11 +1865,12 @@
     grid-template-columns: 320px minmax(0, 1fr);
     align-items: start;
     gap: 14px;
-    padding-bottom: 70px;
+    padding-bottom: 96px;
   }
 
   .customer-item-card,
   .customer-config-summary,
+  .customer-config-note,
   .customer-config-actions {
     grid-column: 1;
   }

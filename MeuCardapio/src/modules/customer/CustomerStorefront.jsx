@@ -444,7 +444,20 @@ function buildConfiguredCartLine(product, form) {
     flavorLabel: flavorNames.join(', '),
     addonSelections,
     addonEntries: getSelectedCartAddonEntries(product, addonSelections),
+    note: String(form.note || '').trim(),
   }
+}
+
+function getInitialConfigStep(product, form = {}) {
+  const steps = getCartConfigurationSteps(product)
+
+  if (steps.length <= 1) {
+    return 0
+  }
+
+  return steps.reduce((lastIndex, step, index) => (
+    getCartStepSelectedIds(form, step).length > 0 ? index : lastIndex
+  ), 0)
 }
 
 function getCartLineDetails(item) {
@@ -852,11 +865,13 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const [payment, setPayment] = useState('')
   const [tracking, setTracking] = useState(null)
   const [configProduct, setConfigProduct] = useState(null)
+  const [configBackScreen, setConfigBackScreen] = useState('home')
   const [configForm, setConfigForm] = useState({
     lineId: '',
     quantity: '1',
     flavorIds: [],
     addonSelections: {},
+    note: '',
   })
   const [configStepIndex, setConfigStepIndex] = useState(0)
 
@@ -1068,11 +1083,13 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
 
     setConfigProduct(product)
+    setConfigBackScreen('home')
     setConfigForm({
       lineId: '',
       quantity: '1',
       flavorIds: [],
       addonSelections: {},
+      note: '',
     })
     setConfigStepIndex(0)
     setScreen('item')
@@ -1086,13 +1103,17 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
 
     setConfigProduct(product)
-    setConfigForm({
+    setConfigBackScreen('cart')
+    const nextForm = {
       lineId: item.id,
       quantity: String(item.quantity || 1),
       flavorIds: Array.isArray(item.flavorIds) ? item.flavorIds : [],
       addonSelections: item.addonSelections || {},
-    })
-    setConfigStepIndex(0)
+      note: item.note || '',
+    }
+
+    setConfigForm(nextForm)
+    setConfigStepIndex(getInitialConfigStep(product, nextForm))
     setScreen('item')
   }
 
@@ -1243,6 +1264,15 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     setConfigStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))
   }
 
+  function goBackConfigStep() {
+    if (configStepIndex > 0) {
+      setConfigStepIndex((current) => Math.max(current - 1, 0))
+      return
+    }
+
+    setScreen(configBackScreen)
+  }
+
   function commitConfiguredItem() {
     if (!configProduct) {
       return
@@ -1266,8 +1296,9 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       return [...current, nextLine]
     })
     setConfigProduct(null)
+    setConfigBackScreen('home')
     setConfigStepIndex(0)
-    setConfigForm({ lineId: '', quantity: '1', flavorIds: [], addonSelections: {} })
+    setConfigForm({ lineId: '', quantity: '1', flavorIds: [], addonSelections: {}, note: '' })
     setStatus({ type: 'idle', message: '' })
     setScreen('cart')
   }
@@ -1645,7 +1676,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       ) : null}
 
       {screen === 'item' && configProduct ? (
-        <CustomerScreen title={configProduct.name} onBack={() => setScreen('home')}>
+        <CustomerScreen title={configProduct.name} onBack={goBackConfigStep}>
           <section className="customer-item-config">
             <header className="customer-item-card">
               <ProductThumb product={configProduct} small />
@@ -1702,15 +1733,17 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
               {status.message && status.type === 'error' ? <p className="customer-config-error">{status.message}</p> : null}
             </section>
 
-            <div className="customer-config-actions">
-              <button type="button" onClick={() => {
-                if (configStepIndex > 0) {
-                  setConfigStepIndex((current) => current - 1)
-                  return
-                }
+            <label className="customer-item-note customer-config-note">
+              <span>Observacao do item</span>
+              <textarea
+                value={configForm.note || ''}
+                onChange={(event) => setConfigForm((current) => ({ ...current, note: event.target.value }))}
+                placeholder="Ex: pizza sem cebola, ponto da carne, embalagem separada..."
+              />
+            </label>
 
-                setScreen('home')
-              }}>
+            <div className="customer-config-actions">
+              <button type="button" onClick={goBackConfigStep}>
                 Voltar
               </button>
               {hasNextConfigStep ? (

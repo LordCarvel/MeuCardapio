@@ -1916,8 +1916,46 @@ function normalizeStoredOrderCartItem(item, productList = []) {
   }
 }
 
+function inferOrderCartSelectionsFromReceiptItem(product, receiptItem = {}) {
+  const details = Array.isArray(receiptItem.details)
+    ? receiptItem.details.map((detail) => String(detail || '').trim()).filter(Boolean)
+    : []
+  const normalizedDetails = details.map(normalizeSearchText)
+  const noteDetail = details.find((detail) => /^obs(?:ervacao)?\s*:/i.test(detail))
+  const flavorIds = getActiveProductFlavors(product)
+    .filter((flavor) => normalizedDetails.includes(normalizeSearchText(flavor.name)))
+    .map((flavor) => flavor.id)
+    .slice(0, Math.max(1, Number(product?.maxFlavors) || 1))
+  const addonSelections = {}
+
+  getActiveProductAddonGroups(product).forEach((group) => {
+    const optionIds = group.options
+      .filter((option) => normalizedDetails.includes(normalizeSearchText(option.name)))
+      .map((option) => option.id)
+      .slice(0, Math.max(1, Number(group.maxSelect) || 1))
+
+    if (optionIds.length > 0) {
+      addonSelections[group.id] = optionIds
+    }
+  })
+
+  return {
+    flavorIds,
+    addonSelections,
+    note: noteDetail ? noteDetail.replace(/^obs(?:ervacao)?\s*:\s*/i, '').trim() : '',
+  }
+}
+
 function orderToCartItems(order = {}, productList = []) {
   const normalizedOrder = normalizeOrderRecord(order)
+  const storedCartItems = Array.isArray(normalizedOrder.cartItems)
+    ? normalizedOrder.cartItems
+    : []
+
+  if (storedCartItems.length > 0) {
+    return storedCartItems.map((item) => normalizeStoredOrderCartItem(item, productList))
+  }
+
   const receiptItems = getReceiptItems(normalizedOrder)
   const totalQuantity = receiptItems.reduce((sum, item) => sum + Math.max(1, Number(item.qty) || 1), 0) || 1
   const fallbackUnitPrice = normalizedOrder.subtotal > 0 ? normalizedOrder.subtotal / totalQuantity : 0
@@ -1925,6 +1963,7 @@ function orderToCartItems(order = {}, productList = []) {
   return receiptItems.map((item, index) => {
     const qty = Math.max(1, Number(item.qty) || 1)
     const matchedProduct = productList.find((product) => normalizeSearchText(product.name) === normalizeSearchText(item.name))
+    const inferredSelections = matchedProduct ? inferOrderCartSelectionsFromReceiptItem(matchedProduct, item) : {}
     const lineTotal = item.price === null || item.price === undefined
       ? ((matchedProduct ? Number(matchedProduct.price) || 0 : fallbackUnitPrice) * qty)
       : Number(item.price) || 0
@@ -1937,9 +1976,11 @@ function orderToCartItems(order = {}, productList = []) {
       qty,
       basePrice: qty > 0 ? lineTotal / qty : lineTotal,
       price: qty > 0 ? lineTotal / qty : lineTotal,
-      flavorNames: Array.isArray(item.details) ? item.details.filter(Boolean) : [],
-      flavorLabel: Array.isArray(item.details) ? item.details.filter(Boolean).join(', ') : '',
-      note: item.note || '',
+      flavorIds: inferredSelections.flavorIds || [],
+      addonSelections: inferredSelections.addonSelections || {},
+      flavorNames: matchedProduct ? [] : Array.isArray(item.details) ? item.details.filter(Boolean) : [],
+      flavorLabel: matchedProduct ? '' : Array.isArray(item.details) ? item.details.filter(Boolean).join(', ') : '',
+      note: item.note || inferredSelections.note || '',
     }, productList)
   })
 }
@@ -1986,6 +2027,20 @@ function orderCartItemToForm(product, item = null) {
     addonSelections: item?.addonSelections ? cloneData(item.addonSelections) : {},
     note: item?.note || '',
   }
+}
+
+function getInitialCartItemEditStep(product, item = null) {
+  const steps = getCartConfigurationSteps(product)
+
+  if (steps.length <= 1 || !item) {
+    return 0
+  }
+
+  const lastSelectedStepIndex = steps.reduce((lastIndex, step, index) => (
+    getCartStepSelectedIds(orderCartItemToForm(product, item), step).length > 0 ? index : lastIndex
+  ), 0)
+
+  return Math.max(0, lastSelectedStepIndex)
 }
 
 function getOrderCartItemLabel(item) {
@@ -6822,6 +6877,7 @@ function App() {
       setSelectedCartItemId(editableCart[0]?.id || null)
       setCartItemForm(blankCartItemForm)
       setCartItemStepIndex(0)
+      setCartItemNoteOpen(false)
       setPosCategory('all')
       setPosSearch('')
       setShowManualTotalInput(false)
@@ -6869,7 +6925,8 @@ function App() {
       }
 
       setCartItemForm(orderCartItemToForm(product, payload))
-      setCartItemStepIndex(0)
+      setCartItemStepIndex(getInitialCartItemEditStep(product, payload))
+      setCartItemNoteOpen(Boolean(payload.note))
     }
 
     if (type === 'newOrder') {
@@ -6879,6 +6936,7 @@ function App() {
       setSelectedCartItemId(null)
       setCartItemForm(blankCartItemForm)
       setCartItemStepIndex(0)
+      setCartItemNoteOpen(false)
       setPosCategory('all')
       setPosSearch('')
       setShowManualTotalInput(false)
@@ -8992,6 +9050,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       items: orderCart.length
         ? orderCart.map(getOrderCartItemLabel)
         : typedItems,
+      cartItems: orderCart.length ? orderCart.map((item) => cloneData(item)) : [],
       printItems: orderCart.length
         ? orderCart.map(getOrderCartPrintItem)
         : [],
@@ -9216,7 +9275,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setPosCategory(product.category)
     setPosSearch('')
     setCartItemForm(orderCartItemToForm(product, cartItem))
-    setCartItemStepIndex(0)
+    setCartItemStepIndex(getInitialCartItemEditStep(product, cartItem))
     setCartItemNoteOpen(Boolean(cartItem.note))
   }
 

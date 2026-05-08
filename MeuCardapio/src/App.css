@@ -2442,7 +2442,8 @@
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 4px;
+  padding-bottom: 18px;
+  scroll-padding-bottom: 18px;
 }
 
 .pos-flavor-card {
