@@ -51,6 +51,7 @@ const blankSignupForm = {
 
 export function StoreAccess({
   demoAvailable = false,
+  initialAccessKey = '',
   users = [],
   onCreateAccount,
   onLogin,
@@ -58,7 +59,7 @@ export function StoreAccess({
   onUseDemo,
 }) {
   const [mode, setMode] = useState('login')
-  const [accessKey, setAccessKey] = useState('')
+  const [accessKey, setAccessKey] = useState(initialAccessKey)
   const [loginForm, setLoginForm] = useState({
     ...blankLoginForm,
     email: users[0]?.email || '',

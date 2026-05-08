@@ -127,6 +127,9 @@ export function StoreProfileForm({
         <Field label="Site ou link principal">
           <input value={value.website} onChange={handleFieldChange('website')} />
         </Field>
+        <Field label="Chave unica de acesso" hint="Use esta chave para liberar entrada em outro dispositivo pelo link ou QR.">
+          <input value={value.accessKey || ''} onChange={handleFieldChange('accessKey')} placeholder="Ex: loja-penha-2026" />
+        </Field>
       </Section>
 
       <Section

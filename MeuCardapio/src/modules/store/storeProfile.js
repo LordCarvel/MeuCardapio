@@ -94,6 +94,7 @@ export function createEmptyStoreProfile() {
     serviceModes: { ...DEFAULT_SERVICE_MODES },
     website: '',
     instagram: '',
+    accessKey: '',
     note: '',
     lat: '',
     lng: '',
@@ -137,6 +138,7 @@ export function normalizeStoreProfile(profile = {}) {
     supportEmail: String(merged.supportEmail || '').trim(),
     taxId: String(merged.taxId || '').trim(),
     stateRegistration: String(merged.stateRegistration || '').trim(),
+    accessKey: String(merged.accessKey || '').trim(),
     serviceModes,
     configuredAt: merged.configuredAt || (hasAnyStoreIdentity(merged) ? merged.verifiedAt || '' : ''),
   }

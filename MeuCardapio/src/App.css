@@ -4030,6 +4030,17 @@
   border: 1px solid #d0d7da;
 }
 
+.public-profile-share__qr:has(img) {
+  display: block;
+  padding: 4px;
+}
+
+.public-profile-share__qr img {
+  display: block;
+  width: 70px;
+  height: 70px;
+}
+
 .public-profile-share__qr span {
   background: #eef4f6;
 }

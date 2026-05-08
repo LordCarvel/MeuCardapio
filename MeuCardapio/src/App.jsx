@@ -47,6 +47,17 @@ function getCustomerStoreIdFromPath() {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function getStoreAccessKeyFromPath() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const match = window.location.pathname.match(/\/acesso\/([^/?#]+)/i)
+  const queryKey = new URLSearchParams(window.location.search).get('chave') || ''
+
+  return match ? decodeURIComponent(match[1]) : queryKey
+}
+
 function normalizePublicBasePath(value = '') {
   const normalized = `/${String(value).trim().replace(/^\/+|\/+$/g, '')}`
 
@@ -78,6 +89,35 @@ function buildPublicAppUrl(path = '/') {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'
 
   return `${origin}${getPublicBasePath()}${cleanPath}`
+}
+
+function normalizeStoreAccessKey(value = '') {
+  return String(value || '').trim().toLowerCase()
+}
+
+function generateStoreAccessKey(profile = {}) {
+  const base = String(profile.name || profile.tradeName || 'loja')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24) || 'loja'
+  const suffix = Math.random().toString(36).slice(2, 8)
+
+  return `${base}-${suffix}`
+}
+
+function buildStoreAccessUrl(accessKey = '') {
+  const normalizedKey = String(accessKey || '').trim()
+
+  return normalizedKey ? buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedKey)}`) : ''
+}
+
+function buildQrImageUrl(value = '') {
+  return value
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(value)}`
+    : ''
 }
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
@@ -2745,6 +2785,43 @@ function splitReceiptItemLabel(label = '') {
   return { qty, name, details, price: null }
 }
 
+function parseReceiptProductName(value = '') {
+  const parts = String(value || '')
+    .split(/\s+-\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const name = parts.shift() || 'Item do pedido'
+  const details = parts.flatMap((part) => {
+    const [, rawValue = ''] = part.match(/:\s*(.+)$/) || []
+    const detail = (rawValue || part).trim()
+
+    return detail
+      .split(/\s*,\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  })
+
+  return { name, details }
+}
+
+function backendItemToReceiptItem(item = {}) {
+  const parsed = parseReceiptProductName(item.productName || item.name || 'Item do pedido')
+  const note = String(item.note || '').trim()
+  const quantity = item.quantity || item.qty || 1
+  const price = item.totalPrice !== undefined && item.totalPrice !== null
+    ? item.totalPrice
+    : item.unitPrice !== undefined && item.unitPrice !== null
+      ? (Number(item.unitPrice) || 0) * (Number(quantity) || 1)
+      : item.price ?? 0
+
+  return {
+    qty: quantity,
+    name: parsed.name,
+    details: [...parsed.details, note ? `Obs: ${note}` : ''].filter(Boolean),
+    price: Number(price) || 0,
+  }
+}
+
 function getReceiptItems(order = {}) {
   if (Array.isArray(order.printItems) && order.printItems.length > 0) {
     return order.printItems.map((item) => ({
@@ -3565,13 +3642,12 @@ function backendOrderToFrontOrder(order = {}) {
   const noteAddress = getBackendNoteValue(order.note, 'Endereco')
   const noteSource = getBackendNoteValue(order.note, 'Origem')
   const items = Array.isArray(order.items) ? order.items : []
-  const mappedItems = items.map((item) => `${item.quantity || 1}x ${item.productName || 'Item do pedido'}`)
-  const printItems = items.map((item) => ({
-    qty: item.quantity || 1,
-    name: item.productName || 'Item do pedido',
-    details: [],
-    price: Number(item.totalPrice ?? item.unitPrice ?? 0) || 0,
-  }))
+  const printItems = items.map(backendItemToReceiptItem)
+  const mappedItems = printItems.map((item) => {
+    const details = item.details.length > 0 ? ` (${item.details.join(' | ')})` : ''
+
+    return `${item.qty}x ${item.name}${details}`
+  })
   const fulfillment = order.fulfillment || 'pickup'
 
   return normalizeOrderRecord({
@@ -6670,6 +6746,7 @@ function App() {
   const [storeAddressLookup, setStoreAddressLookup] = useState({ status: 'idle', message: '' })
   const [storeMapMode, setStoreMapMode] = useState('view')
   const storeFormRef = useRef(initialData.storeProfile)
+  const accessKeyAttemptRef = useRef('')
   const [printerConfig, setPrinterConfig] = useState(normalizePrinterConfig(initialData.printerConfig))
   const [printerForm, setPrinterForm] = useState(printerConfigToForm(initialData.printerConfig))
   const [pilotSync, setPilotSync] = useState(normalizePilotSync(initialData.pilotSync))
@@ -6858,6 +6935,8 @@ function App() {
   const storefrontUrl = storefrontShareId && typeof window !== 'undefined'
     ? buildPublicAppUrl(`/loja/${encodeURIComponent(storefrontShareId)}`)
     : ''
+  const storeAccessUrl = buildStoreAccessUrl(storeProfile.accessKey)
+  const storeAccessKeyFromPath = getStoreAccessKeyFromPath()
   const customerStoreId = getCustomerStoreIdFromPath()
   const customerStore = customerStoreId
     ? resolvedStores.find((store) => store.id === customerStoreId) || null
@@ -6866,6 +6945,17 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceSnapshot))
   }, [workspaceSnapshot])
+
+  useEffect(() => {
+    if (!storeAccessKeyFromPath || hasValidStoreSession || accessKeyAttemptRef.current === storeAccessKeyFromPath) {
+      return
+    }
+
+    accessKeyAttemptRef.current = storeAccessKeyFromPath
+    void openDemoStore({ source: 'accessKey', accessKey: storeAccessKeyFromPath, silent: true })
+    // openDemoStore reads the current workspace; accessKeyAttemptRef prevents repeated attempts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeAccessKeyFromPath, hasValidStoreSession])
 
   useEffect(() => {
     if (!orderCart.some((item) => item.id === selectedCartItemId)) {
@@ -6920,6 +7010,20 @@ function App() {
       notify(copied ? 'Link do perfil publico copiado.' : `Link pronto: ${storefrontUrl}`)
     } catch {
       notify(`Link pronto: ${storefrontUrl}`, 'warning')
+    }
+  }
+
+  async function copyStoreAccessUrl() {
+    if (!storeAccessUrl) {
+      notify('Cadastre uma chave unica de acesso antes de copiar o link.', 'warning')
+      return
+    }
+
+    try {
+      const copied = await copyText(storeAccessUrl)
+      notify(copied ? 'Link de acesso copiado.' : `Link pronto: ${storeAccessUrl}`)
+    } catch {
+      notify(`Link pronto: ${storeAccessUrl}`, 'warning')
     }
   }
 
@@ -7199,6 +7303,17 @@ function App() {
   function handleStoreFormChange(nextStore) {
     storeFormRef.current = nextStore
     setStoreForm(nextStore)
+  }
+
+  function generateAccessKeyForStore() {
+    const nextStore = normalizeStoreProfile({
+      ...storeFormRef.current,
+      accessKey: generateStoreAccessKey(storeFormRef.current),
+    })
+
+    storeFormRef.current = nextStore
+    setStoreForm(nextStore)
+    notify('Chave unica gerada. Salve a loja para liberar o link.')
   }
 
   function notify(message, tone = 'neutral') {
@@ -7733,11 +7848,27 @@ function App() {
   }
 
   function openDemoStore({ source = 'demoButton', accessKey = '' } = {}) {
-    const normalizedKey = String(accessKey || '').trim().toLowerCase()
+    const normalizedKey = normalizeStoreAccessKey(accessKey)
     const usingAccessKey = source === 'accessKey'
 
     if (usingAccessKey && normalizedKey && normalizedKey !== 'demo') {
-      return { ok: false, message: 'Nesta versao local, use a chave demo.' }
+      const matchedStore = resolvedStores.find((store) => normalizeStoreAccessKey(store.snapshot?.storeProfile?.accessKey) === normalizedKey)
+
+      if (!matchedStore) {
+        return { ok: false, message: 'Chave de acesso nao encontrada neste dispositivo.' }
+      }
+
+      const firstUser = matchedStore.snapshot.storeUsers[0]
+      if (!firstUser) {
+        return { ok: false, message: 'Esta loja ainda nao tem usuario cadastrado.' }
+      }
+
+      setActiveStoreId(matchedStore.id)
+      applySnapshot(matchedStore.snapshot, 'Loja carregada pela chave de acesso.')
+      setCurrentStoreUser(buildStoreSession(firstUser, nowDateTime, matchedStore.id))
+      setToast(`Acesso liberado para ${matchedStore.snapshot.storeProfile.name || 'loja'}.`)
+      notify('Acesso liberado pela chave da loja.')
+      return { ok: true }
     }
 
     const existingDemoStore = resolvedStores.find((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))
@@ -9641,11 +9772,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       discountAmount: customerDiscount > 0 ? formatCurrencyInput(customerDiscount) : '0,00',
       note: request.note || 'Pedido vindo do cardapio digital.',
       items: request.items.map((item) => `${item.quantity}x ${item.productName}`),
-      printItems: request.items.map((item) => ({
-        qty: item.quantity,
-        name: item.productName,
-        details: item.note ? [`Obs: ${item.note}`] : [],
-        price: (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1),
+      printItems: request.items.map((item) => backendItemToReceiptItem({
+        ...item,
+        totalPrice: (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1),
       })),
     })
 
@@ -13619,6 +13748,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const whatsappShareUrl = storefrontUrl
         ? `https://wa.me/?text=${encodeURIComponent(shareText)}`
         : ''
+      const accessQrUrl = buildQrImageUrl(storeAccessUrl)
 
       return (
         <Modal title="Perfil publico da loja" subtitle="Link unico do cardapio digital para enviar aos clientes." onClose={closeModal}>
@@ -13658,16 +13788,37 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 </a>
               ) : null}
 
+              <div className="public-profile-share__title">
+                <strong>Acesso da loja</strong>
+                <span>Use este link em outro dispositivo para entrar direto nesta loja.</span>
+              </div>
+
+              <div className="public-profile-share__link">
+                {storeAccessUrl || 'Cadastre uma chave unica nos dados da loja.'}
+              </div>
+
+              <div className="public-profile-share__actions">
+                <Button disabled={!storeAccessUrl} onClick={copyStoreAccessUrl}>
+                  Copiar acesso
+                </Button>
+                {storeAccessUrl ? (
+                  <a className="btn" href={storeAccessUrl} target="_blank" rel="noreferrer">
+                    <Icon name="arrow" size={15} />
+                    Abrir acesso
+                  </a>
+                ) : null}
+              </div>
+
               <div className="public-profile-share__card">
                 <div className="public-profile-share__qr" aria-hidden="true">
-                  {Array.from({ length: 25 }, (_, index) => (
+                  {accessQrUrl ? <img alt="" src={accessQrUrl} /> : Array.from({ length: 25 }, (_, index) => (
                     <span key={index} className={index % 2 === 0 || index % 7 === 0 ? 'is-dark' : ''} />
                   ))}
                 </div>
                 <span>
-                  <strong>CARDAPIO DIGITAL PARA REDES SOCIAIS</strong>
+                  <strong>{storeAccessUrl ? 'QR DE ACESSO DA LOJA' : 'CARDAPIO DIGITAL PARA REDES SOCIAIS'}</strong>
                   <small>{publicStoreCategory}</small>
-                  <small>{publicStoreAddress || storeProfile.phone || 'Perfil publico da loja'}</small>
+                  <small>{storeAccessUrl || publicStoreAddress || storeProfile.phone || 'Perfil publico da loja'}</small>
                 </span>
               </div>
             </div>
@@ -13716,6 +13867,20 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               showMapTools
               value={storeForm}
             />
+            <section className="settings-inline-panel">
+              <header>
+                <span>Acesso da loja</span>
+                <strong>Link unico e QR</strong>
+              </header>
+              <div className="settings-inline-panel__grid">
+                <Field label="Link liberado pela chave">
+                  <input readOnly value={buildStoreAccessUrl(storeForm.accessKey)} placeholder="Gere ou preencha uma chave unica acima" />
+                </Field>
+                <Field label="Gerador">
+                  <Button onClick={generateAccessKeyForStore} type="button">Gerar chave</Button>
+                </Field>
+              </div>
+            </section>
             <section className="settings-inline-panel">
               <header>
                 <span>Pedidos online</span>
@@ -14158,6 +14323,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       <StoreAccess
         key={activeStoreId || 'access'}
         demoAvailable={resolvedStores.some((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))}
+        initialAccessKey={storeAccessKeyFromPath}
         onCreateAccount={createOnlineStoreAccount}
         onLogin={loginStoreUser}
         onResetPassword={handlePasswordReset}
