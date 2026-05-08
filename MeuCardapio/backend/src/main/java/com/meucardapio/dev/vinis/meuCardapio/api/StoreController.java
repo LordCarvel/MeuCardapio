@@ -84,6 +84,7 @@ public class StoreController {
         store.setCityName(request.cityName());
         store.setState(request.state());
         store.setSchedule(request.schedule());
+        store.setAccessKey(request.accessKey());
         store.setMinimumOrder(request.minimumOrder() == null ? BigDecimal.ZERO : request.minimumOrder());
         store.setDeliveryRadiusKm(request.deliveryRadiusKm() == null ? BigDecimal.valueOf(5) : request.deliveryRadiusKm());
     }

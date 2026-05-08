@@ -26,6 +26,7 @@ public final class StoreDtos {
             String cityName,
             String state,
             String schedule,
+            String accessKey,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm) {
     }
@@ -44,6 +45,7 @@ public final class StoreDtos {
             String cityName,
             String state,
             String schedule,
+            String accessKey,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm,
             LocalDateTime createdAt) {
@@ -62,6 +64,7 @@ public final class StoreDtos {
                     store.getCityName(),
                     store.getState(),
                     store.getSchedule(),
+                    store.getAccessKey(),
                     store.getMinimumOrder(),
                     store.getDeliveryRadiusKm(),
                     store.getCreatedAt());

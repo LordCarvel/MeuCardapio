@@ -193,6 +193,13 @@ export async function createBackendStore(store) {
   })
 }
 
+export async function updateBackendStore(storeId, store) {
+  return request(`/stores/${storeId}`, {
+    method: 'PUT',
+    body: JSON.stringify(store),
+  })
+}
+
 export async function getBackendStore(storeId) {
   return request(`/stores/${storeId}`)
 }

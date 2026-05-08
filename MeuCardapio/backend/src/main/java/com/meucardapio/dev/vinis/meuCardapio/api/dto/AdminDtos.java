@@ -62,6 +62,7 @@ public final class AdminDtos {
             String cityName,
             String state,
             String schedule,
+            String accessKey,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm,
             @NotBlank String code,

@@ -32,6 +32,8 @@ public class Store {
     private String cityName;
     private String state;
     private String schedule;
+    @Column(name = "access_key")
+    private String accessKey;
     @Column(nullable = false)
     private BigDecimal minimumOrder;
     @Column(nullable = false)
@@ -80,6 +82,8 @@ public class Store {
     public void setState(String state) { this.state = state; }
     public String getSchedule() { return schedule; }
     public void setSchedule(String schedule) { this.schedule = schedule; }
+    public String getAccessKey() { return accessKey; }
+    public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
     public BigDecimal getMinimumOrder() { return minimumOrder; }
     public void setMinimumOrder(BigDecimal minimumOrder) { this.minimumOrder = minimumOrder; }
     public BigDecimal getDeliveryRadiusKm() { return deliveryRadiusKm; }

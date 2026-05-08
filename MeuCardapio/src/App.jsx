@@ -17,6 +17,7 @@ import {
   requestSignupCode,
   resetBackendPassword,
   signupBackendAccount,
+  updateBackendStore,
   updateBackendOrder,
   updateBackendOrderStatus,
 } from './modules/backend/backendApi'
@@ -47,15 +48,19 @@ function getCustomerStoreIdFromPath() {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
-function getStoreAccessKeyFromPath() {
+function getStoreAccessFromPath() {
   if (typeof window === 'undefined') {
-    return ''
+    return { storeId: '', accessKey: '' }
   }
 
-  const match = window.location.pathname.match(/\/acesso\/([^/?#]+)/i)
+  const match = window.location.pathname.match(/\/acesso\/([^/?#]+)(?:\/([^/?#]+))?/i)
   const queryKey = new URLSearchParams(window.location.search).get('chave') || ''
+  const queryStoreId = new URLSearchParams(window.location.search).get('loja') || ''
 
-  return match ? decodeURIComponent(match[1]) : queryKey
+  return {
+    storeId: match?.[2] ? decodeURIComponent(match[1]) : queryStoreId,
+    accessKey: match ? decodeURIComponent(match[2] || match[1]) : queryKey,
+  }
 }
 
 function normalizePublicBasePath(value = '') {
@@ -108,10 +113,17 @@ function generateStoreAccessKey(profile = {}) {
   return `${base}-${suffix}`
 }
 
-function buildStoreAccessUrl(accessKey = '') {
+function buildStoreAccessUrl(accessKey = '', storeId = '') {
   const normalizedKey = String(accessKey || '').trim()
+  const normalizedStoreId = String(storeId || '').trim()
 
-  return normalizedKey ? buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedKey)}`) : ''
+  if (!normalizedKey) {
+    return ''
+  }
+
+  return normalizedStoreId
+    ? buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedStoreId)}/${encodeURIComponent(normalizedKey)}`)
+    : buildPublicAppUrl(`/acesso/${encodeURIComponent(normalizedKey)}`)
 }
 
 function buildQrImageUrl(value = '') {
@@ -3676,6 +3688,109 @@ function backendOrderToFrontOrder(order = {}) {
   })
 }
 
+function backendStoreToProfile(store = {}) {
+  return normalizeStoreProfile({
+    tradeName: store.tradeName || '',
+    owner: store.ownerName || '',
+    phone: store.phone || '',
+    whatsapp: store.phone || '',
+    email: store.email || '',
+    taxId: store.taxId || '',
+    category: store.category || 'Restaurante',
+    street: store.street || '',
+    number: store.number || '',
+    district: store.district || '',
+    cityName: store.cityName || '',
+    state: store.state || 'SC',
+    schedule: store.schedule || '',
+    accessKey: store.accessKey || '',
+    minimumOrder: formatCurrencyInput(store.minimumOrder || 0),
+    deliveryRadius: String(store.deliveryRadiusKm || 5),
+  })
+}
+
+function storeProfileToBackendRequest(profile = {}) {
+  const normalized = normalizeStoreProfile(profile)
+
+  return {
+    tradeName: normalized.tradeName || normalized.name || 'Minha loja',
+    ownerName: normalized.owner || normalized.manager || 'Responsavel',
+    email: normalized.email || normalized.supportEmail || 'loja@meucardapio.local',
+    phone: normalized.phone || normalized.whatsapp || '(00) 00000-0000',
+    taxId: normalized.taxId || '00.000.000/0001-00',
+    category: normalized.category || 'Restaurante',
+    street: normalized.street || '',
+    number: normalized.number || '',
+    district: normalized.district || '',
+    cityName: normalized.cityName || '',
+    state: normalized.state || 'SC',
+    schedule: normalized.schedule || '',
+    accessKey: normalized.accessKey || '',
+    minimumOrder: parseCurrencyInput(normalized.minimumOrder),
+    deliveryRadiusKm: Number(normalized.deliveryRadius) || 5,
+  }
+}
+
+function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
+  const profile = backendStoreToProfile({
+    ...(workspace.store || {}),
+    accessKey: workspace.store?.accessKey || accessKey,
+  })
+  const categories = Array.isArray(workspace.categories)
+    ? workspace.categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        imageUrl: category.imageUrl || '',
+        active: category.active !== false,
+      }))
+    : []
+  const fallbackCategory = categories[0]?.name || 'Cardapio'
+  const products = Array.isArray(workspace.products)
+    ? workspace.products.map((product) => normalizeProduct({
+        id: product.id,
+        name: product.name,
+        description: product.description || '',
+        imageUrl: product.imageUrl || '',
+        category: product.categoryName || categories.find((category) => category.id === product.categoryId)?.name || fallbackCategory,
+        price: Number(product.price) || 0,
+        active: product.active !== false,
+      }, fallbackCategory))
+    : []
+  const orders = Array.isArray(workspace.orders) ? workspace.orders.map(backendOrderToFrontOrder) : []
+  const accessUser = normalizeStoreUser({
+    id: `access-${workspace.store?.id || Date.now()}`,
+    name: 'Dispositivo autorizado',
+    email: profile.email || 'acesso@meucardapio.local',
+    password: '',
+    role: 'owner',
+    createdAt: nowDateTime(),
+  })
+  const snapshot = normalizeAppSnapshot({
+    ...createDefaultAppData(),
+    storeProfile: profile,
+    categories,
+    products,
+    orders,
+    storeUsers: [accessUser],
+    pilotSync: normalizePilotSync({
+      ...initialPilotSync,
+      enabled: true,
+      status: 'online',
+      storeId: workspace.store?.id || '',
+      storeName: profile.name,
+      lastCheckedAt: nowDateTime(),
+      lastSyncedAt: nowDateTime(),
+      message: 'Loja carregada pela chave de acesso.',
+    }),
+  })
+
+  return {
+    id: workspace.store?.id || `store-access-${Date.now()}`,
+    snapshot,
+    user: accessUser,
+  }
+}
+
 function mergeBackendOrderIntoLocal(localOrder, backendOrder) {
   const mapped = backendOrderToFrontOrder(backendOrder)
 
@@ -6935,8 +7050,10 @@ function App() {
   const storefrontUrl = storefrontShareId && typeof window !== 'undefined'
     ? buildPublicAppUrl(`/loja/${encodeURIComponent(storefrontShareId)}`)
     : ''
-  const storeAccessUrl = buildStoreAccessUrl(storeProfile.accessKey)
-  const storeAccessKeyFromPath = getStoreAccessKeyFromPath()
+  const storeAccessUrl = buildStoreAccessUrl(storeProfile.accessKey, pilotSync.storeId || activeStoreId)
+  const storeAccessFromPath = getStoreAccessFromPath()
+  const storeAccessKeyFromPath = storeAccessFromPath.accessKey
+  const storeAccessIdFromPath = storeAccessFromPath.storeId
   const customerStoreId = getCustomerStoreIdFromPath()
   const customerStore = customerStoreId
     ? resolvedStores.find((store) => store.id === customerStoreId) || null
@@ -6947,15 +7064,16 @@ function App() {
   }, [workspaceSnapshot])
 
   useEffect(() => {
-    if (!storeAccessKeyFromPath || hasValidStoreSession || accessKeyAttemptRef.current === storeAccessKeyFromPath) {
+    const accessAttemptKey = `${storeAccessIdFromPath}:${storeAccessKeyFromPath}`
+    if (!storeAccessKeyFromPath || hasValidStoreSession || accessKeyAttemptRef.current === accessAttemptKey) {
       return
     }
 
-    accessKeyAttemptRef.current = storeAccessKeyFromPath
-    void openDemoStore({ source: 'accessKey', accessKey: storeAccessKeyFromPath, silent: true })
+    accessKeyAttemptRef.current = accessAttemptKey
+    void openDemoStore({ source: 'accessKey', accessKey: storeAccessKeyFromPath, storeId: storeAccessIdFromPath, silent: true })
     // openDemoStore reads the current workspace; accessKeyAttemptRef prevents repeated attempts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeAccessKeyFromPath, hasValidStoreSession])
+  }, [storeAccessKeyFromPath, storeAccessIdFromPath, hasValidStoreSession])
 
   useEffect(() => {
     if (!orderCart.some((item) => item.id === selectedCartItemId)) {
@@ -7658,6 +7776,7 @@ function App() {
     }
 
     try {
+      const initialAccessKey = generateStoreAccessKey({ tradeName: account.tradeName })
       const localStore = createStoreRecord({
         profile: {
           tradeName: account.tradeName,
@@ -7673,6 +7792,7 @@ function App() {
           cityName: account.cityName,
           state: account.state || 'SC',
           schedule: account.schedule,
+          accessKey: initialAccessKey,
           minimumOrder: '0,00',
           deliveryRadius: '5',
         },
@@ -7700,6 +7820,7 @@ function App() {
         cityName: account.cityName,
         state: account.state || 'SC',
         schedule: account.schedule,
+        accessKey: initialAccessKey,
         minimumOrder: 0,
         deliveryRadiusKm: 5,
         password,
@@ -7783,23 +7904,7 @@ function App() {
 
       const backendStore = await getBackendStore(login.user.storeId)
       const localStore = createStoreRecord({
-        profile: {
-          tradeName: backendStore.tradeName,
-          owner: backendStore.ownerName,
-          phone: backendStore.phone,
-          whatsapp: backendStore.phone,
-          email: backendStore.email,
-          taxId: backendStore.taxId,
-          category: backendStore.category,
-          street: backendStore.street || '',
-          number: backendStore.number || '',
-          district: backendStore.district || '',
-          cityName: backendStore.cityName || '',
-          state: backendStore.state || 'SC',
-          schedule: backendStore.schedule || '',
-          minimumOrder: formatCurrencyInput(backendStore.minimumOrder || 0),
-          deliveryRadius: String(backendStore.deliveryRadiusKm || 5),
-        },
+        profile: backendStoreToProfile(backendStore),
         owner: {
           name: login.user.name,
           email: login.user.email,
@@ -7847,28 +7952,57 @@ function App() {
     setToast('Sessao encerrada.')
   }
 
-  function openDemoStore({ source = 'demoButton', accessKey = '' } = {}) {
+  async function openDemoStore({ source = 'demoButton', accessKey = '', storeId = '' } = {}) {
     const normalizedKey = normalizeStoreAccessKey(accessKey)
     const usingAccessKey = source === 'accessKey'
 
     if (usingAccessKey && normalizedKey && normalizedKey !== 'demo') {
       const matchedStore = resolvedStores.find((store) => normalizeStoreAccessKey(store.snapshot?.storeProfile?.accessKey) === normalizedKey)
 
-      if (!matchedStore) {
-        return { ok: false, message: 'Chave de acesso nao encontrada neste dispositivo.' }
+      if (matchedStore) {
+        const firstUser = matchedStore.snapshot.storeUsers[0]
+        if (!firstUser) {
+          return { ok: false, message: 'Esta loja ainda nao tem usuario cadastrado.' }
+        }
+
+        setActiveStoreId(matchedStore.id)
+        applySnapshot(matchedStore.snapshot, 'Loja carregada pela chave de acesso.')
+        setCurrentStoreUser(buildStoreSession(firstUser, nowDateTime, matchedStore.id))
+        setToast(`Acesso liberado para ${matchedStore.snapshot.storeProfile.name || 'loja'}.`)
+        notify('Acesso liberado pela chave da loja.')
+        return { ok: true }
       }
 
-      const firstUser = matchedStore.snapshot.storeUsers[0]
-      if (!firstUser) {
-        return { ok: false, message: 'Esta loja ainda nao tem usuario cadastrado.' }
+      if (!storeId) {
+        return { ok: false, message: 'Link antigo sem ID da loja. Gere um novo QR/link em Perfil publico.' }
       }
 
-      setActiveStoreId(matchedStore.id)
-      applySnapshot(matchedStore.snapshot, 'Loja carregada pela chave de acesso.')
-      setCurrentStoreUser(buildStoreSession(firstUser, nowDateTime, matchedStore.id))
-      setToast(`Acesso liberado para ${matchedStore.snapshot.storeProfile.name || 'loja'}.`)
-      notify('Acesso liberado pela chave da loja.')
-      return { ok: true }
+      try {
+        const workspace = await loadBackendWorkspace(storeId)
+        if (!workspace.store) {
+          return { ok: false, message: 'Loja nao encontrada na API.' }
+        }
+
+        if (normalizeStoreAccessKey(workspace.store.accessKey) !== normalizedKey) {
+          return { ok: false, message: 'Chave de acesso nao confere com a loja.' }
+        }
+
+        const nextStore = backendWorkspaceToStoreRecord(workspace, accessKey)
+        const nextStores = [...resolvedStores.filter((store) => store.id !== nextStore.id), {
+          id: nextStore.id,
+          snapshot: nextStore.snapshot,
+        }]
+
+        setStores(nextStores)
+        setActiveStoreId(nextStore.id)
+        applySnapshot(nextStore.snapshot, 'Loja carregada pela chave de acesso.')
+        setCurrentStoreUser(buildStoreSession(nextStore.user, nowDateTime, nextStore.id))
+        setToast(`Acesso liberado para ${nextStore.snapshot.storeProfile.name || 'loja'}.`)
+        notify('Acesso liberado pela chave da loja.')
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel carregar a loja pela chave.' }
+      }
     }
 
     const existingDemoStore = resolvedStores.find((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))
@@ -8245,9 +8379,19 @@ function App() {
     return enqueuePrintJob(printDocument.label, printDocument.type, printDocument, { printNow: true, ...options })
   }
 
-  function saveStoreProfile(event) {
+  async function saveStoreProfile(event) {
     event.preventDefault()
     const nextStore = normalizeStoreProfile(storeFormRef.current)
+    const backendStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')
+
+    if (backendStoreId) {
+      try {
+        await updateBackendStore(backendStoreId, storeProfileToBackendRequest(nextStore))
+      } catch (err) {
+        notify(`Loja salva localmente, mas a API nao atualizou: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
+      }
+    }
+
     setStoreProfile(nextStore)
     setStoreForm(nextStore)
     storeFormRef.current = nextStore
@@ -13874,7 +14018,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               </header>
               <div className="settings-inline-panel__grid">
                 <Field label="Link liberado pela chave">
-                  <input readOnly value={buildStoreAccessUrl(storeForm.accessKey)} placeholder="Gere ou preencha uma chave unica acima" />
+                  <input readOnly value={buildStoreAccessUrl(storeForm.accessKey, pilotSync.storeId || activeStoreId)} placeholder="Gere ou preencha uma chave unica acima" />
                 </Field>
                 <Field label="Gerador">
                   <Button onClick={generateAccessKeyForStore} type="button">Gerar chave</Button>
