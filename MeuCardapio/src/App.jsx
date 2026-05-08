@@ -1823,22 +1823,33 @@ function isCartStepSelectionValid(step, cartForm) {
 }
 
 function getSelectedCartFlavorNames(product, flavorIds = []) {
-  const selectedIds = new Set(flavorIds)
+  const activeFlavorById = new Map(getActiveProductFlavors(product).map((flavor) => [flavor.id, flavor]))
 
-  return getActiveProductFlavors(product)
-    .filter((flavor) => selectedIds.has(flavor.id))
-    .map((flavor) => flavor.name)
+  return (Array.isArray(flavorIds) ? flavorIds : [])
+    .map((flavorId) => activeFlavorById.get(flavorId)?.name || '')
+    .filter(Boolean)
+}
+
+function formatRepeatedCartNames(names = []) {
+  const counts = new Map()
+
+  names.forEach((name) => {
+    counts.set(name, (counts.get(name) || 0) + 1)
+  })
+
+  return Array.from(counts.entries())
+    .map(([name, count]) => (count > 1 ? `${count}x ${name}` : name))
+    .join(', ')
 }
 
 function getCartItemFlavorLabel(product, flavorIds = []) {
-  return getSelectedCartFlavorNames(product, flavorIds).join(', ')
+  return formatRepeatedCartNames(getSelectedCartFlavorNames(product, flavorIds))
 }
 
 function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
-  const selectedIds = new Set(flavorIds)
-  const flavorExtras = getActiveProductFlavors(product)
-    .filter((flavor) => selectedIds.has(flavor.id))
-    .reduce((sum, flavor) => sum + (Number(flavor.price) || 0), 0)
+  const activeFlavorById = new Map(getActiveProductFlavors(product).map((flavor) => [flavor.id, flavor]))
+  const flavorExtras = (Array.isArray(flavorIds) ? flavorIds : [])
+    .reduce((sum, flavorId) => sum + (Number(activeFlavorById.get(flavorId)?.price) || 0), 0)
   const activeGroups = getActiveProductAddonGroups(product)
   const addonExtras = getSelectedCartAddonEntries(product, addonSelections)
     .reduce((sum, entry) => {
@@ -1856,7 +1867,12 @@ function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
 }
 
 function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, qty = 1, flavorIds = [], addonSelections = {}, note = '' } = {}) {
-  const normalizedFlavorIds = Array.from(new Set(flavorIds))
+  const activeFlavorIds = new Set(getActiveProductFlavors(product).map((flavor) => flavor.id))
+  const maxFlavors = Math.max(1, Number(product?.maxFlavors) || 1)
+  const selectedFlavorIds = (Array.isArray(flavorIds) ? flavorIds : [])
+    .filter((flavorId) => activeFlavorIds.has(flavorId))
+  const normalizedFlavorIds = (isComboProduct(product) ? selectedFlavorIds : Array.from(new Set(selectedFlavorIds)))
+    .slice(0, maxFlavors)
   const flavorNames = getSelectedCartFlavorNames(product, normalizedFlavorIds)
   const normalizedAddonSelections = normalizeCartAddonSelections(product, addonSelections)
   const addonEntries = getSelectedCartAddonEntries(product, normalizedAddonSelections)
@@ -1871,7 +1887,7 @@ function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.rand
     price: getCartItemUnitPrice(product, normalizedFlavorIds, normalizedAddonSelections),
     flavorIds: normalizedFlavorIds,
     flavorNames,
-    flavorLabel: flavorNames.join(', '),
+    flavorLabel: formatRepeatedCartNames(flavorNames),
     addonSelections: normalizedAddonSelections,
     addonEntries,
     maxFlavors: Math.max(1, Number(product.maxFlavors) || 1),
@@ -2742,6 +2758,16 @@ function getReceiptItems(order = {}) {
   return (Array.isArray(order.items) ? order.items : []).map(splitReceiptItemLabel)
 }
 
+function getReceiptDetailRows(details = []) {
+  const counts = new Map()
+
+  details.filter(Boolean).forEach((detail) => {
+    counts.set(detail, (counts.get(detail) || 0) + 1)
+  })
+
+  return Array.from(counts.entries()).map(([detail, qty]) => ({ detail, qty }))
+}
+
 function buildReceiptItemsHtml(order = {}) {
   const receiptItems = getReceiptItems(order)
 
@@ -2756,7 +2782,7 @@ function buildReceiptItemsHtml(order = {}) {
         <span>(${escapeHtml(item.qty)}) ${escapeHtml(item.name)}</span>
         <strong>${item.price === null ? '-' : formatReceiptCurrency(item.price)}</strong>
       </div>
-      ${item.details.map((detail) => `<div class="receipt-item__detail">(1) ${escapeHtml(detail)} <span>-</span></div>`).join('')}
+      ${getReceiptDetailRows(item.details).map(({ detail, qty }) => `<div class="receipt-item__detail">(${escapeHtml(qty)}) ${escapeHtml(detail)} <span>-</span></div>`).join('')}
     </div>
   `).join('')
 }
@@ -2784,6 +2810,7 @@ function getPrintableOrderNote(order = {}) {
     .split('|')
     .map((part) => part.trim())
     .filter(Boolean)
+    .filter((part) => !/^pedido local\s*#/i.test(part))
     .map((part) => {
       const [, label = '', value = ''] = part.match(/^([^:]+):\s*(.*)$/) || []
       const normalizedLabel = normalizeSearchText(label)
@@ -2801,6 +2828,18 @@ function getPrintableOrderNote(order = {}) {
     .filter(Boolean)
     .filter((part) => !ignoredExactNotes.has(normalizeSearchText(part)))
     .join(' | ')
+}
+
+function getReceiptCustomerAddress(order = {}) {
+  const normalizedAddress = String(order.address || '').trim()
+  const noteAddress = getBackendNoteValue(order.note, 'Endereco')
+  const fallbackAddress = order.fulfillment === 'pickup' ? 'Retirada no balcao' : ''
+
+  if (noteAddress && (!normalizedAddress || noteAddress.length > normalizedAddress.length)) {
+    return noteAddress
+  }
+
+  return normalizedAddress || fallbackAddress
 }
 
 function createPrinterTestOrder() {
@@ -2845,7 +2884,7 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
   const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
   const showFinancials = normalizedConfig.showFinancials && variant !== 'kitchen'
   const storeName = storeProfile.name || storeProfile.tradeName || 'MeuCardapio'
-  const customerAddress = normalizedOrder.address || (normalizedOrder.fulfillment === 'pickup' ? 'Retirada no balcao' : '')
+  const customerAddress = getReceiptCustomerAddress(normalizedOrder)
   const printableNote = getPrintableOrderNote(normalizedOrder)
   const note = printableNote && normalizedConfig.showNotes
     ? `
@@ -3729,11 +3768,15 @@ function OsmDeliveryMap({
     : null
 
   useEffect(() => {
-    setViewCenter({
-      lat: normalizeCoordinate(center?.lat) ?? DEFAULT_MAP_COORDINATES.lat,
-      lng: normalizeCoordinate(center?.lng) ?? DEFAULT_MAP_COORDINATES.lng,
-    })
-    setViewZoom(zoom)
+    const timeoutId = window.setTimeout(() => {
+      setViewCenter({
+        lat: normalizeCoordinate(center?.lat) ?? DEFAULT_MAP_COORDINATES.lat,
+        lng: normalizeCoordinate(center?.lng) ?? DEFAULT_MAP_COORDINATES.lng,
+      })
+      setViewZoom(zoom)
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [center?.lat, center?.lng, zoom])
 
   useEffect(() => {
@@ -4655,20 +4698,6 @@ function getOrderSource(order) {
   return remoteSources[Number(order.id) % remoteSources.length]
 }
 
-function getSourceTone(source) {
-  const tones = {
-    WhatsApp: 'success',
-    iFood: 'danger',
-    Instagram: 'warning',
-    'Cardapio Digital': 'neutral',
-    Balcao: 'muted',
-    Mesa: 'warning',
-    Salao: 'warning',
-  }
-
-  return tones[source] || 'neutral'
-}
-
 function getOrderStageLabel(status) {
   const labels = {
     analysis: 'Em analise',
@@ -4778,12 +4807,6 @@ function ServiceInbox({ orders, chatMessages, onOpenModal }) {
     }))
   const [selectedConversationId, setSelectedConversationId] = useState(inbox[0]?.id || null)
 
-  useEffect(() => {
-    if (!inbox.some((conversation) => conversation.id === selectedConversationId)) {
-      setSelectedConversationId(inbox[0]?.id || null)
-    }
-  }, [inbox, selectedConversationId])
-
   const selectedConversation = inbox.find((conversation) => conversation.id === selectedConversationId) || inbox[0] || null
   const latestChat = chatMessages[chatMessages.length - 1]
 
@@ -4864,12 +4887,6 @@ function ServiceInbox({ orders, chatMessages, onOpenModal }) {
 function MenuPreviewPanel({ storeProfile, categories, products, coupons, qrCodes, onOpenModal }) {
   const activeProducts = products.filter(isProductAvailable)
   const [previewProductId, setPreviewProductId] = useState(activeProducts[0]?.id || null)
-
-  useEffect(() => {
-    if (!activeProducts.some((product) => product.id === previewProductId)) {
-      setPreviewProductId(activeProducts[0]?.id || null)
-    }
-  }, [activeProducts, previewProductId])
 
   const previewProduct = activeProducts.find((product) => product.id === previewProductId) || activeProducts[0] || null
   const upsellProducts = activeProducts.filter((product) => product.id !== previewProduct?.id).slice(0, 3)
@@ -4968,12 +4985,6 @@ function MenuPreviewPanel({ storeProfile, categories, products, coupons, qrCodes
 
 function WaiterConsole({ tables, orders, qrCodes, onOpenModal }) {
   const [activeTableId, setActiveTableId] = useState(tables[0]?.id || null)
-
-  useEffect(() => {
-    if (!tables.some((table) => table.id === activeTableId)) {
-      setActiveTableId(tables[0]?.id || null)
-    }
-  }, [tables, activeTableId])
 
   const activeTable = tables.find((table) => table.id === activeTableId) || tables[0] || null
 
@@ -5391,19 +5402,13 @@ function MenuSection({
     Object.fromEntries(products.map((product, index) => [product.id, index === 0])),
   )
 
-  useEffect(() => {
-    setExpandedCategories((current) =>
-      Object.fromEntries(categories.map((category, index) => [category.id, current[category.id] ?? index === 0])),
-    )
-  }, [categories])
-
-  useEffect(() => {
-    setExpandedProducts((current) =>
-      Object.fromEntries(products.map((product, index) => [product.id, current[product.id] ?? index === 0])),
-    )
-  }, [products])
-
   const normalizedSearch = menuSearch.trim().toLowerCase()
+  const resolvedExpandedCategories = useMemo(() => (
+    Object.fromEntries(categories.map((category, index) => [category.id, expandedCategories[category.id] ?? index === 0]))
+  ), [categories, expandedCategories])
+  const resolvedExpandedProducts = useMemo(() => (
+    Object.fromEntries(products.map((product, index) => [product.id, expandedProducts[product.id] ?? index === 0]))
+  ), [expandedProducts, products])
   const qualityPercent = Math.min(
     98,
     Math.round(
@@ -5497,7 +5502,7 @@ function MenuSection({
       <div className="menu-manager__scroll">
         <div className="menu-category-stack">
           {categoryCards.length > 0 ? categoryCards.map(({ category, visibleProducts, totalProducts }) => {
-            const isCategoryExpanded = normalizedSearch ? true : Boolean(expandedCategories[category.id])
+            const isCategoryExpanded = normalizedSearch ? true : Boolean(resolvedExpandedCategories[category.id])
 
             return (
               <article className={`menu-category-card ${isCategoryExpanded ? 'is-open' : ''}`.trim()} key={category.id}>
@@ -5571,7 +5576,7 @@ function MenuSection({
                   <div className="menu-category-card__body">
                     {visibleProducts.length > 0 ? visibleProducts.map((product) => {
       const thumbClass = getMenuProductThumbClass(product)
-      const isProductExpanded = normalizedSearch ? true : Boolean(expandedProducts[product.id])
+      const isProductExpanded = normalizedSearch ? true : Boolean(resolvedExpandedProducts[product.id])
       const isProductExhausted = isProductExhaustedInCategory(product, category.name)
       const sourceLabel = product.category === category.name ? 'Principal' : `Importado de ${product.category}`
 
@@ -6527,6 +6532,7 @@ function App() {
   const menuImportInputRef = useRef(null)
   const geocodeCacheRef = useRef(new Map())
   const nominatimLastRequestRef = useRef(0)
+  const refreshPilotFromBackendRef = useRef(null)
   const [stores, setStores] = useState(initialWorkspace.stores)
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
 
@@ -6542,7 +6548,6 @@ function App() {
   const [modal, setModal] = useState(null)
   const [newOrder, setNewOrder] = useState(blankOrder)
   const [showManualTotalInput, setShowManualTotalInput] = useState(false)
-  const [showFiscalField, setShowFiscalField] = useState(false)
   const [orderPanel, setOrderPanel] = useState(null)
   const [editingOrderId, setEditingOrderId] = useState(null)
   const [paymentDraft, setPaymentDraft] = useState(blankOrder.payment)
@@ -6839,13 +6844,15 @@ function App() {
     }
   }, [deliveryTabDraft, orderAddresses, selectedAddressDraftId])
 
+  refreshPilotFromBackendRef.current = refreshPilotFromBackend
+
   useEffect(() => {
     if (customerStoreId || !hasValidStoreSession || !isStoreReady || !pilotSync.enabled || !pilotSync.storeId) {
       return undefined
     }
 
     const intervalId = window.setInterval(() => {
-      void refreshPilotFromBackend({ silent: true })
+      void refreshPilotFromBackendRef.current?.({ silent: true })
     }, 6000)
 
     return () => window.clearInterval(intervalId)
@@ -6924,7 +6931,6 @@ function App() {
       setPosCategory('all')
       setPosSearch('')
       setShowManualTotalInput(false)
-      setShowFiscalField(Boolean(payload.document))
       setOrderPanel(null)
       setModal({ type: 'newOrder', payload })
       return
@@ -6983,7 +6989,6 @@ function App() {
       setPosCategory('all')
       setPosSearch('')
       setShowManualTotalInput(false)
-      setShowFiscalField(false)
       setOrderPanel(null)
     }
 
@@ -8875,7 +8880,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       ...current,
       document: documentDraft.trim(),
     }))
-    setShowFiscalField(Boolean(documentDraft.trim()))
     setOrderPanel(null)
   }
 
@@ -8939,7 +8943,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     setCartItemForm(blankCartItemForm)
     setCartItemStepIndex(0)
     setShowManualTotalInput(Boolean(draftOrder.discountValue || draftOrder.surchargeValue || draft.data.newOrder?.total) && (draft.data.orderCart?.length ?? 0) > 0)
-    setShowFiscalField(Boolean(draft.data.newOrder?.document))
     setOrderPanel(null)
     reopenOrderEditor()
     notify(`Rascunho "${draft.label}" carregado.`)
@@ -9345,6 +9348,17 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
   function toggleCartItemFlavor(flavorId, maxFlavors, product) {
     const isSelected = cartItemForm.flavorIds.includes(flavorId)
+    const allowsRepeatedFlavor = isComboProduct(product) && maxFlavors > 1
+
+    if (allowsRepeatedFlavor) {
+      if (cartItemForm.flavorIds.length >= maxFlavors) {
+        notify(`Escolha no maximo ${maxFlavors} ${getFlavorEntityLabel(product, true)}.`, 'warning')
+        return
+      }
+
+      setCartItemForm((current) => ({ ...current, flavorIds: [...current.flavorIds, flavorId] }))
+      return
+    }
 
     if (!isSelected && maxFlavors > 1 && cartItemForm.flavorIds.length >= maxFlavors) {
       notify(`Escolha no maximo ${maxFlavors} ${getFlavorEntityLabel(product, true)}.`, 'warning')
@@ -9361,6 +9375,21 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       }
 
       return { ...current, flavorIds: [...current.flavorIds, flavorId] }
+    })
+  }
+
+  function removeCartItemFlavor(flavorId) {
+    setCartItemForm((current) => {
+      const flavorIndex = current.flavorIds.lastIndexOf(flavorId)
+
+      if (flavorIndex < 0) {
+        return current
+      }
+
+      return {
+        ...current,
+        flavorIds: current.flavorIds.filter((currentId, index) => currentId !== flavorId || index !== flavorIndex),
+      }
     })
   }
 
@@ -10469,25 +10498,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     closeModal()
   }
 
-  function stockAdjust(stockId, delta) {
-    let nextStock = null
-
-    setInventory((current) =>
-      current.map((stock) => {
-        if (stock.id !== stockId) {
-          return stock
-        }
-
-        nextStock = { ...stock, quantity: Math.max(0, stock.quantity + delta) }
-        return nextStock
-      }),
-    )
-
-    if (nextStock && settings.lowStockAlert && nextStock.quantity <= nextStock.min) {
-      notify(`Alerta: ${nextStock.item} ficou abaixo do minimo.`, 'warning')
-    }
-  }
-
   function deleteStock(stockId) {
     setInventory((current) => current.filter((stock) => stock.id !== stockId))
     closeModal()
@@ -11068,7 +11078,10 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                       {currentConfigStep ? (
                         <div className="pos-config__grid">
                           {currentConfigOptions.length > 0 ? currentConfigOptions.map((option) => {
-                            const isSelected = getCartStepSelectedIds(cartItemForm, currentConfigStep).includes(option.id)
+                            const selectedIds = getCartStepSelectedIds(cartItemForm, currentConfigStep)
+                            const selectedCount = selectedIds.filter((selectedId) => selectedId === option.id).length
+                            const isSelected = selectedCount > 0
+                            const allowsRepeatedFlavor = currentConfigStep.type === 'flavors' && isComboProduct(configuredProduct) && configuredFlavorLimit > 1
 
                             return (
                               <button
@@ -11087,7 +11100,27 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                               >
                                 <strong>{option.name}</strong>
                                 <small>{option.price > 0 ? `+${formatCurrency(option.price)}` : 'Sem adicional'}</small>
-                                <span>{isSelected ? 'Selecionado' : 'Selecionar'}</span>
+                                <span>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</span>
+                                {allowsRepeatedFlavor && selectedCount > 0 ? (
+                                  <span
+                                    className="pos-flavor-card__remove"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      removeCartItemFlavor(option.id)
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        removeCartItemFlavor(option.id)
+                                      }
+                                    }}
+                                  >
+                                    Remover 1
+                                  </span>
+                                ) : null}
                               </button>
                             )
                           }) : (
@@ -11275,7 +11308,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 </div>
 
                 <div className="payment-grid payment-grid--secondary">
-                  <button data-testid="open-document-panel" disabled={!hasOrderItems} type="button" className={Boolean(newOrder.document.trim()) ? 'is-active' : ''} onClick={openOrderDocumentPanel}>[ T ] CPF/CNPJ</button>
+                  <button data-testid="open-document-panel" disabled={!hasOrderItems} type="button" className={newOrder.document.trim() ? 'is-active' : ''} onClick={openOrderDocumentPanel}>[ T ] CPF/CNPJ</button>
                   <button data-testid="open-adjustment-panel" disabled={!hasOrderItems} type="button" className={hasOrderAdjustments ? 'is-active' : ''} onClick={openOrderAdjustmentPanel}>[ Y ] Ajustar R$</button>
                 </div>
 
@@ -13222,7 +13255,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                 </header>
                 <div className="cart-config__list">
                   {activeFlavors.map((flavor) => {
-                    const isSelected = cartItemForm.flavorIds.includes(flavor.id)
+                    const selectedCount = cartItemForm.flavorIds.filter((flavorId) => flavorId === flavor.id).length
+                    const isSelected = selectedCount > 0
+                    const allowsRepeatedFlavor = isComboProduct(product) && product.maxFlavors > 1
 
                     return (
                       <button
@@ -13236,7 +13271,27 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                           <strong>{flavor.name}</strong>
                           <small>{flavor.price > 0 ? `+${formatCurrency(flavor.price)}` : 'Sem adicional'}</small>
                         </span>
-                        <b>{isSelected ? 'Selecionado' : 'Selecionar'}</b>
+                        <b>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</b>
+                        {allowsRepeatedFlavor && selectedCount > 0 ? (
+                          <small
+                            className="cart-config__remove"
+                            role="button"
+                            tabIndex={0}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              removeCartItemFlavor(flavor.id)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                removeCartItemFlavor(flavor.id)
+                              }
+                            }}
+                          >
+                            Remover 1
+                          </small>
+                        ) : null}
                       </button>
                     )
                   })}
@@ -13561,22 +13616,28 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               showMapTools
               value={storeForm}
             />
-            <section className="form-grid settings-inline-panel">
-              <Field label="Aceitar pedidos automaticamente">
-                <select value={settings.autoAccept ? 'yes' : 'no'} onChange={(event) => setSettings({ ...settings, autoAccept: event.target.value === 'yes' })}>
-                  <option value="yes">Sim, mandar direto para preparo</option>
-                  <option value="no">Nao, revisar antes</option>
-                </select>
-              </Field>
-              <Field label="Imprimir automaticamente">
-                <select
-                  value={settings.autoPrint ? 'yes' : 'no'}
-                  onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes', printer: event.target.value === 'yes' })}
-                >
-                  <option value="yes">Sim, imprimir ao receber</option>
-                  <option value="no">Nao, imprimir manualmente</option>
-                </select>
-              </Field>
+            <section className="settings-inline-panel">
+              <header>
+                <span>Pedidos online</span>
+                <strong>Aceite e impressao</strong>
+              </header>
+              <div className="settings-inline-panel__grid">
+                <Field label="Aceitar pedidos automaticamente">
+                  <select value={settings.autoAccept ? 'yes' : 'no'} onChange={(event) => setSettings({ ...settings, autoAccept: event.target.value === 'yes' })}>
+                    <option value="yes">Sim, mandar direto para preparo</option>
+                    <option value="no">Nao, revisar antes</option>
+                  </select>
+                </Field>
+                <Field label="Imprimir automaticamente">
+                  <select
+                    value={settings.autoPrint ? 'yes' : 'no'}
+                    onChange={(event) => setSettings({ ...settings, autoPrint: event.target.value === 'yes', printer: event.target.value === 'yes' })}
+                  >
+                    <option value="yes">Sim, imprimir ao receber</option>
+                    <option value="no">Nao, imprimir manualmente</option>
+                  </select>
+                </Field>
+              </div>
             </section>
           </form>
         </Modal>

@@ -2503,6 +2503,12 @@
   color: #ffffff;
 }
 
+.pos-flavor-card.is-active .pos-flavor-card__remove {
+  border-color: #d7e2ea;
+  background: #ffffff;
+  color: #51616a;
+}
+
 .pos-flavor-card:not(.is-active) span {
   background: #f3f7fa;
   color: #506671;
@@ -3619,11 +3625,41 @@
 }
 
 .settings-inline-panel {
+  display: grid;
+  gap: 12px;
   margin-top: 12px;
   padding: 12px;
   border: 1px solid #dfe6dd;
   border-radius: 8px;
   background: #f7faf5;
+}
+
+.settings-inline-panel header {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-inline-panel header span {
+  color: #708086;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-inline-panel header strong {
+  color: #1f3137;
+  font-size: 16px;
+}
+
+.settings-inline-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-inline-panel__grid .field:last-child {
+  grid-column: auto;
 }
 
 .field {
@@ -4277,6 +4313,17 @@
 .cart-config__option b {
   color: #248a72;
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.cart-config__remove {
+  padding: 4px 8px;
+  border: 1px solid #d7dfe6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #51616a;
+  font-size: 11px;
+  font-weight: 800;
   white-space: nowrap;
 }
 
@@ -5352,6 +5399,14 @@
 }
 
 @media (max-width: 760px) {
+  .settings-inline-panel__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-inline-panel__grid .field:last-child {
+    grid-column: 1 / -1;
+  }
+
   .app-frame { grid-template-rows: auto minmax(0, 1fr); }
 
   .brand {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createBackendTestLog, loadBackendDiagnostics } from './backendApi'
 import './BackendDiagnostics.css'
 
@@ -11,7 +11,7 @@ export function BackendDiagnostics() {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setStatus('loading')
     setError('')
 
@@ -23,7 +23,7 @@ export function BackendDiagnostics() {
       setError(err instanceof Error ? err.message : 'Nao foi possivel consultar a API')
       setStatus('error')
     }
-  }
+  }, [])
 
   async function sendTestLog() {
     const storeId = data?.stores?.[0]?.id
@@ -34,8 +34,12 @@ export function BackendDiagnostics() {
   }
 
   useEffect(() => {
-    refresh()
-  }, [])
+    const timeoutId = window.setTimeout(() => {
+      void refresh()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [refresh])
 
   const summary = data?.summary
   const store = data?.stores?.[0]
