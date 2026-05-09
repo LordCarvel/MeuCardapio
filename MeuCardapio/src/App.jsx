@@ -3739,6 +3739,14 @@ function buildMenuSnapshot({ categories = [], products = [], deliveryZones = [] 
   }
 }
 
+function hasMenuSnapshotContent(snapshot = {}) {
+  return (
+    (Array.isArray(snapshot.categories) && snapshot.categories.length > 0)
+    || (Array.isArray(snapshot.products) && snapshot.products.length > 0)
+    || (Array.isArray(snapshot.deliveryZones) && snapshot.deliveryZones.length > 0)
+  )
+}
+
 function serializeMenuSnapshot({ categories = [], products = [], deliveryZones = [] } = {}) {
   return JSON.stringify(buildMenuSnapshot({ categories, products, deliveryZones }))
 }
@@ -6896,6 +6904,7 @@ function App() {
   const [storeMapMode, setStoreMapMode] = useState('view')
   const storeFormRef = useRef(initialData.storeProfile)
   const accessKeyAttemptRef = useRef('')
+  const backendLinkAttemptRef = useRef('')
   const lastMenuSnapshotRef = useRef('')
   const [printerConfig, setPrinterConfig] = useState(normalizePrinterConfig(initialData.printerConfig))
   const [printerForm, setPrinterForm] = useState(printerConfigToForm(initialData.printerConfig))
@@ -7124,6 +7133,31 @@ function App() {
 
     return () => window.clearTimeout(timeoutId)
   }, [activeStoreId, categories, deliveryZones, hasValidStoreSession, isStoreReady, pilotSync.storeId, products])
+
+  useEffect(() => {
+    const backendStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')
+
+    if (backendStoreId || !hasValidStoreSession || !isStoreReady) {
+      return
+    }
+
+    const sessionUser = storeUsers.find((user) => user.email === currentStoreUser?.email && user.password)
+    const localMenu = buildMenuSnapshot({ categories, products, deliveryZones })
+
+    if (!sessionUser || !hasMenuSnapshotContent(localMenu)) {
+      return
+    }
+
+    const attemptKey = `${activeStoreId}:${sessionUser.email}`
+    if (backendLinkAttemptRef.current === attemptKey) {
+      return
+    }
+
+    backendLinkAttemptRef.current = attemptKey
+    void linkLocalStoreToBackend(sessionUser, localMenu)
+    // linkLocalStoreToBackend uses the current local store snapshot as the source of truth.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStoreId, categories, currentStoreUser?.email, deliveryZones, hasValidStoreSession, isStoreReady, pilotSync.storeId, products, storeUsers])
 
   useEffect(() => {
     const accessAttemptKey = `${storeAccessIdFromPath}:${storeAccessKeyFromPath}`
@@ -7965,11 +7999,86 @@ function App() {
     }
   }
 
+  async function linkLocalStoreToBackend(localUser, localMenu = buildMenuSnapshot({ categories, products, deliveryZones })) {
+    if (!localUser?.email || !localUser?.password || !hasMenuSnapshotContent(localMenu)) {
+      return false
+    }
+
+    try {
+      const login = await loginBackendUser(localUser.email, localUser.password)
+
+      if (login.ok === false || !login.user?.storeId) {
+        return false
+      }
+
+      const backendStore = await getBackendStore(login.user.storeId)
+      const nextPilotSync = normalizePilotSync({
+        ...pilotSync,
+        enabled: true,
+        status: 'online',
+        storeId: login.user.storeId,
+        storeName: backendStore.tradeName || storeProfile.name,
+        lastCheckedAt: nowDateTime(),
+        lastSyncedAt: nowDateTime(),
+        message: 'Loja local vinculada ao backend.',
+      })
+      const nextStoreProfile = normalizeStoreProfile({
+        ...storeProfile,
+        accessKey: storeProfile.accessKey || backendStore.accessKey || generateStoreAccessKey(storeProfile),
+      })
+      const nextStoreUsers = storeUsers.map((user) => (
+        user.email === localUser.email
+          ? { ...user, id: login.user.id || user.id, role: login.user.role || user.role }
+          : user
+      ))
+      const nextSnapshot = normalizeAppSnapshot({
+        ...currentStoreSnapshot,
+        categories,
+        products,
+        deliveryZones,
+        storeProfile: nextStoreProfile,
+        storeUsers: nextStoreUsers,
+        pilotSync: nextPilotSync,
+      })
+
+      await updateBackendStore(login.user.storeId, {
+        ...storeProfileToBackendRequest(nextStoreProfile),
+        menuSnapshot: JSON.stringify(localMenu),
+      })
+      await updateBackendMenuSnapshot(login.user.storeId, localMenu)
+
+      const nextStores = [
+        ...resolvedStores.filter((store) => store.id !== activeStoreId && store.id !== login.user.storeId),
+        { id: login.user.storeId, snapshot: nextSnapshot },
+      ]
+
+      setStores(nextStores)
+      setActiveStoreId(login.user.storeId)
+      applySnapshot(nextSnapshot, 'Loja local vinculada ao backend.')
+      setPilotSync(nextPilotSync)
+      setCurrentStoreUser(buildStoreSession(
+        nextStoreUsers.find((user) => user.email === localUser.email) || localUser,
+        nowDateTime,
+        login.user.storeId,
+      ))
+      notify('Cardapio local enviado para o banco.')
+      return true
+    } catch (err) {
+      notify(`Nao foi possivel vincular o cardapio local ao backend: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
+      return false
+    }
+  }
+
   async function loginStoreUser(credentials) {
     if (activeStoreId) {
       const result = authenticateStoreUser(storeUsers, credentials)
 
       if (result.ok !== false) {
+        const linked = await linkLocalStoreToBackend(result.user)
+        if (linked) {
+          return { ok: true }
+        }
+
         setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, activeStoreId))
         setToast(`Bem-vindo, ${result.user.name}.`)
         return { ok: true }
