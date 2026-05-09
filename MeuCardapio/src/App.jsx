@@ -9575,14 +9575,27 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
   function moveOrder(orderId, nextStatus) {
     const currentOrder = orders.find((order) => order.id === orderId)
-    const updatedOrder = currentOrder ? { ...currentOrder, status: nextStatus } : null
+    const shouldAutoPrintPreparation = Boolean(
+      currentOrder
+      && nextStatus === 'production'
+      && currentOrder.status !== 'production'
+      && settings.autoPrint
+      && !currentOrder.preparationPrintedAt
+    )
+    const updatedOrder = currentOrder
+      ? {
+          ...currentOrder,
+          status: nextStatus,
+          preparationPrintedAt: shouldAutoPrintPreparation ? nowDateTime() : currentOrder.preparationPrintedAt,
+        }
+      : null
 
     setOrders((current) =>
-      current.map((order) => (order.id === orderId ? { ...order, status: nextStatus } : order)),
+      current.map((order) => (order.id === orderId ? updatedOrder : order)),
     )
 
-    if (updatedOrder && nextStatus === 'ready' && settings.autoPrint) {
-      printOrderTicket(updatedOrder, 'dispatch')
+    if (updatedOrder && shouldAutoPrintPreparation) {
+      printOrderTicket(updatedOrder, 'kitchen')
     }
 
     if (updatedOrder) {
@@ -9721,7 +9734,12 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         ? orderCart.map(getOrderCartPrintItem)
         : [],
     }
-    const normalizedCreatedOrder = normalizeOrderRecord(createdOrder)
+    const normalizedCreatedOrder = normalizeOrderRecord({
+      ...createdOrder,
+      preparationPrintedAt: !editedSourceOrder && settings.autoPrint && createdOrder.status === 'production'
+        ? nowDateTime()
+        : createdOrder.preparationPrintedAt,
+    })
 
     if (editedSourceOrder) {
       setOrders((current) =>
@@ -9741,8 +9759,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         syncMessage: 'Aguardando modo piloto.',
       })
     }
-    if (settings.autoPrint) {
-      printOrderTicket(createdOrder, 'order')
+    if (!editedSourceOrder && settings.autoPrint && normalizedCreatedOrder.status === 'production') {
+      printOrderTicket(normalizedCreatedOrder, 'kitchen')
     }
     setNewOrder(blankOrder)
     setOrderCart([])
