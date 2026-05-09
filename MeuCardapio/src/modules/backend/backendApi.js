@@ -242,6 +242,13 @@ export async function updateBackendStore(storeId, store) {
   })
 }
 
+export async function patchBackendStore(storeId, patch) {
+  return request(`/stores/${storeId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
 export async function updateBackendMenuSnapshot(storeId, snapshot) {
   return request(`/stores/${storeId}/menu-snapshot`, {
     method: 'PUT',

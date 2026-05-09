@@ -46,6 +46,16 @@ public class Store {
     private BigDecimal minimumOrder;
     @Column(nullable = false, precision = 8, scale = 2)
     private BigDecimal deliveryRadiusKm;
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal serviceFee;
+    @Column(length = 40)
+    private String lat;
+    @Column(length = 40)
+    private String lng;
+    @Column(length = 500)
+    private String mapLabel;
+    @Column(length = 40)
+    private String verifiedAt;
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
@@ -62,6 +72,7 @@ public class Store {
         this.category = category;
         this.minimumOrder = BigDecimal.ZERO;
         this.deliveryRadiusKm = BigDecimal.valueOf(5);
+        this.serviceFee = BigDecimal.ZERO;
         this.createdAt = LocalDateTime.now();
     }
 
@@ -98,5 +109,15 @@ public class Store {
     public void setMinimumOrder(BigDecimal minimumOrder) { this.minimumOrder = minimumOrder; }
     public BigDecimal getDeliveryRadiusKm() { return deliveryRadiusKm; }
     public void setDeliveryRadiusKm(BigDecimal deliveryRadiusKm) { this.deliveryRadiusKm = deliveryRadiusKm; }
+    public BigDecimal getServiceFee() { return serviceFee; }
+    public void setServiceFee(BigDecimal serviceFee) { this.serviceFee = serviceFee; }
+    public String getLat() { return lat; }
+    public void setLat(String lat) { this.lat = lat; }
+    public String getLng() { return lng; }
+    public void setLng(String lng) { this.lng = lng; }
+    public String getMapLabel() { return mapLabel; }
+    public void setMapLabel(String mapLabel) { this.mapLabel = mapLabel; }
+    public String getVerifiedAt() { return verifiedAt; }
+    public void setVerifiedAt(String verifiedAt) { this.verifiedAt = verifiedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

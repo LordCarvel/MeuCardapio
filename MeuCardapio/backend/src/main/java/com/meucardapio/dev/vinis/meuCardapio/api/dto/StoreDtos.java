@@ -29,7 +29,36 @@ public final class StoreDtos {
             String accessKey,
             String menuSnapshot,
             BigDecimal minimumOrder,
-            BigDecimal deliveryRadiusKm) {
+            BigDecimal deliveryRadiusKm,
+            BigDecimal serviceFee,
+            String lat,
+            String lng,
+            String mapLabel,
+            String verifiedAt) {
+    }
+
+    public record StorePatchRequest(
+            String tradeName,
+            String ownerName,
+            String email,
+            String phone,
+            String taxId,
+            String category,
+            String street,
+            String number,
+            String district,
+            String cityName,
+            String state,
+            String schedule,
+            String accessKey,
+            String menuSnapshot,
+            BigDecimal minimumOrder,
+            BigDecimal deliveryRadiusKm,
+            BigDecimal serviceFee,
+            String lat,
+            String lng,
+            String mapLabel,
+            String verifiedAt) {
     }
 
     public record StoreResponse(
@@ -50,6 +79,11 @@ public final class StoreDtos {
             String menuSnapshot,
             BigDecimal minimumOrder,
             BigDecimal deliveryRadiusKm,
+            BigDecimal serviceFee,
+            String lat,
+            String lng,
+            String mapLabel,
+            String verifiedAt,
             LocalDateTime createdAt) {
         public static StoreResponse from(Store store) {
             return new StoreResponse(
@@ -70,6 +104,11 @@ public final class StoreDtos {
                     store.getMenuSnapshot(),
                     store.getMinimumOrder(),
                     store.getDeliveryRadiusKm(),
+                    store.getServiceFee(),
+                    store.getLat(),
+                    store.getLng(),
+                    store.getMapLabel(),
+                    store.getVerifiedAt(),
                     store.getCreatedAt());
         }
     }

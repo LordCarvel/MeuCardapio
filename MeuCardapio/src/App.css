@@ -2779,6 +2779,36 @@
   font-weight: 800;
 }
 
+.summary-item__children {
+  display: grid;
+  gap: 3px;
+  padding-left: 14px;
+}
+
+.summary-item__child {
+  display: grid;
+  grid-template-columns: minmax(58px, auto) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.summary-item__child small {
+  color: #7b8992;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.summary-item__child strong {
+  min-width: 0;
+  color: #566875;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .summary-item__controls {
   display: grid;
   grid-template-columns: 24px 28px 24px 28px 28px;

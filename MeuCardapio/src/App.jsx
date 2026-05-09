@@ -18,6 +18,7 @@ import {
   requestSignupCode,
   resetBackendPassword,
   signupBackendAccount,
+  patchBackendStore,
   updateBackendStore,
   updateBackendMenuSnapshot,
   updateBackendOrder,
@@ -1782,7 +1783,8 @@ function normalizeCartAddonSelections(product, addonSelections = {}) {
 
   getActiveProductAddonGroups(product).forEach((group) => {
     const selectedIds = Array.isArray(addonSelections[group.id]) ? addonSelections[group.id] : []
-    const validIds = Array.from(new Set(selectedIds.filter((optionId) => group.options.some((option) => option.id === optionId))))
+    const validIds = selectedIds
+      .filter((optionId) => group.options.some((option) => option.id === optionId))
       .slice(0, Math.max(1, Number(group.maxSelect) || 1))
 
     if (validIds.length > 0) {
@@ -1799,18 +1801,26 @@ function getSelectedCartAddonEntries(product, addonSelections = {}) {
   return getActiveProductAddonGroups(product)
     .map((group) => {
       const selectedIds = normalizedSelections[group.id] || []
-      const selectedOptions = group.options.filter((option) => selectedIds.includes(option.id))
+      const optionById = new Map(group.options.map((option) => [option.id, option]))
+      const selectedOptions = selectedIds.map((optionId) => optionById.get(optionId)).filter(Boolean)
 
       if (selectedOptions.length === 0) {
         return null
       }
 
+      const optionCounts = Array.from(selectedOptions.reduce((counts, option) => {
+        const current = counts.get(option.id) || { id: option.id, name: option.name, price: Number(option.price) || 0, count: 0 }
+        counts.set(option.id, { ...current, count: current.count + 1 })
+        return counts
+      }, new Map()).values())
+
       return {
         groupId: group.id,
         groupName: group.name,
-        optionIds: selectedOptions.map((option) => option.id),
+        optionIds: selectedIds,
         optionNames: selectedOptions.map((option) => option.name),
-        label: selectedOptions.map((option) => option.name).join(', '),
+        optionCounts,
+        label: formatRepeatedCartNames(selectedOptions.map((option) => option.name)),
       }
     })
     .filter(Boolean)
@@ -1901,18 +1911,8 @@ function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
   const activeFlavorById = new Map(getActiveProductFlavors(product).map((flavor) => [flavor.id, flavor]))
   const flavorExtras = (Array.isArray(flavorIds) ? flavorIds : [])
     .reduce((sum, flavorId) => sum + (Number(activeFlavorById.get(flavorId)?.price) || 0), 0)
-  const activeGroups = getActiveProductAddonGroups(product)
   const addonExtras = getSelectedCartAddonEntries(product, addonSelections)
-    .reduce((sum, entry) => {
-      const group = activeGroups.find((current) => current.id === entry.groupId)
-      const groupTotal = group
-        ? group.options
-          .filter((option) => entry.optionIds.includes(option.id))
-          .reduce((groupSum, option) => groupSum + (Number(option.price) || 0), 0)
-        : 0
-
-      return sum + groupTotal
-    }, 0)
+    .reduce((sum, entry) => sum + entry.optionCounts.reduce((groupSum, option) => groupSum + (option.price * option.count), 0), 0)
 
   return (Number(product?.price) || 0) + flavorExtras + addonExtras
 }
@@ -1922,8 +1922,7 @@ function createOrderCartLine(product, { lineId = `cart-${Date.now()}-${Math.rand
   const maxFlavors = Math.max(1, Number(product?.maxFlavors) || 1)
   const selectedFlavorIds = (Array.isArray(flavorIds) ? flavorIds : [])
     .filter((flavorId) => activeFlavorIds.has(flavorId))
-  const normalizedFlavorIds = (isComboProduct(product) ? selectedFlavorIds : Array.from(new Set(selectedFlavorIds)))
-    .slice(0, maxFlavors)
+  const normalizedFlavorIds = selectedFlavorIds.slice(0, maxFlavors)
   const flavorNames = getSelectedCartFlavorNames(product, normalizedFlavorIds)
   const normalizedAddonSelections = normalizeCartAddonSelections(product, addonSelections)
   const addonEntries = getSelectedCartAddonEntries(product, normalizedAddonSelections)
@@ -2120,6 +2119,37 @@ function getOrderCartItemLabel(item) {
   return detailParts.length > 0
     ? `${item.qty}x ${item.name} (${detailParts.join(' | ')})`
     : `${item.qty}x ${item.name}`
+}
+
+function getOrderCartChildRows(item) {
+  const flavorRows = Array.from((Array.isArray(item?.flavorNames) ? item.flavorNames : []).reduce((counts, name) => {
+    counts.set(name, (counts.get(name) || 0) + 1)
+    return counts
+  }, new Map()).entries())
+    .map(([name, count]) => ({
+      id: `flavor-${name}`,
+      groupName: getFlavorEntityLabel({ category: item?.category, name: item?.name }, count > 1),
+      name,
+      count,
+    }))
+
+  const addonRows = (Array.isArray(item?.addonEntries) ? item.addonEntries : [])
+    .flatMap((entry) => (Array.isArray(entry.optionCounts) && entry.optionCounts.length > 0
+      ? entry.optionCounts.map((option) => ({
+        id: `${entry.groupId}-${option.id}`,
+        groupName: entry.groupName,
+        name: option.name,
+        count: option.count,
+      }))
+      : (Array.isArray(entry.optionNames) ? entry.optionNames : [])
+        .map((name, index) => ({
+          id: `${entry.groupId}-${name}-${index}`,
+          groupName: entry.groupName,
+          name,
+          count: 1,
+        }))))
+
+  return [...flavorRows, ...addonRows]
 }
 
 function getOrderCartPrintItem(item) {
@@ -3704,7 +3734,12 @@ function backendStoreToProfile(store = {}) {
     schedule: store.schedule || '',
     accessKey: store.accessKey || '',
     minimumOrder: formatCurrencyInput(store.minimumOrder || 0),
+    serviceFee: formatCurrencyInput(store.serviceFee || 0),
     deliveryRadius: String(store.deliveryRadiusKm || 5),
+    lat: store.lat || '',
+    lng: store.lng || '',
+    mapLabel: store.mapLabel || '',
+    verifiedAt: store.verifiedAt || '',
   })
 }
 
@@ -3727,7 +3762,21 @@ function storeProfileToBackendRequest(profile = {}) {
     accessKey: normalized.accessKey || '',
     minimumOrder: parseCurrencyInput(normalized.minimumOrder),
     deliveryRadiusKm: Number(normalized.deliveryRadius) || 5,
+    serviceFee: parseCurrencyInput(normalized.serviceFee),
+    lat: normalized.lat || '',
+    lng: normalized.lng || '',
+    mapLabel: normalized.mapLabel || '',
+    verifiedAt: normalized.verifiedAt || '',
   }
+}
+
+function buildStoreProfilePatch(baseProfile = {}, nextProfile = {}) {
+  const base = storeProfileToBackendRequest(baseProfile)
+  const next = storeProfileToBackendRequest(nextProfile)
+
+  return Object.fromEntries(
+    Object.entries(next).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(base[key])),
+  )
 }
 
 function buildMenuSnapshot({ categories = [], products = [], deliveryZones = [] } = {}) {
@@ -6903,9 +6952,10 @@ function App() {
   const [storeAddressLookup, setStoreAddressLookup] = useState({ status: 'idle', message: '' })
   const [storeMapMode, setStoreMapMode] = useState('view')
   const storeFormRef = useRef(initialData.storeProfile)
+  const storeFormBaseRef = useRef(initialData.storeProfile)
   const accessKeyAttemptRef = useRef('')
   const backendLinkAttemptRef = useRef('')
-  const lastMenuSnapshotRef = useRef('')
+  const lastMenuSnapshotRef = useRef(serializeMenuSnapshot(initialData))
   const menuSyncRetryTimerRef = useRef(null)
   const menuSyncFailureNotifiedRef = useRef(false)
   const [menuSyncRetry, setMenuSyncRetry] = useState(0)
@@ -7481,6 +7531,7 @@ function App() {
       const nextStoreForm = normalizeStoreProfile(storeProfile)
       setStoreForm(nextStoreForm)
       storeFormRef.current = nextStoreForm
+      storeFormBaseRef.current = nextStoreForm
       setStoreAddressLookup({ status: 'idle', message: '' })
       setStoreMapMode('view')
       setDataImportError('')
@@ -8023,7 +8074,7 @@ function App() {
   }
 
   async function linkLocalStoreToBackend(localUser, localMenu = buildMenuSnapshot({ categories, products, deliveryZones })) {
-    if (!localUser?.email || !localUser?.password || !hasMenuSnapshotContent(localMenu)) {
+    if (!localUser?.email || !localUser?.password) {
       return false
     }
 
@@ -8034,7 +8085,15 @@ function App() {
         return false
       }
 
-      const backendStore = await getBackendStore(login.user.storeId)
+      const workspace = await loadBackendWorkspace(login.user.storeId)
+      const backendStore = workspace.store || await getBackendStore(login.user.storeId)
+      const remoteMenu = getWorkspaceMenuSnapshot({ ...workspace, store: backendStore })
+      const remoteSnapshot = buildMenuSnapshot({
+        categories: remoteMenu.categories || [],
+        products: remoteMenu.products || [],
+        deliveryZones: remoteMenu.deliveryZones || [],
+      })
+      const hasRemoteMenu = hasMenuSnapshotContent(remoteSnapshot)
       const nextPilotSync = normalizePilotSync({
         ...pilotSync,
         enabled: true,
@@ -8043,9 +8102,9 @@ function App() {
         storeName: backendStore.tradeName || storeProfile.name,
         lastCheckedAt: nowDateTime(),
         lastSyncedAt: nowDateTime(),
-        message: 'Loja local vinculada ao backend.',
+        message: hasRemoteMenu ? 'Loja carregada do backend.' : 'Loja local vinculada ao backend.',
       })
-      const nextStoreProfile = normalizeStoreProfile({
+      const localStoreProfile = normalizeStoreProfile({
         ...storeProfile,
         accessKey: storeProfile.accessKey || backendStore.accessKey || generateStoreAccessKey(storeProfile),
       })
@@ -8054,21 +8113,38 @@ function App() {
           ? { ...user, id: login.user.id || user.id, role: login.user.role || user.role }
           : user
       ))
-      const nextSnapshot = normalizeAppSnapshot({
-        ...currentStoreSnapshot,
-        categories,
-        products,
-        deliveryZones,
-        storeProfile: nextStoreProfile,
-        storeUsers: nextStoreUsers,
-        pilotSync: nextPilotSync,
-      })
 
-      await updateBackendStore(login.user.storeId, {
-        ...storeProfileToBackendRequest(nextStoreProfile),
-        menuSnapshot: JSON.stringify(localMenu),
-      })
-      await updateBackendMenuSnapshot(login.user.storeId, localMenu)
+      let nextSnapshot
+      if (hasRemoteMenu) {
+        const loadedStore = backendWorkspaceToStoreRecord({ ...workspace, store: backendStore }, backendStore.accessKey || '')
+        nextSnapshot = normalizeAppSnapshot({
+          ...loadedStore.snapshot,
+          storeUsers: nextStoreUsers,
+          pilotSync: nextPilotSync,
+        })
+      } else if (hasMenuSnapshotContent(localMenu)) {
+        nextSnapshot = normalizeAppSnapshot({
+          ...currentStoreSnapshot,
+          categories,
+          products,
+          deliveryZones,
+          storeProfile: localStoreProfile,
+          storeUsers: nextStoreUsers,
+          pilotSync: nextPilotSync,
+        })
+
+        await updateBackendStore(login.user.storeId, {
+          ...storeProfileToBackendRequest(localStoreProfile),
+          menuSnapshot: JSON.stringify(localMenu),
+        })
+        await updateBackendMenuSnapshot(login.user.storeId, localMenu)
+      } else {
+        nextSnapshot = normalizeAppSnapshot({
+          ...backendWorkspaceToStoreRecord({ ...workspace, store: backendStore }, backendStore.accessKey || '').snapshot,
+          storeUsers: nextStoreUsers,
+          pilotSync: nextPilotSync,
+        })
+      }
 
       const nextStores = [
         ...resolvedStores.filter((store) => store.id !== activeStoreId && store.id !== login.user.storeId),
@@ -8077,14 +8153,14 @@ function App() {
 
       setStores(nextStores)
       setActiveStoreId(login.user.storeId)
-      applySnapshot(nextSnapshot, 'Loja local vinculada ao backend.')
+      applySnapshot(nextSnapshot, hasRemoteMenu ? 'Conta carregada do backend.' : 'Loja local vinculada ao backend.')
       setPilotSync(nextPilotSync)
       setCurrentStoreUser(buildStoreSession(
         nextStoreUsers.find((user) => user.email === localUser.email) || localUser,
         nowDateTime,
         login.user.storeId,
       ))
-      notify('Cardapio local enviado para o banco.')
+      notify(hasRemoteMenu ? 'Cardapio carregado do banco.' : 'Cardapio local enviado para o banco.')
       return true
     } catch (err) {
       notify(`Nao foi possivel vincular o cardapio local ao backend: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
@@ -8286,6 +8362,7 @@ function App() {
     setDeliveryZones(merged.deliveryZones)
     setStoreProfile(merged.storeProfile)
     setStoreForm(merged.storeProfile)
+    storeFormBaseRef.current = merged.storeProfile
     setPrinterConfig(merged.printerConfig)
     setPrinterForm(printerConfigToForm(merged.printerConfig))
     setPilotSync(merged.pilotSync)
@@ -8599,7 +8676,10 @@ function App() {
 
     if (backendStoreId) {
       try {
-        await updateBackendStore(backendStoreId, storeProfileToBackendRequest(nextStore))
+        const patch = buildStoreProfilePatch(storeFormBaseRef.current, nextStore)
+        if (Object.keys(patch).length > 0) {
+          await patchBackendStore(backendStoreId, patch)
+        }
       } catch (err) {
         notify(`Loja salva localmente, mas a API nao atualizou: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
       }
@@ -8608,6 +8688,7 @@ function App() {
     setStoreProfile(nextStore)
     setStoreForm(nextStore)
     storeFormRef.current = nextStore
+    storeFormBaseRef.current = nextStore
     setSecurity((current) => ({
       ...current,
       operator: nextStore.owner || current.operator,
@@ -9887,7 +9968,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
   function toggleCartItemFlavor(flavorId, maxFlavors, product) {
     const isSelected = cartItemForm.flavorIds.includes(flavorId)
-    const allowsRepeatedFlavor = isComboProduct(product) && maxFlavors > 1
+    const allowsRepeatedFlavor = maxFlavors > 1
 
     if (allowsRepeatedFlavor) {
       if (cartItemForm.flavorIds.length >= maxFlavors) {
@@ -9936,7 +10017,27 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const isSelected = getCartStepSelectedIds(cartItemForm, step).includes(optionId)
     const maxSelect = Math.max(1, Number(step?.maxSelect) || 1)
 
-    if (!isSelected && maxSelect > 1 && getCartStepSelectedIds(cartItemForm, step).length >= maxSelect) {
+    if (maxSelect > 1) {
+      if (getCartStepSelectedIds(cartItemForm, step).length >= maxSelect) {
+        notify(`Escolha no maximo ${maxSelect} opcoes em ${step.title.toLowerCase()}.`, 'warning')
+        return
+      }
+
+      setCartItemForm((current) => {
+        const selectedIds = Array.isArray(current.addonSelections?.[step.id]) ? current.addonSelections[step.id] : []
+
+        return {
+          ...current,
+          addonSelections: {
+            ...current.addonSelections,
+            [step.id]: [...selectedIds, optionId],
+          },
+        }
+      })
+      return
+    }
+
+    if (!isSelected && getCartStepSelectedIds(cartItemForm, step).length >= maxSelect) {
       notify(`Escolha no maximo ${maxSelect} opcoes em ${step.title.toLowerCase()}.`, 'warning')
       return
     }
@@ -9963,6 +10064,25 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         addonSelections: {
           ...current.addonSelections,
           [step.id]: nextSelections,
+        },
+      }
+    })
+  }
+
+  function removeCartItemAddonOption(step, optionId) {
+    setCartItemForm((current) => {
+      const selectedIds = Array.isArray(current.addonSelections?.[step.id]) ? current.addonSelections[step.id] : []
+      const optionIndex = selectedIds.lastIndexOf(optionId)
+
+      if (optionIndex < 0) {
+        return current
+      }
+
+      return {
+        ...current,
+        addonSelections: {
+          ...current.addonSelections,
+          [step.id]: selectedIds.filter((currentId, index) => currentId !== optionId || index !== optionIndex),
         },
       }
     })
@@ -11618,22 +11738,38 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                             const selectedIds = getCartStepSelectedIds(cartItemForm, currentConfigStep)
                             const selectedCount = selectedIds.filter((selectedId) => selectedId === option.id).length
                             const isSelected = selectedCount > 0
-                            const allowsRepeatedFlavor = currentConfigStep.type === 'flavors' && isComboProduct(configuredProduct) && configuredFlavorLimit > 1
-                            const canAddRepeatedFlavor = selectedIds.length < configuredFlavorLimit
+                            const optionLimit = Math.max(1, Number(currentConfigStep.maxSelect) || configuredFlavorLimit)
+                            const allowsRepeatedOption = optionLimit > 1
+                            const canAddRepeatedOption = selectedIds.length < optionLimit
 
-                            if (allowsRepeatedFlavor) {
+                            if (allowsRepeatedOption) {
                               return (
                                 <article
                                   className={`pos-flavor-card pos-flavor-card--quantity ${isSelected ? 'is-active' : ''}`.trim()}
-                                  data-testid={`cart-flavor-${option.id}`}
+                                  data-testid={`${currentConfigStep.type === 'flavors' ? 'cart-flavor' : 'cart-addon'}-${option.id}`}
                                   key={option.id}
                                   role="button"
                                   tabIndex={0}
-                                  onClick={() => canAddRepeatedFlavor && toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)}
-                                  onKeyDown={(event) => {
-                                    if ((event.key === 'Enter' || event.key === ' ') && canAddRepeatedFlavor) {
-                                      event.preventDefault()
+                                  onClick={() => {
+                                    if (!canAddRepeatedOption) {
+                                      return
+                                    }
+
+                                    if (currentConfigStep.type === 'flavors') {
                                       toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)
+                                      return
+                                    }
+
+                                    toggleCartItemAddonOption(currentConfigStep, option.id)
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if ((event.key === 'Enter' || event.key === ' ') && canAddRepeatedOption) {
+                                      event.preventDefault()
+                                      if (currentConfigStep.type === 'flavors') {
+                                        toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)
+                                      } else {
+                                        toggleCartItemAddonOption(currentConfigStep, option.id)
+                                      }
                                     }
                                   }}
                                 >
@@ -11644,21 +11780,35 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                                       aria-label={`Remover ${option.name}`}
                                       disabled={selectedCount <= 0}
                                       type="button"
-                                      onClick={() => removeCartItemFlavor(option.id)}
+                                      onClick={() => {
+                                        if (currentConfigStep.type === 'flavors') {
+                                          removeCartItemFlavor(option.id)
+                                          return
+                                        }
+
+                                        removeCartItemAddonOption(currentConfigStep, option.id)
+                                      }}
                                     >
                                       -
                                     </button>
                                     <b>{selectedCount}</b>
                                     <button
                                       aria-label={`Adicionar ${option.name}`}
-                                      disabled={!canAddRepeatedFlavor}
+                                      disabled={!canAddRepeatedOption}
                                       type="button"
-                                      onClick={() => toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)}
+                                      onClick={() => {
+                                        if (currentConfigStep.type === 'flavors') {
+                                          toggleCartItemFlavor(option.id, configuredFlavorLimit, configuredProduct)
+                                          return
+                                        }
+
+                                        toggleCartItemAddonOption(currentConfigStep, option.id)
+                                      }}
                                     >
                                       +
                                     </button>
                                   </div>
-                                  <small className="pos-flavor-card__limit">Maximo {configuredFlavorLimit}</small>
+                                  <small className="pos-flavor-card__limit">Maximo {optionLimit}</small>
                                 </article>
                               )
                             }
@@ -11680,7 +11830,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                               >
                                 <strong>{option.name}</strong>
                                 <small>{option.price > 0 ? `+${formatCurrency(option.price)}` : 'Sem adicional'}</small>
-                                <span>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</span>
+                                <span>{isSelected ? 'Selecionado' : 'Selecionar'}</span>
                               </button>
                             )
                           }) : (
@@ -11782,15 +11932,21 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                           <div className="summary-item__main">
                             <span>
                               <strong>{item.qty}x {item.name}</strong>
-                              {item.flavorLabel ? <small>{getFlavorEntityLabel({ category: item.category, name: item.name }, true)}: {item.flavorLabel}</small> : null}
-                              {Array.isArray(item.addonEntries) ? item.addonEntries.map((entry) => (
-                                <small key={`${item.id}-${entry.groupId}`}>{entry.groupName}: {entry.label}</small>
-                              )) : null}
                               {item.note ? <small className="summary-item__note">Observacao: {item.note}</small> : null}
                               <small>{formatCurrency(item.price)} por unidade</small>
                             </span>
                             <b className="summary-item__price">{formatCurrency(item.price * item.qty)}</b>
                           </div>
+                          {getOrderCartChildRows(item).length > 0 ? (
+                            <div className="summary-item__children">
+                              {getOrderCartChildRows(item).map((row) => (
+                                <span className="summary-item__child" key={`${item.id}-${row.id}`}>
+                                  <small>{row.groupName}</small>
+                                  <strong>{row.count * item.qty}x {row.name}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                           <div className="summary-item__controls" onClick={(event) => event.stopPropagation()}>
                             <button
                               data-testid={`order-item-subtract-${item.id}`}
@@ -13818,7 +13974,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                   {activeFlavors.map((flavor) => {
                     const selectedCount = cartItemForm.flavorIds.filter((flavorId) => flavorId === flavor.id).length
                     const isSelected = selectedCount > 0
-                    const allowsRepeatedFlavor = isComboProduct(product) && flavorLimit > 1
+                    const allowsRepeatedFlavor = flavorLimit > 1
                     const canAddRepeatedFlavor = cartItemForm.flavorIds.length < flavorLimit
 
                     if (allowsRepeatedFlavor) {
@@ -13877,7 +14033,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                           <strong>{flavor.name}</strong>
                           <small>{flavor.price > 0 ? `+${formatCurrency(flavor.price)}` : 'Sem adicional'}</small>
                         </span>
-                        <b>{isSelected ? (allowsRepeatedFlavor ? `${selectedCount}x selecionado` : 'Selecionado') : 'Selecionar'}</b>
+                        <b>{isSelected ? 'Selecionado' : 'Selecionar'}</b>
                       </button>
                     )
                   })}
