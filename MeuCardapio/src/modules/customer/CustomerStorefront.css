@@ -493,7 +493,8 @@
   padding-bottom: 10px;
 }
 
-.customer-option-list button {
+.customer-option-list button,
+.customer-option-quantity {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 20px;
   align-items: center;
@@ -507,16 +508,24 @@
   text-align: left;
 }
 
-.customer-option-list button div {
+.customer-option-quantity {
+  grid-template-columns: minmax(0, 1fr) 112px;
+  cursor: pointer;
+}
+
+.customer-option-list button div,
+.customer-option-quantity > div:first-child {
   display: grid;
   gap: 3px;
 }
 
-.customer-option-list strong {
+.customer-option-list strong,
+.customer-option-quantity strong {
   font-size: 14px;
 }
 
-.customer-option-list small {
+.customer-option-list small,
+.customer-option-quantity small {
   color: #6b7280;
   font-size: 12px;
 }
@@ -528,13 +537,53 @@
   border-radius: 50%;
 }
 
-.customer-option-list button.is-selected {
+.customer-option-list button.is-selected,
+.customer-option-quantity.is-selected {
   border-color: #1697e8;
   background: #f0f8ff;
 }
 
 .customer-option-list button.is-selected b {
   border: 5px solid #1697e8;
+}
+
+.customer-option-stepper {
+  display: grid;
+  grid-template-columns: 30px minmax(28px, 1fr) 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px;
+  border-radius: 4px;
+  background: #e9eef3;
+}
+
+.customer-option-stepper button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: #1697e8;
+  color: #ffffff;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.customer-option-stepper button:disabled {
+  background: #d1d5db;
+  color: #8c96a3;
+}
+
+.customer-option-stepper b {
+  border: 0;
+  width: auto;
+  height: auto;
+  color: #12313b;
+  font-size: 13px;
+  text-align: center;
 }
 
 .customer-config-summary {

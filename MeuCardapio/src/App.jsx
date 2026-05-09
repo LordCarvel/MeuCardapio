@@ -6906,6 +6906,9 @@ function App() {
   const accessKeyAttemptRef = useRef('')
   const backendLinkAttemptRef = useRef('')
   const lastMenuSnapshotRef = useRef('')
+  const menuSyncRetryTimerRef = useRef(null)
+  const menuSyncFailureNotifiedRef = useRef(false)
+  const [menuSyncRetry, setMenuSyncRetry] = useState(0)
   const [printerConfig, setPrinterConfig] = useState(normalizePrinterConfig(initialData.printerConfig))
   const [printerForm, setPrinterForm] = useState(printerConfigToForm(initialData.printerConfig))
   const [pilotSync, setPilotSync] = useState(normalizePilotSync(initialData.pilotSync))
@@ -7124,15 +7127,35 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       updateBackendMenuSnapshot(backendStoreId, snapshot)
         .then(() => {
+          if (menuSyncRetryTimerRef.current) {
+            window.clearTimeout(menuSyncRetryTimerRef.current)
+            menuSyncRetryTimerRef.current = null
+          }
+          menuSyncFailureNotifiedRef.current = false
           lastMenuSnapshotRef.current = serialized
         })
         .catch((err) => {
-          notify(`Cardapio salvo localmente, mas nao sincronizou com a API: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 'warning')
+          if (!menuSyncFailureNotifiedRef.current) {
+            notify(`Cardapio salvo localmente, mas nao sincronizou com a API: ${err instanceof Error ? err.message : 'erro desconhecido'}. Vou tentar novamente.`, 'warning')
+            menuSyncFailureNotifiedRef.current = true
+          }
+          if (!menuSyncRetryTimerRef.current) {
+            menuSyncRetryTimerRef.current = window.setTimeout(() => {
+              menuSyncRetryTimerRef.current = null
+              setMenuSyncRetry((current) => current + 1)
+            }, 5000)
+          }
         })
     }, 900)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeStoreId, categories, deliveryZones, hasValidStoreSession, isStoreReady, pilotSync.storeId, products])
+  }, [activeStoreId, categories, deliveryZones, hasValidStoreSession, isStoreReady, menuSyncRetry, pilotSync.storeId, products])
+
+  useEffect(() => () => {
+    if (menuSyncRetryTimerRef.current) {
+      window.clearTimeout(menuSyncRetryTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const backendStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')

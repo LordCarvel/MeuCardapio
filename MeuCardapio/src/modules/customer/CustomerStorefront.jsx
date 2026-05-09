@@ -362,11 +362,23 @@ function isCartStepSelectionValid(step, form) {
 }
 
 function getSelectedCartFlavorNames(product, flavorIds = []) {
-  const selectedIds = new Set(flavorIds)
+  const activeFlavors = getActiveProductFlavors(product)
 
-  return getActiveProductFlavors(product)
-    .filter((flavor) => selectedIds.has(flavor.id))
+  return flavorIds
+    .map((flavorId) => activeFlavors.find((flavor) => flavor.id === flavorId))
+    .filter(Boolean)
     .map((flavor) => flavor.name)
+}
+
+function formatRepeatedCartNames(names = []) {
+  const counts = names.reduce((acc, name) => {
+    acc[name] = (acc[name] || 0) + 1
+    return acc
+  }, {})
+
+  return Object.entries(counts)
+    .map(([name, count]) => (count > 1 ? `${count}x ${name}` : name))
+    .join(', ')
 }
 
 function normalizeCartAddonSelections(product, addonSelections = {}) {
@@ -409,10 +421,12 @@ function getSelectedCartAddonEntries(product, addonSelections = {}) {
 }
 
 function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
-  const selectedFlavorIds = new Set(flavorIds)
-  const flavorExtras = getActiveProductFlavors(product)
-    .filter((flavor) => selectedFlavorIds.has(flavor.id))
-    .reduce((sum, flavor) => sum + (Number(flavor.price) || 0), 0)
+  const activeFlavors = getActiveProductFlavors(product)
+  const flavorExtras = flavorIds.reduce((sum, flavorId) => {
+    const flavor = activeFlavors.find((current) => current.id === flavorId)
+
+    return sum + (Number(flavor?.price) || 0)
+  }, 0)
   const groups = getActiveProductAddonGroups(product)
   const addonExtras = getSelectedCartAddonEntries(product, addonSelections)
     .reduce((sum, entry) => {
@@ -430,7 +444,8 @@ function getCartItemUnitPrice(product, flavorIds = [], addonSelections = {}) {
 }
 
 function buildConfiguredCartLine(product, form) {
-  const flavorIds = Array.from(new Set(form.flavorIds || []))
+  const selectedFlavorIds = Array.isArray(form.flavorIds) ? form.flavorIds : []
+  const flavorIds = isComboProduct(product) ? selectedFlavorIds : Array.from(new Set(selectedFlavorIds))
   const addonSelections = normalizeCartAddonSelections(product, form.addonSelections || {})
   const flavorNames = getSelectedCartFlavorNames(product, flavorIds)
 
@@ -441,7 +456,7 @@ function buildConfiguredCartLine(product, form) {
     unitPrice: getCartItemUnitPrice(product, flavorIds, addonSelections),
     flavorIds,
     flavorNames,
-    flavorLabel: flavorNames.join(', '),
+    flavorLabel: formatRepeatedCartNames(flavorNames),
     addonSelections,
     addonEntries: getSelectedCartAddonEntries(product, addonSelections),
     note: String(form.note || '').trim(),
@@ -1213,6 +1228,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     const selectedIds = getCartStepSelectedIds(configForm, step)
     const isSelected = selectedIds.includes(optionId)
     const maxSelect = Math.max(1, Number(step.maxSelect) || 1)
+    const allowsRepeatedFlavor = step.type === 'flavors' && isComboProduct(configProduct) && maxSelect > 1
+
+    if (allowsRepeatedFlavor) {
+      if (selectedIds.length >= maxSelect) {
+        return
+      }
+
+      setConfigForm((current) => ({
+        ...current,
+        flavorIds: [...current.flavorIds, optionId],
+      }))
+      return
+    }
 
     if (!isSelected && selectedIds.length >= maxSelect) {
       if (step.type === 'flavors' && maxSelect === 1) {
@@ -1249,6 +1277,26 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
           ...current.addonSelections,
           [step.id]: nextSelectedIds,
         },
+      }
+    })
+  }
+
+  function removeConfigOption(step, optionId) {
+    if (step.type !== 'flavors') {
+      toggleConfigOption(step, optionId)
+      return
+    }
+
+    setConfigForm((current) => {
+      const optionIndex = current.flavorIds.lastIndexOf(optionId)
+
+      if (optionIndex < 0) {
+        return current
+      }
+
+      return {
+        ...current,
+        flavorIds: current.flavorIds.filter((id, index) => id !== optionId || index !== optionIndex),
       }
     })
   }
@@ -1706,7 +1754,53 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
 
                 <div className="customer-option-list">
                   {currentConfigStep.options.map((option) => {
-                    const selected = getCartStepSelectedIds(configForm, currentConfigStep).includes(option.id)
+                    const selectedIds = getCartStepSelectedIds(configForm, currentConfigStep)
+                    const selectedCount = selectedIds.filter((id) => id === option.id).length
+                    const selected = selectedCount > 0
+                    const allowsRepeatedFlavor = currentConfigStep.type === 'flavors' && isComboProduct(configProduct) && currentConfigStep.maxSelect > 1
+                    const canAddRepeatedFlavor = selectedIds.length < currentConfigStep.maxSelect
+
+                    if (allowsRepeatedFlavor) {
+                      return (
+                        <article
+                          className={`customer-option-quantity ${selected ? 'is-selected' : ''}`.trim()}
+                          key={option.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => canAddRepeatedFlavor && toggleConfigOption(currentConfigStep, option.id)}
+                          onKeyDown={(event) => {
+                            if ((event.key === 'Enter' || event.key === ' ') && canAddRepeatedFlavor) {
+                              event.preventDefault()
+                              toggleConfigOption(currentConfigStep, option.id)
+                            }
+                          }}
+                        >
+                          <div>
+                            <strong>{option.name}</strong>
+                            <small>{Number(option.price) > 0 ? `+ ${formatCurrency(option.price)}` : 'Sem adicional'}</small>
+                          </div>
+                          <div className="customer-option-stepper" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              aria-label={`Remover ${option.name}`}
+                              disabled={selectedCount <= 0}
+                              type="button"
+                              onClick={() => removeConfigOption(currentConfigStep, option.id)}
+                            >
+                              -
+                            </button>
+                            <b>{selectedCount}</b>
+                            <button
+                              aria-label={`Adicionar ${option.name}`}
+                              disabled={!canAddRepeatedFlavor}
+                              type="button"
+                              onClick={() => toggleConfigOption(currentConfigStep, option.id)}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    }
 
                     return (
                       <button className={selected ? 'is-selected' : ''} key={option.id} type="button" onClick={() => toggleConfigOption(currentConfigStep, option.id)}>
@@ -1728,7 +1822,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
                 <input min="1" type="number" value={configForm.quantity} onChange={(event) => setConfigForm((current) => ({ ...current, quantity: event.target.value }))} />
               </label>
               {getSelectedCartFlavorNames(configProduct, configForm.flavorIds).length > 0 ? (
-                <p><strong>Sabores:</strong> {getSelectedCartFlavorNames(configProduct, configForm.flavorIds).join(', ')}</p>
+                <p><strong>Sabores:</strong> {formatRepeatedCartNames(getSelectedCartFlavorNames(configProduct, configForm.flavorIds))}</p>
               ) : null}
               {getSelectedCartAddonEntries(configProduct, configForm.addonSelections).map((entry) => (
                 <p key={entry.groupId}><strong>{entry.groupName}:</strong> {entry.label}</p>
