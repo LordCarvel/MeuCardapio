@@ -7,6 +7,8 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappIntegration;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappMessage;
 
+import tools.jackson.databind.JsonNode;
+
 public final class WhatsappDtos {
     private WhatsappDtos() {
     }
@@ -50,10 +52,10 @@ public final class WhatsappDtos {
     public record WhatsappSessionRequest(String sessionName, String phoneNumber, String webhookUrl) {
     }
 
-    public record WhatsappQrResponse(String status, String qrCode, Object raw) {
+    public record WhatsappQrResponse(String status, String qrCode, JsonNode raw) {
     }
 
-    public record WhatsappStatusResponse(String status, Object raw) {
+    public record WhatsappStatusResponse(String status, JsonNode raw) {
     }
 
     public record WhatsappConversationResponse(

@@ -15,8 +15,6 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappIntegration;
@@ -25,6 +23,9 @@ import com.meucardapio.dev.vinis.meuCardapio.repository.StoreRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappConversationRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappIntegrationRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappMessageRepository;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class WasenderApiService {

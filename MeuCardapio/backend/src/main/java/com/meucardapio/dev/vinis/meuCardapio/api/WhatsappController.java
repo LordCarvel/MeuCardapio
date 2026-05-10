@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationResponse;
@@ -31,6 +30,8 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappIntegration;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappConversationRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappMessageRepository;
 import com.meucardapio.dev.vinis.meuCardapio.service.WasenderApiService;
+
+import tools.jackson.databind.JsonNode;
 
 @RestController
 @RequestMapping("/api")
@@ -65,12 +66,12 @@ public class WhatsappController {
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/session")
-    public Object createSession(@PathVariable UUID storeId, @RequestBody WhatsappSessionRequest request) {
+    public JsonNode createSession(@PathVariable UUID storeId, @RequestBody WhatsappSessionRequest request) {
         return wasender.createSession(storeId, request.sessionName(), request.phoneNumber(), request.webhookUrl());
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/connect")
-    public Object connect(@PathVariable UUID storeId) {
+    public JsonNode connect(@PathVariable UUID storeId) {
         return wasender.connect(storeId);
     }
 
