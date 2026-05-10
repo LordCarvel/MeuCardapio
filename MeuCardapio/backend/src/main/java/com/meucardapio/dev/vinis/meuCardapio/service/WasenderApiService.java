@@ -61,7 +61,7 @@ public class WasenderApiService {
         if (hasText(apiKey)) integration.setApiKey(apiKey.trim());
         if (hasText(sessionId)) integration.setSessionId(sessionId.trim());
         if (hasText(sessionName)) integration.setSessionName(sessionName.trim());
-        if (hasText(phoneNumber)) integration.setPhoneNumber(phoneNumber.trim());
+        if (hasText(phoneNumber)) integration.setPhoneNumber(normalizeInternationalPhone(phoneNumber));
         if (hasText(webhookSecret)) integration.setWebhookSecret(webhookSecret.trim());
         if (hasText(webhookUrl)) integration.setWebhookUrl(webhookUrl.trim());
         integration.touch();
@@ -73,7 +73,7 @@ public class WasenderApiService {
         WhatsappIntegration integration = getOrCreate(storeId);
         String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
         String name = hasText(sessionName) ? sessionName.trim() : Optional.ofNullable(integration.getSessionName()).orElse("MeuCardapio");
-        String phone = hasText(phoneNumber) ? phoneNumber.trim() : require(integration.getPhoneNumber(), "Informe o telefone internacional da sessao.");
+        String phone = normalizeInternationalPhone(hasText(phoneNumber) ? phoneNumber : require(integration.getPhoneNumber(), "Informe o telefone internacional da sessao."));
         String hook = hasText(webhookUrl) ? webhookUrl.trim() : integration.getWebhookUrl();
 
         JsonNode response = restClient.post()
@@ -256,6 +256,14 @@ public class WasenderApiService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
         }
         return value.trim();
+    }
+
+    private static String normalizeInternationalPhone(String value) {
+        String phone = Optional.ofNullable(value).orElse("").replaceAll("\\D", "");
+        if (phone.length() < 10 || phone.length() > 15) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o telefone com DDI e apenas numeros. Exemplo: 5547999999999.");
+        }
+        return phone;
     }
 
     private static boolean hasText(String value) {
