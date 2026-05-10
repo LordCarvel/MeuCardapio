@@ -1609,6 +1609,81 @@
   font-size: 22px;
 }
 
+.finance-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.finance-filter select,
+.finance-filter input {
+  min-height: 36px;
+  min-width: 128px;
+  padding: 0 10px;
+  border: 1px solid #dbe1d7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+}
+
+.whatsapp-mirror__body {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.38fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 280px;
+}
+
+.whatsapp-mirror__sidebar,
+.whatsapp-mirror__conversation {
+  border: 1px solid #dfe4dc;
+  border-radius: 8px;
+  background: #fbfcf8;
+  overflow: hidden;
+}
+
+.whatsapp-mirror__sidebar {
+  display: grid;
+  align-content: start;
+}
+
+.whatsapp-mirror__sidebar button {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid #e8ece5;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.whatsapp-mirror__sidebar small,
+.whatsapp-mirror__conversation small {
+  color: #687574;
+}
+
+.whatsapp-mirror__conversation {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.whatsapp-mirror__conversation header,
+.whatsapp-mirror__conversation div {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.whatsapp-mirror__conversation p {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eef8f0;
+  color: var(--text);
+}
+
 .kds-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(220px, 1fr));

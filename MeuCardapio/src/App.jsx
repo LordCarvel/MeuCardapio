@@ -2227,6 +2227,90 @@ function nowDateTime() {
   })
 }
 
+function formatDateInputValue(date = new Date()) {
+  return date.toISOString().slice(0, 10)
+}
+
+function parseRecordDate(value) {
+  if (!value) {
+    return null
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value
+  }
+
+  const text = String(value).trim()
+  const brDateTime = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:,\s*)?(\d{2})?:?(\d{2})?/)
+  if (brDateTime) {
+    const [, day, month, year, hour = '00', minute = '00'] = brDateTime
+    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute))
+  }
+
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function getRecordDate(record = {}) {
+  return parseRecordDate(record.createdAt || record.backendCreatedAt || record.time || record.paidAt) || new Date()
+}
+
+function getDayRange(date = new Date()) {
+  const start = new Date(date)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return { start, end }
+}
+
+function isRecordInRange(record = {}, startDate = null, endDate = null) {
+  const recordDate = getRecordDate(record)
+  const start = parseRecordDate(startDate)
+  const end = parseRecordDate(endDate)
+
+  if (start && recordDate < start) {
+    return false
+  }
+
+  if (end) {
+    const exclusiveEnd = new Date(end)
+    exclusiveEnd.setDate(exclusiveEnd.getDate() + 1)
+    if (recordDate >= exclusiveEnd) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function filterRecordsByPeriod(records = [], period = 'all', customStart = '', customEnd = '') {
+  const now = new Date()
+  let start = null
+  let end = null
+
+  if (period === 'today') {
+    const range = getDayRange(now)
+    start = range.start
+    end = now
+  } else if (period === 'week') {
+    start = new Date(now)
+    start.setDate(start.getDate() - 6)
+    start.setHours(0, 0, 0, 0)
+    end = now
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1)
+    end = now
+  } else if (period === 'year') {
+    start = new Date(now.getFullYear(), 0, 1)
+    end = now
+  } else if (period === 'custom') {
+    start = customStart || null
+    end = customEnd || null
+  }
+
+  return records.filter((record) => isRecordInRange(record, start, end))
+}
+
 function clampNumber(value, min, max, fallback) {
   const parsed = Number(value)
 
@@ -2349,6 +2433,7 @@ function createDefaultAppData() {
     activeNav: 'orders',
     storeOpen: true,
     cashOpen: false,
+    cashOpenedAt: '',
     noticeVisible: false,
     blockedOrders: initialBlockedOrders,
     settings: initialSettings,
@@ -2390,6 +2475,7 @@ function createBlankAppData() {
     ...defaults,
     orders: [],
     orderSequence: 8300,
+    cashOpenedAt: '',
     blockedOrders: [],
     chatMessages: [],
     categories: [],
@@ -2435,6 +2521,7 @@ function normalizeAppSnapshot(snapshot = {}) {
     ...parsed,
     orders: normalizedOrders,
     orderSequence,
+    cashOpenedAt: parsed.cashOpenedAt || defaults.cashOpenedAt,
     blockedOrders: Array.isArray(parsed.blockedOrders) ? parsed.blockedOrders : defaults.blockedOrders,
     settings: {
       ...defaults.settings,
@@ -4686,10 +4773,11 @@ function Notice({ visible, onClose, onOpenPassword }) {
 }
 
 function Metrics({ orders, storeOpen }) {
-  const activeOrders = orders.filter((order) => order.status !== 'completed')
+  const todayOrders = filterRecordsByPeriod(orders, 'today')
+  const activeOrders = todayOrders.filter((order) => order.status !== 'completed')
   const ready = activeOrders.filter((order) => order.status === 'ready').length
   const production = activeOrders.filter((order) => order.status === 'production').length
-  const revenue = orders.reduce((sum, order) => sum + order.total, 0)
+  const revenue = todayOrders.reduce((sum, order) => sum + order.total, 0)
 
   return (
     <section className="metrics" aria-label="Resumo da operacao">
@@ -5469,14 +5557,16 @@ function DeliveryRadar({ orders, couriers, onOpenModal }) {
   )
 }
 
-function CashDeskPanel({ orders, finance, cashOpen, onOpenModal }) {
+function CashDeskPanel({ orders, finance, cashOpen, cashOpenedAt, onOpenModal }) {
+  const cashOrders = cashOpenedAt ? orders.filter((order) => isRecordInRange(order, parseRecordDate(cashOpenedAt), null)) : orders
+  const cashFinance = cashOpenedAt ? finance.filter((item) => isRecordInRange(item, parseRecordDate(cashOpenedAt), null)) : finance
   const paymentMix = ['Cartao', 'Dinheiro', 'Dividir', 'Mesa'].map((payment) => ({
     payment,
-    amount: orders
+    amount: cashOrders
       .filter((order) => order.payment === payment)
       .reduce((sum, order) => sum + order.total, 0),
   }))
-  const pendingFinance = finance.filter((item) => item.status !== 'Pago')
+  const pendingFinance = cashFinance.filter((item) => item.status !== 'Pago')
   const drawerEstimate = paymentMix.find((item) => item.payment === 'Dinheiro')?.amount || 0
 
   return (
@@ -6454,6 +6544,37 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
 function ServiceSection({ orders, channels, recoveries, chatMessages, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
   return (
     <section className="module-grid module-grid--service">
+      <article className="module-card module-card--span whatsapp-mirror">
+        <header className="module-card__header">
+          <div>
+            <h2>Espelho do WhatsApp</h2>
+            <p>Atendimento da loja com fila e historico do canal.</p>
+          </div>
+          <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">Abrir WhatsApp Web</a>
+        </header>
+        <div className="whatsapp-mirror__body">
+          <div className="whatsapp-mirror__sidebar">
+            {orders.slice(0, 6).map((order) => (
+              <button key={order.id} type="button" onClick={() => onOpenModal('orderDetails', order)}>
+                <strong>#{order.id} - {order.customer}</strong>
+                <small>{order.phone} - {getOrderStageLabel(order.status)}</small>
+              </button>
+            ))}
+          </div>
+          <div className="whatsapp-mirror__conversation">
+            <header>
+              <strong>WhatsApp Web</strong>
+              <small>O WhatsApp bloqueia espelho embutido no navegador. A integracao real precisa usar conector/API; por enquanto este painel replica a fila operacional e abre o Web em aba segura.</small>
+            </header>
+            <div>
+              {chatMessages.slice(-4).map((message) => (
+                <p key={message.id}><b>{message.author}:</b> {message.text}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      </article>
+
       <article className="module-card">
         <header className="module-card__header">
           <div>
@@ -6648,19 +6769,24 @@ function InventorySection({ inventory, onOpenModal, onStockAdjust }) {
 }
 
 function FinanceSection({ finance, orders, onOpenModal, onPayFinance }) {
-  const income = finance.filter((item) => item.type === 'Entrada').reduce((sum, item) => sum + item.amount, 0)
-  const outcome = finance.filter((item) => item.type === 'Saida').reduce((sum, item) => sum + item.amount, 0)
+  const [period, setPeriod] = useState('month')
+  const [customStart, setCustomStart] = useState(formatDateInputValue(new Date()))
+  const [customEnd, setCustomEnd] = useState(formatDateInputValue(new Date()))
+  const filteredFinance = filterRecordsByPeriod(finance, period, customStart, customEnd)
+  const filteredOrders = filterRecordsByPeriod(orders, period, customStart, customEnd)
+  const income = filteredFinance.filter((item) => item.type === 'Entrada').reduce((sum, item) => sum + item.amount, 0)
+  const outcome = filteredFinance.filter((item) => item.type === 'Saida').reduce((sum, item) => sum + item.amount, 0)
   const earningsBySource = ['WhatsApp', 'Balcao', 'Mesa'].map((source) => ({
     source,
-    total: orders
+    total: filteredOrders
       .filter((order) => getOrderSource(order) === source)
       .reduce((sum, order) => sum + order.total, 0),
   })).filter((item) => item.total > 0)
   const earningsPeak = Math.max(...earningsBySource.map((item) => item.total), 1)
-  const paidRevenue = finance
+  const paidRevenue = filteredFinance
     .filter((item) => item.type === 'Entrada' && item.status === 'Pago')
     .reduce((sum, item) => sum + item.amount, 0)
-  const averageOrder = orders.length > 0 ? orders.reduce((sum, order) => sum + order.total, 0) / orders.length : 0
+  const averageOrder = filteredOrders.length > 0 ? filteredOrders.reduce((sum, order) => sum + order.total, 0) / filteredOrders.length : 0
 
   return (
     <section className="module-grid module-grid--finance">
@@ -6672,6 +6798,22 @@ function FinanceSection({ finance, orders, onOpenModal, onPayFinance }) {
           </div>
           <Button variant="primary" data-testid="new-finance" onClick={() => onOpenModal('newFinance')}>Lancamento</Button>
         </header>
+        <div className="finance-filter">
+          <select value={period} onChange={(event) => setPeriod(event.target.value)}>
+            <option value="today">Hoje</option>
+            <option value="week">Semana</option>
+            <option value="month">Mes</option>
+            <option value="year">Ano</option>
+            <option value="all">Tudo</option>
+            <option value="custom">Periodo</option>
+          </select>
+          {period === 'custom' ? (
+            <>
+              <input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} />
+              <input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
+            </>
+          ) : null}
+        </div>
         <div className="report-grid">
           <div><span>Ganhos brutos</span><strong>{formatCurrency(income)}</strong></div>
           <div><span>Despesas</span><strong>{formatCurrency(outcome)}</strong></div>
@@ -6687,11 +6829,11 @@ function FinanceSection({ finance, orders, onOpenModal, onPayFinance }) {
           </div>
         </header>
         <div className="data-list">
-          {finance.map((item) => (
+          {filteredFinance.map((item) => (
             <article className="data-row" key={item.id}>
               <span>
                 <strong>{item.title}</strong>
-                <small>{item.type} - {formatCurrency(item.amount)}</small>
+                <small>{item.type} - {formatCurrency(item.amount)} - {item.createdAt || 'Sem data'}</small>
               </span>
               <StatusBadge tone={item.status === 'Pago' ? 'success' : 'warning'}>{item.status}</StatusBadge>
               <Button onClick={() => onOpenModal('editFinance', item)}>Editar</Button>
@@ -6733,7 +6875,7 @@ function FinanceSection({ finance, orders, onOpenModal, onPayFinance }) {
             </article>
             <article>
               <span>Lancamentos pendentes</span>
-              <strong>{finance.filter((item) => item.status !== 'Pago').length}</strong>
+              <strong>{filteredFinance.filter((item) => item.status !== 'Pago').length}</strong>
             </article>
           </div>
         </div>
@@ -6877,6 +7019,7 @@ function App() {
   const [search, setSearch] = useState('')
   const [storeOpen, setStoreOpen] = useState(initialData.storeOpen)
   const [cashOpen, setCashOpen] = useState(initialData.cashOpen)
+  const [cashOpenedAt, setCashOpenedAt] = useState(initialData.cashOpenedAt)
   const [noticeVisible, setNoticeVisible] = useState(false)
   const [modal, setModal] = useState(null)
   const [newOrder, setNewOrder] = useState(blankOrder)
@@ -6956,6 +7099,8 @@ function App() {
   const accessKeyAttemptRef = useRef('')
   const backendLinkAttemptRef = useRef('')
   const lastMenuSnapshotRef = useRef(serializeMenuSnapshot(initialData))
+  const pendingMenuSnapshotRef = useRef('')
+  const menuSyncInFlightRef = useRef(false)
   const menuSyncRetryTimerRef = useRef(null)
   const menuSyncFailureNotifiedRef = useRef(false)
   const [menuSyncRetry, setMenuSyncRetry] = useState(0)
@@ -7060,6 +7205,7 @@ function App() {
     activeNav,
     storeOpen,
     cashOpen,
+    cashOpenedAt,
     noticeVisible,
     blockedOrders,
     settings,
@@ -7094,6 +7240,7 @@ function App() {
     activeNav,
     storeOpen,
     cashOpen,
+    cashOpenedAt,
     noticeVisible,
     blockedOrders,
     settings,
@@ -7174,7 +7321,10 @@ function App() {
       return undefined
     }
 
+    pendingMenuSnapshotRef.current = serialized
+
     const timeoutId = window.setTimeout(() => {
+      menuSyncInFlightRef.current = true
       updateBackendMenuSnapshot(backendStoreId, snapshot)
         .then(() => {
           if (menuSyncRetryTimerRef.current) {
@@ -7183,6 +7333,9 @@ function App() {
           }
           menuSyncFailureNotifiedRef.current = false
           lastMenuSnapshotRef.current = serialized
+          if (pendingMenuSnapshotRef.current === serialized) {
+            pendingMenuSnapshotRef.current = ''
+          }
         })
         .catch((err) => {
           if (!menuSyncFailureNotifiedRef.current) {
@@ -7195,6 +7348,9 @@ function App() {
               setMenuSyncRetry((current) => current + 1)
             }, 5000)
           }
+        })
+        .finally(() => {
+          menuSyncInFlightRef.current = false
         })
     }, 900)
 
@@ -7665,22 +7821,28 @@ function App() {
 
       setOrders((current) => mergeBackendOrders(current, workspace.orders))
       const snapshot = getWorkspaceMenuSnapshot(workspace)
-      if (snapshot.categories) {
+      const remoteMenuSerialized = serializeMenuSnapshot({
+        categories: snapshot.categories || categories,
+        products: snapshot.products || products,
+        deliveryZones: snapshot.deliveryZones || deliveryZones,
+      })
+      const hasPendingMenuWrite = Boolean(
+        menuSyncInFlightRef.current
+        || (pendingMenuSnapshotRef.current && pendingMenuSnapshotRef.current !== remoteMenuSerialized),
+      )
+
+      if (snapshot.categories && !hasPendingMenuWrite) {
         setCategories(snapshot.categories)
       }
-      if (snapshot.products) {
+      if (snapshot.products && !hasPendingMenuWrite) {
         const fallbackCategory = snapshot.categories?.[0]?.name || categories[0]?.name || 'Cardapio'
         setProducts(snapshot.products.map((product) => normalizeProduct(product, fallbackCategory)))
       }
-      if (snapshot.deliveryZones) {
+      if (snapshot.deliveryZones && !hasPendingMenuWrite) {
         setDeliveryZones(snapshot.deliveryZones)
       }
-      if (snapshot.categories || snapshot.products || snapshot.deliveryZones) {
-        lastMenuSnapshotRef.current = serializeMenuSnapshot({
-          categories: snapshot.categories || categories,
-          products: snapshot.products || products,
-          deliveryZones: snapshot.deliveryZones || deliveryZones,
-        })
+      if ((snapshot.categories || snapshot.products || snapshot.deliveryZones) && !hasPendingMenuWrite) {
+        lastMenuSnapshotRef.current = remoteMenuSerialized
       }
       updatePilotSync({
         enabled: enable ? true : pilotSync.enabled,
@@ -8342,6 +8504,7 @@ function App() {
     setActiveNav(merged.activeNav)
     setStoreOpen(Boolean(merged.storeOpen))
     setCashOpen(Boolean(merged.cashOpen))
+    setCashOpenedAt(merged.cashOpenedAt || '')
     setNoticeVisible(false)
     setBlockedOrders(merged.blockedOrders)
     setSettings(merged.settings)
@@ -9617,6 +9780,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         type: 'Entrada',
         amount: order.total,
         status: order.payment === 'Mesa' ? 'Pendente' : 'Pago',
+        createdAt: nowDateTime(),
       },
       ...current,
     ])
@@ -9706,6 +9870,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       total,
       payment: normalizeOrderPayment(newOrder.payment),
       document: normalizedDocument,
+      createdAt: editedSourceOrder?.createdAt || nowDateTime(),
       time: editedSourceOrder?.time || nowTime(),
       addressId: newOrder.addressId || '',
       addressLat: newOrder.addressLat || '',
@@ -11191,11 +11356,12 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       type: financeForm.type,
       amount: parseCurrencyInput(financeForm.amount),
       status: financeForm.status,
+      createdAt: financeId ? undefined : nowDateTime(),
     }
 
     if (financeId) {
       setFinance((current) =>
-        current.map((item) => (item.id === financeId ? { ...item, ...normalizedFinance } : item)),
+        current.map((item) => (item.id === financeId ? { ...item, ...normalizedFinance, createdAt: item.createdAt || nowDateTime() } : item)),
       )
       closeModal()
       notify('Lancamento atualizado.')
@@ -13218,10 +13384,12 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     }
 
     if (modal.type === 'cash') {
-      const paidEntries = finance.filter((item) => item.status === 'Pago')
-      const cashEntries = orders.filter((order) => order.payment === 'Dinheiro').reduce((sum, order) => sum + order.total, 0)
-      const cardEntries = orders.filter((order) => order.payment === 'Cartao').reduce((sum, order) => sum + order.total, 0)
-      const splitEntries = orders.filter((order) => order.payment === 'Dividir').reduce((sum, order) => sum + order.total, 0)
+      const cashSessionOrders = cashOpenedAt ? orders.filter((order) => isRecordInRange(order, parseRecordDate(cashOpenedAt), null)) : orders
+      const cashSessionFinance = cashOpenedAt ? finance.filter((item) => isRecordInRange(item, parseRecordDate(cashOpenedAt), null)) : finance
+      const paidEntries = cashSessionFinance.filter((item) => item.status === 'Pago')
+      const cashEntries = cashSessionOrders.filter((order) => order.payment === 'Dinheiro').reduce((sum, order) => sum + order.total, 0)
+      const cardEntries = cashSessionOrders.filter((order) => order.payment === 'Cartao').reduce((sum, order) => sum + order.total, 0)
+      const splitEntries = cashSessionOrders.filter((order) => order.payment === 'Dividir').reduce((sum, order) => sum + order.total, 0)
 
       return (
         <Modal
@@ -13234,7 +13402,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               <Button
                 variant="primary"
                 onClick={() => {
-                  setCashOpen((current) => !current)
+                  const nextCashOpen = !cashOpen
+                  setCashOpen(nextCashOpen)
+                  setCashOpenedAt(nextCashOpen ? nowDateTime() : '')
                   notify(cashOpen ? 'Caixa fechado.' : 'Caixa aberto.')
                   closeModal()
                 }}
@@ -13248,7 +13418,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <div className="modal-summary">
               <span>Status atual</span>
               <strong>{cashOpen ? 'Aberto para vendas' : 'Fechado para conferencia'}</strong>
-              <p>Visual de abertura, conferencia por pagamento e fechamento do turno.</p>
+              <p>{cashOpen && cashOpenedAt ? `Valores desde a abertura em ${cashOpenedAt}.` : 'Abra o caixa para iniciar uma nova conferencia de turno.'}</p>
             </div>
             <article className="list-row">
               <span>
