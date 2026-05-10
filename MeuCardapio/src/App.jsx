@@ -6755,18 +6755,21 @@ function WhatsappSetupPanel({ storeId }) {
   async function startWhatsappSession() {
     if (!storeId) return
     try {
-      await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
-      await createWhatsappSession(storeId, {
-        sessionName: whatsappForm.sessionName,
-        phoneNumber: whatsappForm.phoneNumber,
-        webhookUrl,
-      })
+      const saved = await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
+      const hasExistingSession = Boolean((whatsappForm.sessionId || saved.sessionId || '').trim())
+      if (!hasExistingSession) {
+        await createWhatsappSession(storeId, {
+          sessionName: whatsappForm.sessionName,
+          phoneNumber: whatsappForm.phoneNumber,
+          webhookUrl,
+        })
+      }
       await connectWhatsappSession(storeId)
       const qr = await getWhatsappQrCode(storeId)
       const config = await getWhatsappConfig(storeId)
       setWhatsappConfig(config)
       setWhatsappQr(qr.qrCode || '')
-      setWhatsappStatus({ type: 'success', message: qr.status || 'Sessao criada. Escaneie o QR Code.' })
+      setWhatsappStatus({ type: 'success', message: qr.status || (hasExistingSession ? 'Sessao conectada. Escaneie o QR Code.' : 'Sessao criada. Escaneie o QR Code.') })
     } catch (err) {
       setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao conectar WhatsApp.' })
     }

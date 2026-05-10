@@ -71,6 +71,16 @@ public class WasenderApiService {
     @Transactional
     public JsonNode createSession(UUID storeId, String sessionName, String phoneNumber, String webhookUrl) {
         WhatsappIntegration integration = getOrCreate(storeId);
+        if (hasText(integration.getSessionId())) {
+            return objectMapper.createObjectNode()
+                    .put("success", true)
+                    .put("message", "Sessao existente reutilizada.")
+                    .set("data", objectMapper.createObjectNode()
+                            .put("id", integration.getSessionId())
+                            .put("name", Optional.ofNullable(integration.getSessionName()).orElse("MeuCardapio"))
+                            .put("phone_number", Optional.ofNullable(integration.getPhoneNumber()).orElse(""))
+                            .put("status", Optional.ofNullable(integration.getStatus()).orElse("")));
+        }
         String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
         String name = hasText(sessionName) ? sessionName.trim() : Optional.ofNullable(integration.getSessionName()).orElse("MeuCardapio");
         String phone = normalizeInternationalPhone(hasText(phoneNumber) ? phoneNumber : require(integration.getPhoneNumber(), "Informe o telefone internacional da sessao."));
