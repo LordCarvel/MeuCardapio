@@ -315,3 +315,54 @@ export async function resetBackendPassword(email, code, password) {
     body: JSON.stringify({ email, code, password }),
   })
 }
+
+export async function getWhatsappConfig(storeId) {
+  return request(`/stores/${storeId}/whatsapp/config`)
+}
+
+export async function saveWhatsappConfig(storeId, config) {
+  return request(`/stores/${storeId}/whatsapp/config`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export async function createWhatsappSession(storeId, session) {
+  return request(`/stores/${storeId}/whatsapp/session`, {
+    method: 'POST',
+    body: JSON.stringify(session),
+  })
+}
+
+export async function connectWhatsappSession(storeId) {
+  return request(`/stores/${storeId}/whatsapp/connect`, { method: 'POST' })
+}
+
+export async function getWhatsappQrCode(storeId) {
+  return request(`/stores/${storeId}/whatsapp/qrcode`)
+}
+
+export async function getWhatsappStatus(storeId) {
+  return request(`/stores/${storeId}/whatsapp/status`)
+}
+
+export async function getWhatsappConversations(storeId) {
+  return request(`/stores/${storeId}/whatsapp/conversations`)
+}
+
+export async function getWhatsappMessages(storeId, remoteJid) {
+  return request(`/stores/${storeId}/whatsapp/messages?remoteJid=${encodeURIComponent(remoteJid)}`)
+}
+
+export async function sendWhatsappMessage(storeId, to, text) {
+  return request(`/stores/${storeId}/whatsapp/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ to, text }),
+  })
+}
+
+export async function markWhatsappConversationRead(storeId, remoteJid) {
+  return request(`/stores/${storeId}/whatsapp/read?remoteJid=${encodeURIComponent(remoteJid)}`, {
+    method: 'POST',
+  })
+}

@@ -1635,6 +1635,70 @@
   min-height: 280px;
 }
 
+.whatsapp-config {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.whatsapp-config input {
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid #dbe1d7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+}
+
+.whatsapp-status {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #0f5f96;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.whatsapp-status--danger {
+  background: #fff0ed;
+  color: #ad3e2f;
+}
+
+.whatsapp-status--warning {
+  background: #fff7de;
+  color: #8b6500;
+}
+
+.whatsapp-status--success {
+  background: #ecf9f1;
+  color: #1b7d45;
+}
+
+.whatsapp-qr {
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px dashed #bdcbc3;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.whatsapp-qr img {
+  width: 220px;
+  max-width: 100%;
+}
+
+.whatsapp-qr code {
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .whatsapp-mirror__sidebar,
 .whatsapp-mirror__conversation {
   border: 1px solid #dfe4dc;
@@ -1659,6 +1723,10 @@
   text-align: left;
 }
 
+.whatsapp-mirror__sidebar button.is-active {
+  background: #e8f4ed;
+}
+
 .whatsapp-mirror__sidebar small,
 .whatsapp-mirror__conversation small {
   color: #687574;
@@ -1666,7 +1734,7 @@
 
 .whatsapp-mirror__conversation {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .whatsapp-mirror__conversation header,
@@ -1683,6 +1751,36 @@
   background: #eef8f0;
   color: var(--text);
 }
+
+.whatsapp-mirror__conversation p.is-outbound {
+  justify-self: end;
+  background: #d8f5df;
+}
+
+.whatsapp-reply {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #dfe4dc;
+}
+
+.whatsapp-reply input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #dbe1d7;
+  border-radius: 8px;
+  font: inherit;
+}
+
+@media (max-width: 900px) {
+  .whatsapp-config,
+  .whatsapp-mirror__body {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 .kds-grid {
   display: grid;

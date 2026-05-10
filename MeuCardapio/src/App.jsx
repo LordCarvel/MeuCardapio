@@ -13,10 +13,20 @@ import {
   getBackendStore,
   loadBackendWorkspace,
   loadBackendWorkspaceByAccessKey,
+  connectWhatsappSession,
+  createWhatsappSession,
+  getWhatsappConfig,
+  getWhatsappConversations,
+  getWhatsappMessages,
+  getWhatsappQrCode,
+  getWhatsappStatus,
   loginBackendUser,
+  markWhatsappConversationRead,
   requestPasswordResetCode,
   requestSignupCode,
   resetBackendPassword,
+  saveWhatsappConfig,
+  sendWhatsappMessage,
   signupBackendAccount,
   patchBackendStore,
   updateBackendStore,
@@ -6541,20 +6551,187 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
   )
 }
 
-function ServiceSection({ orders, channels, recoveries, chatMessages, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
+function ServiceSection({ storeId, orders, channels, recoveries, chatMessages, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
+  const [whatsappConfig, setWhatsappConfig] = useState(null)
+  const [whatsappForm, setWhatsappForm] = useState({
+    personalAccessToken: '',
+    apiKey: '',
+    sessionId: '',
+    sessionName: 'MeuCardapio',
+    phoneNumber: '',
+    webhookSecret: '',
+  })
+  const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
+  const [whatsappQr, setWhatsappQr] = useState('')
+  const [whatsappConversations, setWhatsappConversations] = useState([])
+  const [selectedWhatsappJid, setSelectedWhatsappJid] = useState('')
+  const [whatsappMessages, setWhatsappMessages] = useState([])
+  const [whatsappDraft, setWhatsappDraft] = useState('')
+  const webhookUrl = storeId ? `${API_BASE_URL}/stores/${storeId}/whatsapp/webhook` : ''
+
+  useEffect(() => {
+    if (!storeId) {
+      return undefined
+    }
+
+    let cancelled = false
+    async function loadWhatsapp() {
+      try {
+        const [config, conversations] = await Promise.all([
+          getWhatsappConfig(storeId),
+          getWhatsappConversations(storeId),
+        ])
+        if (cancelled) return
+        setWhatsappConfig(config)
+        setWhatsappForm((current) => ({
+          ...current,
+          sessionId: config.sessionId || current.sessionId,
+          sessionName: config.sessionName || current.sessionName,
+          phoneNumber: config.phoneNumber || current.phoneNumber,
+          webhookSecret: current.webhookSecret,
+          apiKey: '',
+          personalAccessToken: '',
+        }))
+        setWhatsappConversations(conversations)
+        setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
+      } catch (err) {
+        if (!cancelled) {
+          setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar WhatsApp.' })
+        }
+      }
+    }
+    void loadWhatsapp()
+    const interval = window.setInterval(loadWhatsapp, 8000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [storeId])
+
+  useEffect(() => {
+    if (!storeId || !selectedWhatsappJid) {
+      return
+    }
+
+    let cancelled = false
+    async function loadMessages() {
+      try {
+        const loaded = await getWhatsappMessages(storeId, selectedWhatsappJid)
+        if (!cancelled) {
+          setWhatsappMessages(loaded)
+          void markWhatsappConversationRead(storeId, selectedWhatsappJid)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar mensagens.' })
+        }
+      }
+    }
+    void loadMessages()
+    const interval = window.setInterval(loadMessages, 6000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [selectedWhatsappJid, storeId])
+
+  async function saveWhatsapp() {
+    if (!storeId) return
+    try {
+      const saved = await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
+      setWhatsappConfig(saved)
+      setWhatsappStatus({ type: 'success', message: 'Credenciais salvas.' })
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao salvar.' })
+    }
+  }
+
+  async function startWhatsappSession() {
+    if (!storeId) return
+    try {
+      await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
+      await createWhatsappSession(storeId, {
+        sessionName: whatsappForm.sessionName,
+        phoneNumber: whatsappForm.phoneNumber,
+        webhookUrl,
+      })
+      await connectWhatsappSession(storeId)
+      const qr = await getWhatsappQrCode(storeId)
+      const config = await getWhatsappConfig(storeId)
+      setWhatsappConfig(config)
+      setWhatsappQr(qr.qrCode || '')
+      setWhatsappStatus({ type: 'success', message: qr.status || 'Sessao criada. Escaneie o QR Code.' })
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao conectar WhatsApp.' })
+    }
+  }
+
+  async function refreshWhatsappStatus() {
+    if (!storeId) return
+    try {
+      const status = await getWhatsappStatus(storeId)
+      setWhatsappStatus({ type: 'success', message: status.status || 'Status consultado.' })
+    } catch (err) {
+      setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel consultar status.' })
+    }
+  }
+
+  async function sendWhatsapp(event) {
+    event.preventDefault()
+    if (!storeId || !selectedWhatsappJid || !whatsappDraft.trim()) return
+    try {
+      await sendWhatsappMessage(storeId, selectedWhatsappJid, whatsappDraft.trim())
+      setWhatsappDraft('')
+      setWhatsappMessages(await getWhatsappMessages(storeId, selectedWhatsappJid))
+      setWhatsappConversations(await getWhatsappConversations(storeId))
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
+    }
+  }
+
   return (
     <section className="module-grid module-grid--service">
       <article className="module-card module-card--span whatsapp-mirror">
         <header className="module-card__header">
           <div>
             <h2>Espelho do WhatsApp</h2>
-            <p>Atendimento da loja com fila e historico do canal.</p>
+            <p>Conecte uma sessao WaSenderAPI para atender dentro do painel.</p>
           </div>
-          <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">Abrir WhatsApp Web</a>
+          <div className="module-header-actions">
+            <Button onClick={refreshWhatsappStatus}>Status</Button>
+            <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">WhatsApp Web</a>
+          </div>
         </header>
+        <div className="whatsapp-config">
+          <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder="Personal Access Token" type="password" />
+          <input value={whatsappForm.apiKey} onChange={(event) => setWhatsappForm({ ...whatsappForm, apiKey: event.target.value })} placeholder={whatsappConfig?.hasApiKey ? 'API key salva' : 'API key da sessao'} type="password" />
+          <input value={whatsappForm.sessionName} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionName: event.target.value })} placeholder="Nome da sessao" />
+          <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value })} placeholder="Telefone com DDI, ex: 554799999999" />
+          <input value={whatsappForm.sessionId} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionId: event.target.value })} placeholder={whatsappConfig?.sessionId ? `Sessao: ${whatsappConfig.sessionId}` : 'ID da sessao existente'} />
+          <input value={whatsappForm.webhookSecret} onChange={(event) => setWhatsappForm({ ...whatsappForm, webhookSecret: event.target.value })} placeholder={whatsappConfig?.hasWebhookSecret ? 'Webhook secret salvo' : 'Webhook secret'} type="password" />
+          <input readOnly value={webhookUrl} />
+          <Button onClick={saveWhatsapp}>Salvar</Button>
+          <Button variant="primary" onClick={startWhatsappSession}>Criar/conectar</Button>
+        </div>
+        {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
+        {whatsappQr ? (
+          <div className="whatsapp-qr">
+            {whatsappQr.startsWith('data:image') ? <img alt="QR Code WhatsApp" src={whatsappQr} /> : <code>{whatsappQr}</code>}
+          </div>
+        ) : null}
         <div className="whatsapp-mirror__body">
           <div className="whatsapp-mirror__sidebar">
-            {orders.slice(0, 6).map((order) => (
+            {whatsappConversations.length > 0 ? whatsappConversations.map((conversation) => (
+              <button
+                className={selectedWhatsappJid === conversation.remoteJid ? 'is-active' : ''}
+                key={conversation.id}
+                type="button"
+                onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
+              >
+                <strong>{conversation.contactName || conversation.phone || conversation.remoteJid}</strong>
+                <small>{conversation.lastMessage || 'Sem mensagens'} {conversation.unreadCount > 0 ? `(${conversation.unreadCount})` : ''}</small>
+              </button>
+            )) : orders.slice(0, 6).map((order) => (
               <button key={order.id} type="button" onClick={() => onOpenModal('orderDetails', order)}>
                 <strong>#{order.id} - {order.customer}</strong>
                 <small>{order.phone} - {getOrderStageLabel(order.status)}</small>
@@ -6563,14 +6740,20 @@ function ServiceSection({ orders, channels, recoveries, chatMessages, onToggleCh
           </div>
           <div className="whatsapp-mirror__conversation">
             <header>
-              <strong>WhatsApp Web</strong>
-              <small>O WhatsApp bloqueia espelho embutido no navegador. A integracao real precisa usar conector/API; por enquanto este painel replica a fila operacional e abre o Web em aba segura.</small>
+              <strong>{selectedWhatsappJid || 'WhatsApp'}</strong>
+              <small>{whatsappConfig?.status || 'Aguardando conexao'}</small>
             </header>
             <div>
-              {chatMessages.slice(-4).map((message) => (
-                <p key={message.id}><b>{message.author}:</b> {message.text}</p>
+              {(whatsappMessages.length > 0 ? whatsappMessages : chatMessages.slice(-4)).map((message) => (
+                <p className={message.fromMe ? 'is-outbound' : ''} key={message.id}>
+                  <b>{message.fromMe ? 'Voce' : message.author || 'Cliente'}:</b> {message.body || message.text}
+                </p>
               ))}
             </div>
+            <form className="whatsapp-reply" onSubmit={sendWhatsapp}>
+              <input value={whatsappDraft} onChange={(event) => setWhatsappDraft(event.target.value)} placeholder="Responder pelo WhatsApp" />
+              <Button variant="primary" type="submit">Enviar</Button>
+            </form>
           </div>
         </div>
       </article>
@@ -11509,6 +11692,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     if (activeNav === 'service') {
       return (
         <ServiceSection
+          storeId={pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')}
           orders={orders}
           channels={channels}
           recoveries={recoveries}
