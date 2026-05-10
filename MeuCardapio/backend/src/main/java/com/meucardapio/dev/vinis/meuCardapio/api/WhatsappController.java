@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotControlRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappMessageResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappQrResponse;
@@ -61,7 +62,12 @@ public class WhatsappController {
                 request.sessionName(),
                 request.phoneNumber(),
                 request.webhookSecret(),
-                request.webhookUrl());
+                request.webhookUrl(),
+                request.botEnabled(),
+                request.botWelcome(),
+                request.botFallback(),
+                request.botMenuUrl(),
+                request.botHandoffKeywords());
         return WhatsappConfigResponse.from(integration);
     }
 
@@ -92,6 +98,11 @@ public class WhatsappController {
     @GetMapping("/stores/{storeId}/whatsapp/conversations")
     public List<WhatsappConversationResponse> conversations(@PathVariable UUID storeId) {
         return conversations.findByStoreIdOrderByLastMessageAtDesc(storeId).stream().map(WhatsappConversationResponse::from).toList();
+    }
+
+    @PostMapping("/stores/{storeId}/whatsapp/conversations/sync")
+    public List<WhatsappConversationResponse> syncConversations(@PathVariable UUID storeId) {
+        return wasender.syncConversations(storeId).stream().map(WhatsappConversationResponse::from).toList();
     }
 
     @GetMapping("/stores/{storeId}/whatsapp/messages")
@@ -134,6 +145,14 @@ public class WhatsappController {
         conversation.setUnreadCount(0);
         conversations.save(conversation);
         return Map.of("ok", true);
+    }
+
+    @PostMapping("/stores/{storeId}/whatsapp/bot")
+    public WhatsappConversationResponse controlBot(
+            @PathVariable UUID storeId,
+            @RequestParam String remoteJid,
+            @RequestBody WhatsappBotControlRequest request) {
+        return WhatsappConversationResponse.from(wasender.controlBot(storeId, remoteJid, request.action()));
     }
 
     private static String firstText(JsonNode... nodes) {

@@ -11,4 +11,5 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
 public interface WhatsappConversationRepository extends JpaRepository<WhatsappConversation, UUID> {
     List<WhatsappConversation> findByStoreIdOrderByLastMessageAtDesc(UUID storeId);
     Optional<WhatsappConversation> findByStoreIdAndRemoteJid(UUID storeId, String remoteJid);
+    Optional<WhatsappConversation> findFirstByStoreIdAndPhone(UUID storeId, String phone);
 }

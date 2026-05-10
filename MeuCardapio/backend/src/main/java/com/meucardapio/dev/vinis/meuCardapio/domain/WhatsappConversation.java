@@ -27,6 +27,12 @@ public class WhatsappConversation {
     private LocalDateTime lastMessageAt;
     @Column(nullable = false)
     private int unreadCount;
+    private LocalDateTime botPausedUntil;
+    @Column(nullable = false)
+    private boolean botPausedIndefinitely;
+    private LocalDateTime botLastAutoReplyAt;
+    @Column(nullable = false, length = 40)
+    private String botStatus = "active";
 
     protected WhatsappConversation() {
     }
@@ -51,4 +57,12 @@ public class WhatsappConversation {
     public void setLastMessageAt(LocalDateTime lastMessageAt) { this.lastMessageAt = lastMessageAt; }
     public int getUnreadCount() { return unreadCount; }
     public void setUnreadCount(int unreadCount) { this.unreadCount = unreadCount; }
+    public LocalDateTime getBotPausedUntil() { return botPausedUntil; }
+    public void setBotPausedUntil(LocalDateTime botPausedUntil) { this.botPausedUntil = botPausedUntil; }
+    public boolean isBotPausedIndefinitely() { return botPausedIndefinitely; }
+    public void setBotPausedIndefinitely(boolean botPausedIndefinitely) { this.botPausedIndefinitely = botPausedIndefinitely; }
+    public LocalDateTime getBotLastAutoReplyAt() { return botLastAutoReplyAt; }
+    public void setBotLastAutoReplyAt(LocalDateTime botLastAutoReplyAt) { this.botLastAutoReplyAt = botLastAutoReplyAt; }
+    public String getBotStatus() { return botStatus; }
+    public void setBotStatus(String botStatus) { this.botStatus = botStatus; }
 }

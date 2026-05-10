@@ -30,6 +30,16 @@ public class WhatsappIntegration {
     @Column(length = 40)
     private String status;
     @Column(nullable = false)
+    private boolean botEnabled = true;
+    @Column(columnDefinition = "text")
+    private String botWelcome;
+    @Column(columnDefinition = "text")
+    private String botFallback;
+    @Column(length = 500)
+    private String botMenuUrl;
+    @Column(length = 500)
+    private String botHandoffKeywords;
+    @Column(nullable = false)
     private LocalDateTime updatedAt;
 
     protected WhatsappIntegration() {
@@ -58,6 +68,16 @@ public class WhatsappIntegration {
     public void setWebhookUrl(String webhookUrl) { this.webhookUrl = webhookUrl; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public boolean isBotEnabled() { return botEnabled; }
+    public void setBotEnabled(boolean botEnabled) { this.botEnabled = botEnabled; }
+    public String getBotWelcome() { return botWelcome; }
+    public void setBotWelcome(String botWelcome) { this.botWelcome = botWelcome; }
+    public String getBotFallback() { return botFallback; }
+    public void setBotFallback(String botFallback) { this.botFallback = botFallback; }
+    public String getBotMenuUrl() { return botMenuUrl; }
+    public void setBotMenuUrl(String botMenuUrl) { this.botMenuUrl = botMenuUrl; }
+    public String getBotHandoffKeywords() { return botHandoffKeywords; }
+    public void setBotHandoffKeywords(String botHandoffKeywords) { this.botHandoffKeywords = botHandoffKeywords; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void touch() { this.updatedAt = LocalDateTime.now(); }
 }

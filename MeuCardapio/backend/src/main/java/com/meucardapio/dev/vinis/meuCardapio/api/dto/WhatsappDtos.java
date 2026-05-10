@@ -20,7 +20,12 @@ public final class WhatsappDtos {
             String sessionName,
             String phoneNumber,
             String webhookSecret,
-            String webhookUrl) {
+            String webhookUrl,
+            Boolean botEnabled,
+            String botWelcome,
+            String botFallback,
+            String botMenuUrl,
+            String botHandoffKeywords) {
     }
 
     public record WhatsappConfigResponse(
@@ -33,6 +38,11 @@ public final class WhatsappDtos {
             boolean hasWebhookSecret,
             String webhookUrl,
             String status,
+            boolean botEnabled,
+            String botWelcome,
+            String botFallback,
+            String botMenuUrl,
+            String botHandoffKeywords,
             LocalDateTime updatedAt) {
         public static WhatsappConfigResponse from(WhatsappIntegration integration) {
             return new WhatsappConfigResponse(
@@ -45,6 +55,11 @@ public final class WhatsappDtos {
                     hasText(integration.getWebhookSecret()),
                     integration.getWebhookUrl(),
                     integration.getStatus(),
+                    integration.isBotEnabled(),
+                    integration.getBotWelcome(),
+                    integration.getBotFallback(),
+                    integration.getBotMenuUrl(),
+                    integration.getBotHandoffKeywords(),
                     integration.getUpdatedAt());
         }
     }
@@ -65,7 +80,11 @@ public final class WhatsappDtos {
             String phone,
             String lastMessage,
             LocalDateTime lastMessageAt,
-            int unreadCount) {
+            int unreadCount,
+            String botStatus,
+            LocalDateTime botPausedUntil,
+            boolean botPausedIndefinitely,
+            LocalDateTime botLastAutoReplyAt) {
         public static WhatsappConversationResponse from(WhatsappConversation conversation) {
             return new WhatsappConversationResponse(
                     conversation.getId(),
@@ -74,7 +93,11 @@ public final class WhatsappDtos {
                     conversation.getPhone(),
                     conversation.getLastMessage(),
                     conversation.getLastMessageAt(),
-                    conversation.getUnreadCount());
+                    conversation.getUnreadCount(),
+                    conversation.getBotStatus(),
+                    conversation.getBotPausedUntil(),
+                    conversation.isBotPausedIndefinitely(),
+                    conversation.getBotLastAutoReplyAt());
         }
     }
 
@@ -99,6 +122,9 @@ public final class WhatsappDtos {
     }
 
     public record WhatsappSendMessageRequest(String to, String text) {
+    }
+
+    public record WhatsappBotControlRequest(String action) {
     }
 
     private static boolean hasText(String value) {

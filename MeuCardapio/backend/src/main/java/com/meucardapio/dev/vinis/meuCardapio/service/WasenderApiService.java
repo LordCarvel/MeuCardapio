@@ -1,6 +1,14 @@
 package com.meucardapio.dev.vinis.meuCardapio.service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.Normalizer;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,10 +23,14 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+import com.meucardapio.dev.vinis.meuCardapio.domain.CustomerOrder;
+import com.meucardapio.dev.vinis.meuCardapio.domain.Product;
 import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappIntegration;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappMessage;
+import com.meucardapio.dev.vinis.meuCardapio.repository.CustomerOrderRepository;
+import com.meucardapio.dev.vinis.meuCardapio.repository.ProductRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.StoreRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappConversationRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappIntegrationRepository;
@@ -29,10 +41,23 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class WasenderApiService {
+    private static final List<String> MIRROR_WEBHOOK_EVENTS = List.of(
+            "chats.upsert",
+            "chats.update",
+            "contacts.upsert",
+            "contacts.update",
+            "messages.received",
+            "messages.upsert",
+            "message.sent",
+            "messages.update",
+            "session.status");
+
     private final StoreRepository stores;
     private final WhatsappIntegrationRepository integrations;
     private final WhatsappConversationRepository conversations;
     private final WhatsappMessageRepository messages;
+    private final CustomerOrderRepository customerOrders;
+    private final ProductRepository products;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
@@ -41,12 +66,16 @@ public class WasenderApiService {
             WhatsappIntegrationRepository integrations,
             WhatsappConversationRepository conversations,
             WhatsappMessageRepository messages,
+            CustomerOrderRepository customerOrders,
+            ProductRepository products,
             ObjectMapper objectMapper,
             @Value("${app.wasender.base-url:https://www.wasenderapi.com}") String baseUrl) {
         this.stores = stores;
         this.integrations = integrations;
         this.conversations = conversations;
         this.messages = messages;
+        this.customerOrders = customerOrders;
+        this.products = products;
         this.objectMapper = objectMapper;
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
@@ -60,7 +89,20 @@ public class WasenderApiService {
     }
 
     @Transactional
-    public WhatsappIntegration saveConfig(UUID storeId, String personalToken, String apiKey, String sessionId, String sessionName, String phoneNumber, String webhookSecret, String webhookUrl) {
+    public WhatsappIntegration saveConfig(
+            UUID storeId,
+            String personalToken,
+            String apiKey,
+            String sessionId,
+            String sessionName,
+            String phoneNumber,
+            String webhookSecret,
+            String webhookUrl,
+            Boolean botEnabled,
+            String botWelcome,
+            String botFallback,
+            String botMenuUrl,
+            String botHandoffKeywords) {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(personalToken)) integration.setPersonalAccessToken(personalToken.trim());
         if (hasText(apiKey)) integration.setApiKey(apiKey.trim());
@@ -69,6 +111,11 @@ public class WasenderApiService {
         if (hasText(phoneNumber)) integration.setPhoneNumber(normalizeInternationalPhone(phoneNumber));
         if (hasText(webhookSecret)) integration.setWebhookSecret(webhookSecret.trim());
         if (hasText(webhookUrl)) integration.setWebhookUrl(webhookUrl.trim());
+        if (botEnabled != null) integration.setBotEnabled(botEnabled);
+        if (botWelcome != null) integration.setBotWelcome(botWelcome.trim());
+        if (botFallback != null) integration.setBotFallback(botFallback.trim());
+        if (botMenuUrl != null) integration.setBotMenuUrl(botMenuUrl.trim());
+        if (botHandoffKeywords != null) integration.setBotHandoffKeywords(botHandoffKeywords.trim());
         integration.touch();
         return integrations.save(integration);
     }
@@ -77,9 +124,13 @@ public class WasenderApiService {
     public JsonNode createSession(UUID storeId, String sessionName, String phoneNumber, String webhookUrl) {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(integration.getSessionId())) {
+            String hook = hasText(webhookUrl) ? webhookUrl.trim() : integration.getWebhookUrl();
+            if (hasText(integration.getPersonalAccessToken()) && hasText(hook)) {
+                updateSessionWebhook(integration, hook);
+            }
             return objectMapper.createObjectNode()
                     .put("success", true)
-                    .put("message", "Sessao existente reutilizada.")
+                    .put("message", "Sessao existente reutilizada com webhooks de espelho atualizados.")
                     .set("data", objectMapper.createObjectNode()
                             .put("id", integration.getSessionId())
                             .put("name", Optional.ofNullable(integration.getSessionName()).orElse("MeuCardapio"))
@@ -102,7 +153,7 @@ public class WasenderApiService {
                         "read_incoming_messages", false,
                         "webhook_url", hook == null ? "" : hook,
                         "webhook_enabled", hasText(hook),
-                        "webhook_events", List.of("messages.received", "messages.upsert", "message.sent", "messages.update", "session.status")))
+                        "webhook_events", MIRROR_WEBHOOK_EVENTS))
                 .retrieve()
                 .body(JsonNode.class);
 
@@ -110,6 +161,40 @@ public class WasenderApiService {
         if (data.hasNonNull("id")) integration.setSessionId(data.path("id").asText());
         if (data.hasNonNull("name")) integration.setSessionName(data.path("name").asText());
         if (data.hasNonNull("phone_number")) integration.setPhoneNumber(data.path("phone_number").asText());
+        if (data.hasNonNull("api_key")) integration.setApiKey(data.path("api_key").asText());
+        if (data.hasNonNull("webhook_secret")) integration.setWebhookSecret(data.path("webhook_secret").asText());
+        if (data.hasNonNull("webhook_url")) integration.setWebhookUrl(data.path("webhook_url").asText());
+        if (data.hasNonNull("status")) integration.setStatus(data.path("status").asText());
+        integration.touch();
+        integrations.save(integration);
+        return response;
+    }
+
+    private JsonNode updateSessionWebhook(WhatsappIntegration integration, String webhookUrl) {
+        String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
+        String sessionId = normalizeSessionId(require(integration.getSessionId(), "Crie ou informe o ID da sessao antes de atualizar webhooks."));
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (hasText(integration.getSessionName())) {
+            body.put("name", integration.getSessionName());
+        }
+        if (hasText(integration.getPhoneNumber())) {
+            body.put("phone_number", integration.getPhoneNumber());
+        }
+        body.put("account_protection", true);
+        body.put("log_messages", true);
+        body.put("read_incoming_messages", false);
+        body.put("webhook_url", webhookUrl == null ? "" : webhookUrl);
+        body.put("webhook_enabled", hasText(webhookUrl));
+        body.put("webhook_events", MIRROR_WEBHOOK_EVENTS);
+
+        JsonNode response = restClient.put()
+                .uri("/api/whatsapp-sessions/{id}", sessionId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .body(body)
+                .retrieve()
+                .body(JsonNode.class);
+
+        JsonNode data = response == null ? objectMapper.createObjectNode() : response.path("data");
         if (data.hasNonNull("api_key")) integration.setApiKey(data.path("api_key").asText());
         if (data.hasNonNull("webhook_secret")) integration.setWebhookSecret(data.path("webhook_secret").asText());
         if (data.hasNonNull("webhook_url")) integration.setWebhookUrl(data.path("webhook_url").asText());
@@ -165,20 +250,59 @@ public class WasenderApiService {
 
     @Transactional
     public WhatsappMessage send(UUID storeId, String to, String text) {
+        return sendOutboundMessage(storeId, to, text, true, true, false);
+    }
+
+    private WhatsappMessage sendBotMessage(UUID storeId, String to, String text) {
+        return sendOutboundMessage(storeId, to, text, false, false, true);
+    }
+
+    private WhatsappMessage sendOutboundMessage(UUID storeId, String to, String text, boolean validateRecipient, boolean pauseAsManual, boolean botMessage) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
         if (!hasText(to) || !hasText(text)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe destinatario e mensagem.");
         }
+        String recipient = normalizeRecipient(to);
+        Optional<WhatsappConversation> knownConversation = findKnownConversation(storeId, recipient);
+        if (validateRecipient && knownConversation.isEmpty() && isPhoneAddress(recipient) && !isPhoneRegisteredOnWhatsapp(apiKey, recipient)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Este numero nao esta cadastrado no WhatsApp. A conversa nao foi criada.");
+        }
+
         JsonNode response = restClient.post()
                 .uri("/api/send-message")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .body(Map.of("to", to.trim(), "text", text.trim()))
+                .body(Map.of("to", recipient, "text", text.trim()))
                 .retrieve()
                 .body(JsonNode.class);
 
-        WhatsappConversation conversation = upsertConversation(storeId, to.trim(), to.trim(), to.trim(), text.trim(), true);
-        WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, to.trim(), true);
+        WhatsappConversation conversation = knownConversation
+                .map(existing -> upsertConversation(
+                        storeId,
+                        existing.getRemoteJid(),
+                        existing.getPhone(),
+                        existing.getContactName(),
+                        text.trim(),
+                        LocalDateTime.now(),
+                        false,
+                        null))
+                .orElseGet(() -> upsertConversation(
+                        storeId,
+                        recipient,
+                        isPhoneAddress(recipient) ? cleanWhatsappPhone(recipient) : "",
+                        recipient,
+                        text.trim(),
+                        LocalDateTime.now(),
+                        false,
+                        null));
+        if (pauseAsManual) {
+            pauseConversationForToday(conversation, "human");
+        }
+        if (botMessage) {
+            conversation.setBotLastAutoReplyAt(LocalDateTime.now());
+            conversations.save(conversation);
+        }
+        WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, conversation.getRemoteJid(), true);
         message.setBody(text.trim());
         if (response != null && response.path("data").hasNonNull("msgId")) {
             message.setProviderMessageId(response.path("data").path("msgId").asText());
@@ -189,25 +313,119 @@ public class WasenderApiService {
     }
 
     @Transactional
+    public List<WhatsappConversation> syncConversations(UUID storeId) {
+        WhatsappIntegration integration = getOrCreate(storeId);
+        String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
+        int page = 1;
+        int totalPages = 1;
+        int imported = 0;
+
+        do {
+            int currentPage = page;
+            JsonNode response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/contacts")
+                            .queryParam("paginated", "true")
+                            .queryParam("page", currentPage)
+                            .queryParam("limit", 100)
+                            .build())
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .retrieve()
+                    .body(JsonNode.class);
+            List<JsonNode> contacts = contactItems(response);
+            for (JsonNode contact : contacts) {
+                if (upsertContactConversation(storeId, contact)) {
+                    imported += 1;
+                }
+            }
+            totalPages = Math.max(totalPages, contactPageCount(response));
+            page += 1;
+        } while (page <= totalPages && page <= 20);
+
+        if (imported > 0) {
+            integration.touch();
+            integrations.save(integration);
+        }
+        return conversations.findByStoreIdOrderByLastMessageAtDesc(storeId);
+    }
+
+    @Transactional
+    public WhatsappConversation controlBot(UUID storeId, String remoteJid, String action) {
+        WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
+        String normalizedAction = Optional.ofNullable(action).orElse("").trim().toLowerCase();
+
+        switch (normalizedAction) {
+            case "pause_today" -> pauseConversationForToday(conversation, "paused_today");
+            case "pause_forever" -> pauseConversationIndefinitely(conversation);
+            case "resume" -> resumeConversationBot(conversation);
+            case "send_menu" -> sendMenuToConversation(storeId, conversation);
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Acao do robo invalida.");
+        }
+
+        return conversations.findByStoreIdAndRemoteJid(storeId, remoteJid).orElse(conversation);
+    }
+
+    @Transactional
+    public Optional<WhatsappMessage> notifyOrderCreated(CustomerOrder order) {
+        if (order == null || !hasText(order.getCustomerPhone())) {
+            return Optional.empty();
+        }
+        WhatsappIntegration integration = integrations.findById(order.getStore().getId()).orElse(null);
+        if (integration == null || !integration.isBotEnabled() || !hasText(integration.getApiKey())) {
+            return Optional.empty();
+        }
+        String recipient = normalizeBrazilianWhatsappPhone(order.getCustomerPhone());
+        Optional<WhatsappConversation> knownConversation = findKnownConversation(order.getStore().getId(), recipient);
+        if (knownConversation.isEmpty() && !isPhoneRegisteredOnWhatsapp(integration.getApiKey(), recipient)) {
+            return Optional.empty();
+        }
+        return Optional.of(sendOutboundMessage(order.getStore().getId(), recipient, buildOrderCreatedMessage(order), false, false, true));
+    }
+
+    @Transactional
     public void receiveWebhook(UUID storeId, String signature, JsonNode payload) {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(integration.getWebhookSecret()) && !integration.getWebhookSecret().equals(signature)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Assinatura do webhook invalida.");
         }
         String event = payload.path("event").asText("");
+        if (event.equals("session.status")) {
+            updateSessionStatus(integration, payload);
+            return;
+        }
         if (event.equals("messages.update")) {
             updateMessageStatus(storeId, payload);
             return;
         }
-        JsonNode items = payload.path("data").path("messages");
-        if (items.isMissingNode()) {
-            items = payload.path("data");
+        if (event.startsWith("chats.")) {
+            for (JsonNode item : webhookItems(payload, "")) {
+                saveChatWebhook(storeId, item, payload);
+            }
+            return;
         }
-        if (items.isArray()) {
-            items.forEach(item -> saveWebhookMessage(storeId, item, payload));
-        } else {
-            saveWebhookMessage(storeId, items, payload);
+        if (event.startsWith("contacts.")) {
+            for (JsonNode item : webhookItems(payload, "")) {
+                upsertContactConversation(storeId, item);
+            }
+            return;
         }
+        for (JsonNode item : webhookItems(payload, "messages")) {
+            saveWebhookMessage(storeId, integration, item, payload);
+        }
+    }
+
+    private void updateSessionStatus(WhatsappIntegration integration, JsonNode payload) {
+        String status = firstText(
+                payload.path("data").path("status"),
+                payload.path("data").path("connection"),
+                payload.path("status"));
+        if (!hasText(status)) {
+            return;
+        }
+        integration.setStatus(status);
+        integration.touch();
+        integrations.save(integration);
     }
 
     private void updateMessageStatus(UUID storeId, JsonNode payload) {
@@ -219,28 +437,33 @@ public class WasenderApiService {
         });
     }
 
-    private void saveWebhookMessage(UUID storeId, JsonNode item, JsonNode payload) {
+    private void saveWebhookMessage(UUID storeId, WhatsappIntegration integration, JsonNode item, JsonNode payload) {
         JsonNode key = item.path("key");
         String remoteJid = firstText(
                 key.path("remoteJid"),
                 item.path("remoteJid"),
                 item.path("chatId"),
+                item.path("to"),
                 item.path("from"),
-                item.path("jid"));
+                item.path("jid"),
+                item.path("id"));
         if (!hasText(remoteJid)) return;
-        boolean fromMe = key.path("fromMe").asBoolean(item.path("fromMe").asBoolean(false));
+        boolean fromMe = key.path("fromMe").asBoolean(item.path("fromMe").asBoolean(payload.path("event").asText("").equals("message.sent")));
         String messageId = firstText(key.path("id"), item.path("id"), item.path("messageId"), item.path("msgId"));
         if (hasText(messageId) && messages.findFirstByStoreIdAndProviderMessageId(storeId, messageId).isPresent()) {
             return;
         }
         String phone = firstText(
                 key.path("cleanedSenderPn"),
+                key.path("cleanedParticipantPn"),
                 key.path("senderPn"),
                 key.path("participantPn"),
                 item.path("cleanedSenderPn"),
+                item.path("cleanedParticipantPn"),
                 item.path("senderPn"),
                 item.path("participantPn"),
                 item.path("phone"),
+                item.path("to"),
                 item.path("sender"));
         String contactName = firstText(
                 item.path("pushName"),
@@ -253,23 +476,421 @@ public class WasenderApiService {
             contactName = hasText(phone) ? phone : remoteJid;
         }
         String body = messageText(item);
-        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, !fromMe);
+        LocalDateTime messageAt = extractTimestamp(item, payload);
+        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, messageAt, !fromMe, null);
         WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, remoteJid, fromMe);
         message.setProviderMessageId(messageId);
         message.setBody(body);
+        if (item.hasNonNull("status")) {
+            message.setStatus(item.path("status").asText());
+        }
+        message.setCreatedAt(messageAt);
         message.setPayload(toJson(payload));
         messages.save(message);
+        if (!fromMe) {
+            runBotIfNeeded(storeId, integration, conversation, body);
+        }
     }
 
-    private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, boolean unread) {
+    private void saveChatWebhook(UUID storeId, JsonNode item, JsonNode payload) {
+        String remoteJid = firstText(
+                item.path("id"),
+                item.path("jid"),
+                item.path("remoteJid"),
+                item.path("chatId"));
+        if (!hasText(remoteJid)) {
+            return;
+        }
+        String contactName = firstText(
+                item.path("name"),
+                item.path("pushName"),
+                item.path("notify"),
+                item.path("verifiedName"),
+                item.path("subject"));
+        String phone = firstText(item.path("phone"), item.path("number"), item.path("cleanedSenderPn"), item.path("senderPn"), item.path("id"));
+        String lastMessage = firstText(item.path("lastMessage"), item.path("messageBody"), item.path("body"));
+        Integer unreadCount = item.hasNonNull("unreadCount") ? Math.max(0, item.path("unreadCount").asInt(0)) : null;
+        upsertConversation(storeId, remoteJid, phone, contactName, lastMessage, extractTimestamp(item, payload), false, unreadCount);
+    }
+
+    private boolean upsertContactConversation(UUID storeId, JsonNode contact) {
+        String remoteJid = firstText(
+                contact.path("jid"),
+                contact.path("id"),
+                contact.path("remoteJid"),
+                contact.path("phone"),
+                contact.path("number"));
+        if (!hasText(remoteJid)) {
+            return false;
+        }
+        String contactName = firstText(
+                contact.path("name"),
+                contact.path("notify"),
+                contact.path("verifiedName"),
+                contact.path("verifiedBizName"),
+                contact.path("pushName"));
+        String phone = firstText(contact.path("phone"), contact.path("number"), contact.path("jid"), contact.path("id"));
+        upsertConversation(
+                storeId,
+                remoteJid,
+                phone,
+                hasText(contactName) ? contactName : cleanWhatsappAddress(remoteJid),
+                "",
+                LocalDateTime.now(),
+                false,
+                null);
+        return true;
+    }
+
+    private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, LocalDateTime lastMessageAt, boolean unread, Integer unreadCount) {
         WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
                 .orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
-        if (hasText(phone)) conversation.setPhone(phone.replace("@s.whatsapp.net", ""));
-        if (hasText(contactName)) conversation.setContactName(contactName.replace("@s.whatsapp.net", ""));
-        conversation.setLastMessage(lastMessage == null ? "" : lastMessage);
-        conversation.setLastMessageAt(LocalDateTime.now());
-        conversation.setUnreadCount(unread ? conversation.getUnreadCount() + 1 : conversation.getUnreadCount());
+        if (hasText(phone)) conversation.setPhone(cleanWhatsappPhone(phone));
+        if (hasText(contactName)) conversation.setContactName(cleanWhatsappAddress(contactName));
+        if (hasText(lastMessage) || !hasText(conversation.getLastMessage())) {
+            conversation.setLastMessage(lastMessage == null ? "" : lastMessage);
+        }
+        conversation.setLastMessageAt(lastMessageAt == null ? LocalDateTime.now() : lastMessageAt);
+        if (unreadCount != null) {
+            conversation.setUnreadCount(unreadCount);
+        } else if (unread) {
+            conversation.setUnreadCount(conversation.getUnreadCount() + 1);
+        }
         return conversations.save(conversation);
+    }
+
+    private void runBotIfNeeded(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
+        if (!integration.isBotEnabled() || !hasText(integration.getApiKey()) || !hasText(inboundText) || isBotPaused(conversation)) {
+            return;
+        }
+        BotDecision decision = decideBotReply(storeId, integration, conversation, inboundText);
+        if (!hasText(decision.text())) {
+            return;
+        }
+        WhatsappMessage reply = sendBotMessage(storeId, conversation.getRemoteJid(), decision.text());
+        if (decision.pauseAfterReply()) {
+            pauseConversationForToday(reply.getConversation(), "human");
+        }
+    }
+
+    private BotDecision decideBotReply(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
+        String normalized = normalizeText(inboundText);
+
+        if (containsAny(normalized, handoffKeywords(integration))) {
+            return new BotDecision("Certo, vou chamar um atendente para continuar por aqui. O robo fica pausado nesta conversa hoje.", true);
+        }
+        if (containsAny(normalized, "cardapio", "menu", "link", "fazer pedido", "pedir", "comprar")) {
+            return new BotDecision(buildMenuMessage(storeId, integration), false);
+        }
+        if (containsAny(normalized, "acompanhar", "andamento", "status", "meu pedido", "pedido", "saiu", "entrega", "pronto")) {
+            return new BotDecision(buildLatestOrderMessage(storeId, conversation), false);
+        }
+        if (containsAny(normalized, "pagamento", "pagar", "pix", "cartao", "cartao", "dinheiro", "troco")) {
+            return new BotDecision("Aceitamos cartao, dinheiro e combinacao pelo atendimento. Se for dinheiro, informe se precisa de troco no fechamento do pedido.", false);
+        }
+        if (containsAny(normalized, "horario", "abre", "fecha", "funciona", "aberto")) {
+            return new BotDecision(buildScheduleMessage(storeId), false);
+        }
+        if (containsAny(normalized, "entrega", "delivery", "retirada", "balcao", "endereco")) {
+            return new BotDecision("Fazemos retirada no balcao e delivery nas areas atendidas. No cardapio digital voce informa o endereco e ve a taxa antes de finalizar.", false);
+        }
+
+        String productReply = buildProductReply(storeId, normalized);
+        if (hasText(productReply)) {
+            return new BotDecision(productReply, false);
+        }
+
+        return new BotDecision(defaultText(integration.getBotFallback(), "Posso te mandar o cardapio, consultar seu pedido ou chamar um atendente. Escreva cardapio, pedido ou atendente."), false);
+    }
+
+    private void sendMenuToConversation(UUID storeId, WhatsappConversation conversation) {
+        WhatsappIntegration integration = getOrCreate(storeId);
+        sendBotMessage(storeId, conversation.getRemoteJid(), buildMenuMessage(storeId, integration));
+    }
+
+    private String buildMenuMessage(UUID storeId, WhatsappIntegration integration) {
+        String menuUrl = integration.getBotMenuUrl();
+        if (!hasText(menuUrl)) {
+            menuUrl = stores.findById(storeId)
+                    .map(store -> "/loja/" + store.getId())
+                    .orElse("");
+        }
+        return hasText(menuUrl)
+                ? "Segue o cardapio digital para fazer seu pedido: " + menuUrl
+                : "O link do cardapio digital ainda nao esta configurado. Um atendente pode enviar para voce por aqui.";
+    }
+
+    private String buildLatestOrderMessage(UUID storeId, WhatsappConversation conversation) {
+        String phone = cleanWhatsappPhone(hasText(conversation.getPhone()) ? conversation.getPhone() : conversation.getRemoteJid());
+        Optional<CustomerOrder> latestOrder = customerOrders.findByStoreIdOrderByCreatedAtDesc(storeId).stream()
+                .filter(order -> phoneMatches(phone, order.getCustomerPhone()))
+                .findFirst();
+        if (latestOrder.isEmpty()) {
+            return "Nao encontrei um pedido recente vinculado a este WhatsApp. Se voce acabou de pedir pelo cardapio, me envie o numero do pedido ou chame um atendente.";
+        }
+        return buildOrderStatusMessage(latestOrder.get());
+    }
+
+    private String buildOrderCreatedMessage(CustomerOrder order) {
+        return "Pedido recebido: " + orderReference(order) + "\n" +
+                "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
+                "Total: " + formatMoney(order.getTotal()) + "\n" +
+                "Vamos avisar por aqui quando ele avancar.";
+    }
+
+    private String buildOrderStatusMessage(CustomerOrder order) {
+        return orderReference(order) + "\n" +
+                "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
+                "Entrega: " + fulfillmentLabel(order.getFulfillment()) + "\n" +
+                "Total: " + formatMoney(order.getTotal()) + "\n" +
+                "Se precisar alterar algo, escreva atendente.";
+    }
+
+    private String buildScheduleMessage(UUID storeId) {
+        return stores.findById(storeId)
+                .map(store -> hasText(store.getSchedule())
+                        ? "Nosso horario de atendimento: " + store.getSchedule()
+                        : "O horario da loja ainda nao esta configurado no sistema. Posso chamar um atendente se voce precisar confirmar.")
+                .orElse("Nao consegui consultar o horario da loja agora.");
+    }
+
+    private String buildProductReply(UUID storeId, String normalizedText) {
+        if (!hasText(normalizedText) || normalizedText.length() < 3) {
+            return "";
+        }
+        List<String> tokens = List.of(normalizedText.split("\\s+")).stream()
+                .filter(token -> token.length() >= 3)
+                .toList();
+        if (tokens.isEmpty()) {
+            return "";
+        }
+        List<Product> matches = products.findByStoreIdOrderByNameAsc(storeId).stream()
+                .filter(Product::isActive)
+                .filter(product -> {
+                    String productName = normalizeText(product.getName());
+                    return tokens.stream().anyMatch(productName::contains);
+                })
+                .limit(3)
+                .toList();
+        if (matches.isEmpty()) {
+            return "";
+        }
+        String items = matches.stream()
+                .map(product -> product.getName() + " - " + formatMoney(product.getPrice()))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("");
+        return "Encontrei no cardapio:\n" + items + "\n\nPara finalizar, peca pelo cardapio digital ou escreva atendente.";
+    }
+
+    private boolean isBotPaused(WhatsappConversation conversation) {
+        if (conversation.isBotPausedIndefinitely()) {
+            return true;
+        }
+        LocalDateTime pausedUntil = conversation.getBotPausedUntil();
+        if (pausedUntil == null) {
+            return false;
+        }
+        if (pausedUntil.isAfter(LocalDateTime.now())) {
+            return true;
+        }
+        resumeConversationBot(conversation);
+        return false;
+    }
+
+    private void pauseConversationForToday(WhatsappConversation conversation, String status) {
+        conversation.setBotPausedIndefinitely(false);
+        conversation.setBotPausedUntil(LocalDateTime.now().toLocalDate().plusDays(1).atStartOfDay().minusSeconds(1));
+        conversation.setBotStatus(status);
+        conversations.save(conversation);
+    }
+
+    private void pauseConversationIndefinitely(WhatsappConversation conversation) {
+        conversation.setBotPausedIndefinitely(true);
+        conversation.setBotPausedUntil(null);
+        conversation.setBotStatus("paused");
+        conversations.save(conversation);
+    }
+
+    private void resumeConversationBot(WhatsappConversation conversation) {
+        conversation.setBotPausedIndefinitely(false);
+        conversation.setBotPausedUntil(null);
+        conversation.setBotStatus("active");
+        conversations.save(conversation);
+    }
+
+    private static List<String> handoffKeywords(WhatsappIntegration integration) {
+        String value = defaultText(integration.getBotHandoffKeywords(), "humano, atendente, ajuda, suporte, pessoa, falar com alguem");
+        return List.of(value.split(",")).stream().map(WasenderApiService::normalizeText).filter(WasenderApiService::hasText).toList();
+    }
+
+    private static boolean containsAny(String normalized, String... terms) {
+        return containsAny(normalized, List.of(terms));
+    }
+
+    private static boolean containsAny(String normalized, List<String> terms) {
+        return terms.stream().map(WasenderApiService::normalizeText).anyMatch(term -> hasText(term) && normalized.contains(term));
+    }
+
+    private static boolean phoneMatches(String left, String right) {
+        String a = cleanWhatsappPhone(left);
+        String b = cleanWhatsappPhone(right);
+        return a.length() >= 8 && b.length() >= 8 && (a.endsWith(b) || b.endsWith(a));
+    }
+
+    private static String normalizeText(String value) {
+        String text = Normalizer.normalize(Optional.ofNullable(value).orElse(""), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return text.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private static String defaultText(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
+    }
+
+    private static String orderReference(CustomerOrder order) {
+        return "Pedido #" + order.getId().toString().substring(0, 8);
+    }
+
+    private static String orderStatusLabel(String status) {
+        return switch (Optional.ofNullable(status).orElse("")) {
+            case "analysis" -> "em analise";
+            case "production" -> "em preparo";
+            case "ready" -> "pronto";
+            case "completed" -> "finalizado";
+            case "cancelled" -> "cancelado";
+            default -> hasText(status) ? status : "recebido";
+        };
+    }
+
+    private static String fulfillmentLabel(String fulfillment) {
+        return switch (Optional.ofNullable(fulfillment).orElse("")) {
+            case "delivery" -> "delivery";
+            case "dinein" -> "consumo no local";
+            default -> "retirada no balcao";
+        };
+    }
+
+    private static String formatMoney(BigDecimal value) {
+        BigDecimal amount = value == null ? BigDecimal.ZERO : value;
+        return "R$ " + amount.setScale(2, RoundingMode.HALF_UP).toPlainString().replace(".", ",");
+    }
+
+    private record BotDecision(String text, boolean pauseAfterReply) {
+    }
+
+    private Optional<WhatsappConversation> findKnownConversation(UUID storeId, String recipient) {
+        Optional<WhatsappConversation> byRemoteJid = conversations.findByStoreIdAndRemoteJid(storeId, recipient);
+        if (byRemoteJid.isPresent()) {
+            return byRemoteJid;
+        }
+        String phone = cleanWhatsappPhone(recipient);
+        if (!hasText(phone)) {
+            return Optional.empty();
+        }
+        Optional<WhatsappConversation> byPhone = conversations.findFirstByStoreIdAndPhone(storeId, phone);
+        if (byPhone.isPresent()) {
+            return byPhone;
+        }
+        return conversations.findFirstByStoreIdAndPhone(storeId, "+" + phone);
+    }
+
+    private boolean isPhoneRegisteredOnWhatsapp(String apiKey, String recipient) {
+        JsonNode response = restClient.get()
+                .uri("/api/on-whatsapp/{phone_number}", normalizeInternationalPhone(recipient))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                .retrieve()
+                .body(JsonNode.class);
+        return response != null && response.path("data").path("exists").asBoolean(false);
+    }
+
+    private static List<JsonNode> webhookItems(JsonNode payload, String nestedKey) {
+        JsonNode items = hasText(nestedKey) ? payload.path("data").path(nestedKey) : payload.path("data");
+        if (items.isMissingNode() || items.isNull()) {
+            items = payload.path("data");
+        }
+        List<JsonNode> result = new ArrayList<>();
+        if (items.isArray()) {
+            items.forEach(result::add);
+        } else if (!items.isMissingNode() && !items.isNull()) {
+            result.add(items);
+        }
+        return result;
+    }
+
+    private static List<JsonNode> contactItems(JsonNode response) {
+        JsonNode data = response == null ? null : response.path("data");
+        JsonNode items = data == null ? null : data.path("items");
+        if (items == null || items.isMissingNode()) {
+            items = data == null ? null : data.path("data");
+        }
+        if (items == null || items.isMissingNode()) {
+            items = data;
+        }
+        List<JsonNode> result = new ArrayList<>();
+        if (items != null && items.isArray()) {
+            items.forEach(result::add);
+        }
+        return result;
+    }
+
+    private static int contactPageCount(JsonNode response) {
+        JsonNode data = response == null ? null : response.path("data");
+        JsonNode pagination = data == null ? null : data.path("pagination");
+        int totalPages = firstPositiveInt(
+                pagination == null ? null : pagination.path("totalPages"),
+                pagination == null ? null : pagination.path("total_pages"),
+                pagination == null ? null : pagination.path("lastPage"),
+                pagination == null ? null : pagination.path("last_page"),
+                data == null ? null : data.path("last_page"));
+        return totalPages <= 0 ? 1 : totalPages;
+    }
+
+    private static int firstPositiveInt(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && !node.isMissingNode() && node.asInt(0) > 0) {
+                return node.asInt();
+            }
+        }
+        return 0;
+    }
+
+    private static LocalDateTime extractTimestamp(JsonNode item, JsonNode payload) {
+        JsonNode timestamp = firstPresent(
+                item.path("messageTimestamp"),
+                item.path("timestamp"),
+                item.path("conversationTimestamp"),
+                item.path("createdAt"),
+                item.path("created_at"),
+                payload.path("timestamp"));
+        if (timestamp == null || timestamp.isMissingNode() || timestamp.isNull()) {
+            return LocalDateTime.now();
+        }
+        if (timestamp.isNumber()) {
+            long raw = timestamp.asLong();
+            if (raw <= 0) {
+                return LocalDateTime.now();
+            }
+            long millis = raw > 9_999_999_999L ? raw : raw * 1000L;
+            return LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneOffset.UTC);
+        }
+        String text = timestamp.asText("");
+        if (!hasText(text)) {
+            return LocalDateTime.now();
+        }
+        try {
+            return LocalDateTime.parse(text.replace(' ', 'T'));
+        } catch (DateTimeParseException ignored) {
+            return LocalDateTime.now();
+        }
+    }
+
+    private static JsonNode firstPresent(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && !node.isMissingNode() && !node.isNull() && hasText(node.asText())) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private String toJson(Object value) {
@@ -286,6 +907,7 @@ public class WasenderApiService {
                 item.path("messageBody"),
                 item.path("body"),
                 item.path("text"),
+                item.path("content"),
                 item.path("caption"),
                 message.path("conversation"),
                 message.path("extendedTextMessage").path("text"),
@@ -318,6 +940,43 @@ public class WasenderApiService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o telefone com DDI. Exemplo: +5547999999999.");
         }
         return "+" + phone;
+    }
+
+    private static String normalizeBrazilianWhatsappPhone(String value) {
+        String phone = Optional.ofNullable(value).orElse("").replaceAll("\\D", "");
+        if (phone.length() == 10 || phone.length() == 11) {
+            phone = "55" + phone;
+        }
+        if (phone.length() < 12 || phone.length() > 15) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um WhatsApp valido para notificacao do pedido.");
+        }
+        return "+" + phone;
+    }
+
+    private static String normalizeRecipient(String value) {
+        String recipient = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(recipient) || recipient.contains("@")) {
+            return recipient;
+        }
+        return normalizeInternationalPhone(recipient);
+    }
+
+    private static boolean isPhoneAddress(String value) {
+        return hasText(value) && !value.contains("@") && value.replaceAll("\\D", "").length() >= 10;
+    }
+
+    private static String cleanWhatsappPhone(String value) {
+        String text = cleanWhatsappAddress(value);
+        return text.replaceAll("[^\\d+]", "");
+    }
+
+    private static String cleanWhatsappAddress(String value) {
+        return Optional.ofNullable(value).orElse("")
+                .replace("@s.whatsapp.net", "")
+                .replace("@c.us", "")
+                .replace("@lid", "")
+                .replace("@g.us", "")
+                .trim();
     }
 
     private static String normalizeSessionId(String value) {

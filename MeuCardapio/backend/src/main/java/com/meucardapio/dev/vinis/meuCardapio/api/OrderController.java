@@ -26,6 +26,7 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
 import com.meucardapio.dev.vinis.meuCardapio.repository.CustomerOrderRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.StoreRepository;
 import com.meucardapio.dev.vinis.meuCardapio.service.AppLogService;
+import com.meucardapio.dev.vinis.meuCardapio.service.WasenderApiService;
 
 import jakarta.validation.Valid;
 
@@ -35,11 +36,13 @@ public class OrderController {
     private final StoreRepository stores;
     private final CustomerOrderRepository orders;
     private final AppLogService logService;
+    private final WasenderApiService wasender;
 
-    public OrderController(StoreRepository stores, CustomerOrderRepository orders, AppLogService logService) {
+    public OrderController(StoreRepository stores, CustomerOrderRepository orders, AppLogService logService, WasenderApiService wasender) {
         this.stores = stores;
         this.orders = orders;
         this.logService = logService;
+        this.wasender = wasender;
     }
 
     @GetMapping
@@ -58,6 +61,11 @@ public class OrderController {
         order.replaceItems(items, request.deliveryFee() == null ? BigDecimal.ZERO : request.deliveryFee());
         CustomerOrder saved = orders.save(order);
         logService.record(storeId, "INFO", "orders", "Pedido criado para " + saved.getCustomerName());
+        try {
+            wasender.notifyOrderCreated(saved);
+        } catch (Exception ex) {
+            logService.record(storeId, "WARN", "whatsapp", "Nao foi possivel notificar pedido no WhatsApp: " + ex.getMessage());
+        }
         return OrderResponse.from(saved);
     }
 

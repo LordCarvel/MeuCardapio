@@ -24,13 +24,29 @@ https://SUA-API-DO-RENDER/api/stores/ID-DA-LOJA/whatsapp/webhook
 
 Quando a sessao for criada, a API key da sessao fica salva no backend.
 
-## 3. Usar a inbox
+## 3. Espelhar conversas reais
 
-- Mensagens recebidas chegam pelo webhook e aparecem em `Atendimento`.
+- A inbox nao cria conversa a partir de pedido. Ela mostra somente conversas reais sincronizadas da sessao WhatsApp.
+- Clique em `Puxar conversas` no painel para importar os contatos/conversas sincronizados pela WaSenderAPI.
+- Novas conversas e mensagens chegam pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) e aparecem em `Atendimento`.
 - Selecione uma conversa na lateral.
 - Digite a resposta no campo inferior e clique em `Enviar`.
+- Ao iniciar envio para um numero digitado, o backend consulta se o numero existe no WhatsApp antes de criar a conversa.
+- Pedido sem WhatsApp, ou com numero que nao existe no WhatsApp, continua aparecendo em `Pedidos`, mas nao abre conversa na inbox.
 
-## 4. Render
+## 4. Robo de atendimento
+
+- O robo responde mensagens recebidas pelo webhook quando a integracao esta com `Robo ativo`.
+- Ele reconhece intencoes comuns: pedir cardapio, consultar pedido, horario, pagamento, entrega, produtos do cardapio e chamar atendente.
+- Quando um pedido e criado com WhatsApp valido, o backend envia a confirmacao do pedido pelo robo.
+- Ao enviar mensagem manual pela inbox, o robo pausa automaticamente naquela conversa ate o fim do dia.
+- Na conversa selecionada, use:
+  - `Pausar hoje` para silenciar o robo ate 23:59.
+  - `Pausar sem prazo` para atendimento humano sem retorno automatico.
+  - `Retomar bot` para o robo voltar a responder.
+  - `Cardapio` para enviar o link do cardapio digital sem criar conversa falsa.
+
+## 5. Render
 
 Depois do deploy, configure a URL publica da API no frontend (`VITE_API_BASE_URL`) e use a URL do webhook mostrada no painel. O webhook precisa ser acessivel publicamente pela WaSenderAPI.
 

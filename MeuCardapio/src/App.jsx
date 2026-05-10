@@ -22,6 +22,7 @@ import {
   checkBackendHealth,
   createBackendLog,
   createBackendOrder,
+  controlWhatsappBot,
   deleteBackendOrder,
   getBackendStore,
   loadBackendWorkspace,
@@ -41,6 +42,7 @@ import {
   saveWhatsappConfig,
   sendWhatsappMessage,
   signupBackendAccount,
+  syncWhatsappConversations,
   patchBackendStore,
   updateBackendStore,
   updateBackendMenuSnapshot,
@@ -6618,7 +6620,30 @@ function getWhatsappMessageText(message) {
   return message?.body || message?.text || ''
 }
 
-function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
+function getWhatsappBotState(conversation) {
+  if (!conversation) {
+    return { paused: false, label: 'Robo ativo' }
+  }
+
+  if (conversation.botPausedIndefinitely) {
+    return { paused: true, label: 'Robo pausado sem prazo' }
+  }
+
+  if (conversation.botPausedUntil) {
+    const pausedUntil = new Date(conversation.botPausedUntil)
+    if (!Number.isNaN(pausedUntil.getTime()) && pausedUntil.getTime() > Date.now()) {
+      return { paused: true, label: `Robo pausado ate ${formatWhatsappTime(conversation.botPausedUntil)}` }
+    }
+  }
+
+  if (conversation.botStatus === 'human') {
+    return { paused: true, label: 'Atendimento humano hoje' }
+  }
+
+  return { paused: false, label: 'Robo ativo' }
+}
+
+function WhatsappInbox({ storeId, onOpenModal }) {
   const [whatsappConfig, setWhatsappConfig] = useState(null)
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
   const [whatsappConversations, setWhatsappConversations] = useState([])
@@ -6628,25 +6653,8 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   const [conversationSearch, setConversationSearch] = useState('')
   const [conversationFilter, setConversationFilter] = useState('all')
 
-  const fallbackConversations = useMemo(() => orders
-    .filter((order) => order.phone)
-    .slice(0, 8)
-    .map((order) => ({
-      id: `order-${order.id}`,
-      remoteJid: order.phone,
-      contactName: order.customer,
-      phone: order.phone,
-      lastMessage: `Pedido #${order.id} - ${getOrderStageLabel(order.status)}`,
-      lastMessageAt: order.createdAt || order.updatedAt || '',
-      unreadCount: 0,
-      source: 'order',
-      order,
-    })), [orders])
-
-  const availableConversations = useMemo(() => (
-    whatsappConversations.length > 0 ? whatsappConversations : fallbackConversations
-  ), [fallbackConversations, whatsappConversations])
-  const effectiveSelectedWhatsappJid = selectedWhatsappJid || availableConversations[0]?.remoteJid || ''
+  const availableConversations = whatsappConversations
+  const effectiveSelectedWhatsappJid = selectedWhatsappJid || whatsappConversations[0]?.remoteJid || ''
   const selectedConversation = useMemo(() => (
     availableConversations.find((conversation) => conversation.remoteJid === effectiveSelectedWhatsappJid) || availableConversations[0] || null
   ), [availableConversations, effectiveSelectedWhatsappJid])
@@ -6668,27 +6676,14 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   }), [availableConversations, conversationFilter, conversationSearch])
   const selectedTitle = getWhatsappConversationTitle(selectedConversation)
   const selectedPhone = cleanWhatsappAddress(selectedConversation?.phone || selectedConversation?.remoteJid || '')
+  const selectedBotState = getWhatsappBotState(selectedConversation)
   const conversationMessages = useMemo(() => {
     if (whatsappMessages.length > 0) {
       return whatsappMessages
     }
 
-    if (selectedConversation?.source === 'order') {
-      return [{
-        id: `order-message-${selectedConversation.order.id}`,
-        fromMe: false,
-        body: `Pedido #${selectedConversation.order.id} em ${getOrderStageLabel(selectedConversation.order.status)}. Total ${formatCurrency(selectedConversation.order.total)}.`,
-        createdAt: selectedConversation.lastMessageAt,
-      }]
-    }
-
-    return chatMessages.slice(-4).map((message) => ({
-      id: message.id,
-      fromMe: message.author === 'Voce',
-      body: message.text,
-      createdAt: '',
-    }))
-  }, [chatMessages, selectedConversation, whatsappMessages])
+    return []
+  }, [whatsappMessages])
 
   useEffect(() => {
     if (!storeId) {
@@ -6721,7 +6716,7 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   }, [storeId])
 
   useEffect(() => {
-    if (!storeId || !effectiveSelectedWhatsappJid || whatsappConversations.length === 0) {
+    if (!storeId || !effectiveSelectedWhatsappJid) {
       return
     }
 
@@ -6745,7 +6740,7 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [effectiveSelectedWhatsappJid, storeId, whatsappConversations.length])
+  }, [effectiveSelectedWhatsappJid, storeId])
 
   async function refreshWhatsappStatus() {
     if (!storeId) return
@@ -6754,6 +6749,19 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
       setWhatsappStatus({ type: 'success', message: status.status || 'Status consultado.' })
     } catch (err) {
       setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel consultar status.' })
+    }
+  }
+
+  async function syncWhatsappFromSession() {
+    if (!storeId) return
+    try {
+      setWhatsappStatus({ type: 'warning', message: 'Puxando contatos e conversas do WhatsApp...' })
+      const conversations = await syncWhatsappConversations(storeId)
+      setWhatsappConversations(conversations)
+      setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
+      setWhatsappStatus({ type: 'success', message: `${conversations.length} conversa(s) sincronizada(s).` })
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel sincronizar conversas.' })
     }
   }
 
@@ -6770,6 +6778,28 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
     }
   }
 
+  async function runBotAction(action) {
+    if (!storeId || !effectiveSelectedWhatsappJid) return
+    try {
+      const updatedConversation = await controlWhatsappBot(storeId, effectiveSelectedWhatsappJid, action)
+      setWhatsappConversations((current) => current.map((conversation) => (
+        conversation.remoteJid === updatedConversation.remoteJid ? updatedConversation : conversation
+      )))
+      if (action === 'send_menu') {
+        setWhatsappMessages(await getWhatsappMessages(storeId, effectiveSelectedWhatsappJid))
+      }
+      const actionLabels = {
+        pause_today: 'Robo pausado nesta conversa ate o fim do dia.',
+        pause_forever: 'Robo pausado sem prazo nesta conversa.',
+        resume: 'Robo retomado nesta conversa.',
+        send_menu: 'Cardapio enviado para a conversa.',
+      }
+      setWhatsappStatus({ type: 'success', message: actionLabels[action] || 'Acao aplicada.' })
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel controlar o robo.' })
+    }
+  }
+
   return (
     <article className="module-card module-card--full whatsapp-mirror whatsapp-mirror--pure">
       <div className="whatsapp-mirror__body">
@@ -6777,9 +6807,6 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
           <button className="is-active" type="button" title="WhatsApp">
             <Icon name="message" size={21} />
             {unreadTotal > 0 ? <span>{unreadTotal}</span> : null}
-          </button>
-          <button type="button" title="Pedidos" onClick={() => onOpenModal('orderDetails', orders[0])} disabled={!orders[0]}>
-            <Icon name="bag" size={20} />
           </button>
           <button type="button" title="Configuracoes" onClick={() => onOpenModal('whatsappSetup')}>
             <Icon name="settings" size={20} />
@@ -6797,6 +6824,9 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
                 <button type="button" title="Conectar" onClick={() => onOpenModal('whatsappSetup')}>
                   <Icon name="plus" size={19} />
                 </button>
+                <button type="button" title="Puxar conversas" onClick={syncWhatsappFromSession}>
+                  <Icon name="upload" size={18} />
+                </button>
                 <button type="button" title="Status" onClick={refreshWhatsappStatus}>
                   <Icon name="bolt" size={18} />
                 </button>
@@ -6805,7 +6835,7 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
 
             <label className="whatsapp-search">
               <Icon name="search" size={18} />
-              <input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Pesquisar ou comecar uma conversa" />
+              <input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Pesquisar conversas reais" />
             </label>
 
             <div className="whatsapp-filter-tabs" role="tablist" aria-label="Filtrar conversas">
@@ -6833,7 +6863,10 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
                     key={conversation.id}
                     lastActivityTime={formatWhatsappTime(conversation.lastMessageAt)}
                     name={title}
-                    onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
+                    onClick={() => {
+                      setSelectedWhatsappJid(conversation.remoteJid)
+                      setWhatsappMessages([])
+                    }}
                     unreadCnt={conversation.unreadCount || undefined}
                   >
                     <Avatar name={title} className="whatsapp-chatkit-avatar">
@@ -6857,9 +6890,18 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
               <Avatar name={selectedTitle} className="whatsapp-chatkit-avatar whatsapp-chatkit-avatar--lg">
                 <span>{getWhatsappInitials(selectedTitle)}</span>
               </Avatar>
-              <ConversationHeader.Content userName={selectedTitle} info={selectedPhone || whatsappConfig?.status || 'Aguardando conversa'} />
+              <ConversationHeader.Content userName={selectedTitle} info={[selectedPhone || whatsappConfig?.status || 'Aguardando conversa', selectedBotState.label].filter(Boolean).join(' - ')} />
               <ConversationHeader.Actions>
-                <Button className="whatsapp-tag-button">Etiquetar conversa</Button>
+                <span className={`whatsapp-bot-status ${selectedBotState.paused ? 'is-paused' : 'is-active'}`.trim()}>{selectedBotState.label}</span>
+                {selectedBotState.paused ? (
+                  <Button className="whatsapp-tag-button" disabled={!selectedConversation} onClick={() => runBotAction('resume')}>Retomar bot</Button>
+                ) : (
+                  <Button className="whatsapp-tag-button" disabled={!selectedConversation} onClick={() => runBotAction('pause_today')}>Pausar hoje</Button>
+                )}
+                <Button className="whatsapp-tag-button" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>Cardapio</Button>
+                <button type="button" title="Pausar robo sem prazo" disabled={!selectedConversation} onClick={() => runBotAction('pause_forever')}>
+                  <Icon name="clock" size={20} />
+                </button>
                 <button type="button" title="Pesquisar na conversa">
                   <Icon name="search" size={20} />
                 </button>
@@ -6909,6 +6951,7 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
 
 function WhatsappSetupPanel({ storeId }) {
   const [whatsappConfig, setWhatsappConfig] = useState(null)
+  const defaultBotMenuUrl = storeId ? buildPublicAppUrl(`/loja/${encodeURIComponent(storeId)}`) : ''
   const [whatsappForm, setWhatsappForm] = useState({
     personalAccessToken: '',
     apiKey: '',
@@ -6916,6 +6959,11 @@ function WhatsappSetupPanel({ storeId }) {
     sessionName: 'MeuCardapio',
     phoneNumber: '',
     webhookSecret: '',
+    botEnabled: true,
+    botWelcome: 'Oi, sou o atendimento automatico. Posso te mandar o cardapio, consultar seu pedido ou chamar um atendente.',
+    botFallback: 'Posso te mandar o cardapio, consultar seu pedido ou chamar um atendente. Escreva cardapio, pedido ou atendente.',
+    botMenuUrl: defaultBotMenuUrl,
+    botHandoffKeywords: 'humano, atendente, ajuda, suporte',
   })
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
   const [whatsappQr, setWhatsappQr] = useState('')
@@ -6938,6 +6986,11 @@ function WhatsappSetupPanel({ storeId }) {
           sessionName: config.sessionName || current.sessionName,
           phoneNumber: config.phoneNumber || current.phoneNumber,
           webhookSecret: current.webhookSecret,
+          botEnabled: config.botEnabled !== false,
+          botWelcome: config.botWelcome || current.botWelcome,
+          botFallback: config.botFallback || current.botFallback,
+          botMenuUrl: config.botMenuUrl || current.botMenuUrl || defaultBotMenuUrl,
+          botHandoffKeywords: config.botHandoffKeywords || current.botHandoffKeywords,
           apiKey: '',
           personalAccessToken: '',
         }))
@@ -6952,7 +7005,7 @@ function WhatsappSetupPanel({ storeId }) {
     return () => {
       cancelled = true
     }
-  }, [storeId])
+  }, [defaultBotMenuUrl, storeId])
 
   async function saveWhatsapp() {
     if (!storeId) return
@@ -7009,6 +7062,14 @@ function WhatsappSetupPanel({ storeId }) {
         <input value={whatsappForm.sessionId} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionId: event.target.value.replace(/\D/g, '') })} placeholder={whatsappConfig?.sessionId ? `Sessao: ${whatsappConfig.sessionId}` : 'ID numerico da sessao'} />
         <input value={whatsappForm.webhookSecret} onChange={(event) => setWhatsappForm({ ...whatsappForm, webhookSecret: event.target.value })} placeholder={whatsappConfig?.hasWebhookSecret ? 'Webhook secret salvo' : 'Webhook secret'} type="password" />
         <input readOnly value={webhookUrl} />
+        <select value={whatsappForm.botEnabled ? 'yes' : 'no'} onChange={(event) => setWhatsappForm({ ...whatsappForm, botEnabled: event.target.value === 'yes' })}>
+          <option value="yes">Robo ativo</option>
+          <option value="no">Robo desligado</option>
+        </select>
+        <input value={whatsappForm.botMenuUrl} onChange={(event) => setWhatsappForm({ ...whatsappForm, botMenuUrl: event.target.value })} placeholder="Link do cardapio digital" />
+        <input value={whatsappForm.botHandoffKeywords} onChange={(event) => setWhatsappForm({ ...whatsappForm, botHandoffKeywords: event.target.value })} placeholder="Palavras para chamar atendente" />
+        <textarea value={whatsappForm.botWelcome} onChange={(event) => setWhatsappForm({ ...whatsappForm, botWelcome: event.target.value })} placeholder="Mensagem inicial do robo" />
+        <textarea value={whatsappForm.botFallback} onChange={(event) => setWhatsappForm({ ...whatsappForm, botFallback: event.target.value })} placeholder="Resposta quando o robo nao entende" />
       </div>
       {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
       {whatsappQr ? (
@@ -7025,10 +7086,10 @@ function WhatsappSetupPanel({ storeId }) {
   )
 }
 
-function ServiceSection({ storeId, orders, chatMessages, onOpenModal }) {
+function ServiceSection({ storeId, onOpenModal }) {
   return (
     <section className="module-grid module-grid--service">
-      <WhatsappInbox storeId={storeId} orders={orders} chatMessages={chatMessages} onOpenModal={onOpenModal} />
+      <WhatsappInbox storeId={storeId} onOpenModal={onOpenModal} />
     </section>
   )
 }
@@ -10262,7 +10323,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       ...(editedSourceOrder || {}),
       id: nextId,
       customer: newOrder.customer || 'Cliente balcao',
-      phone: newOrder.phone || '(47) 9 0000-0000',
+      phone: newOrder.phone.trim(),
       channel: newOrder.fulfillment === 'delivery' ? 'delivery' : 'pickup',
       fulfillment: newOrder.fulfillment,
       source: newOrder.fulfillment === 'dinein' && normalizeOrderPayment(newOrder.payment) === 'Mesa'
@@ -10356,7 +10417,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               const normalizedOrder = normalizeOrderRecord({
                 ...order,
                 customer: orderForm.customer || 'Cliente balcao',
-                phone: orderForm.phone || '(47) 9 0000-0000',
+                phone: orderForm.phone.trim(),
                 channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
                 fulfillment,
                 source: fulfillment === 'dinein' && orderForm.payment === 'Mesa'
@@ -10442,7 +10503,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const restoredOrder = normalizeOrderRecord({
       id: blocked.id,
       customer: blocked.customer,
-      phone: '(47) 9 1111-2222',
+      phone: '',
       channel: 'pickup',
       fulfillment: 'pickup',
       source: 'WhatsApp',
@@ -10761,7 +10822,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: 'Cliente PDV',
-      phone: '(47) 9 0000-0000',
+      phone: '',
       channel: 'pickup',
       fulfillment: 'pickup',
       source: 'Balcao',
@@ -11366,7 +11427,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     const createdOrder = normalizeOrderRecord({
       id: nextId,
       customer: table.customer || table.name,
-      phone: '(47) 9 2222-3333',
+      phone: '',
       channel: 'pickup',
       fulfillment: 'dinein',
       source: 'Mesa',
@@ -11865,8 +11926,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       return (
         <ServiceSection
           storeId={pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')}
-          orders={orders}
-          chatMessages={chatMessages}
           onOpenModal={openModal}
         />
       )

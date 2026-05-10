@@ -350,6 +350,10 @@ export async function getWhatsappConversations(storeId) {
   return request(`/stores/${storeId}/whatsapp/conversations`)
 }
 
+export async function syncWhatsappConversations(storeId) {
+  return request(`/stores/${storeId}/whatsapp/conversations/sync`, { method: 'POST' })
+}
+
 export async function getWhatsappMessages(storeId, remoteJid) {
   return request(`/stores/${storeId}/whatsapp/messages?remoteJid=${encodeURIComponent(remoteJid)}`)
 }
@@ -358,6 +362,13 @@ export async function sendWhatsappMessage(storeId, to, text) {
   return request(`/stores/${storeId}/whatsapp/messages`, {
     method: 'POST',
     body: JSON.stringify({ to, text }),
+  })
+}
+
+export async function controlWhatsappBot(storeId, remoteJid, action) {
+  return request(`/stores/${storeId}/whatsapp/bot?remoteJid=${encodeURIComponent(remoteJid)}`, {
+    method: 'POST',
+    body: JSON.stringify({ action }),
   })
 }
 
