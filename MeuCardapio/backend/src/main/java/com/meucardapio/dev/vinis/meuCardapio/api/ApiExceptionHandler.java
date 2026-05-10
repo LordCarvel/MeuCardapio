@@ -53,13 +53,24 @@ public class ApiExceptionHandler {
     @ExceptionHandler(RestClientResponseException.class)
     public ResponseEntity<Map<String, Object>> handleRestClientResponse(RestClientResponseException ex) {
         String response = ex.getResponseBodyAsString();
-        String message = response == null || response.isBlank()
-                ? "Servico externo recusou a requisicao."
-                : response.substring(0, Math.min(response.length(), 500));
+        String message = externalServiceMessage(response);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
                 "ok", false,
                 "status", ex.getStatusCode().value(),
                 "message", message));
+    }
+
+    private String externalServiceMessage(String response) {
+        if (response == null || response.isBlank()) {
+            return "Servico externo recusou a requisicao.";
+        }
+
+        String normalized = response.trim();
+        if (normalized.startsWith("<!DOCTYPE") || normalized.startsWith("<html")) {
+            return "WaSenderAPI retornou uma pagina HTML em vez de JSON. Confira se o Personal Access Token esta correto e se o ID da sessao e numerico.";
+        }
+
+        return normalized.substring(0, Math.min(normalized.length(), 500));
     }
 
     @ExceptionHandler(MailException.class)

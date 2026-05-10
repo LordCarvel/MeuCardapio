@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
@@ -46,7 +47,10 @@ public class WasenderApiService {
         this.conversations = conversations;
         this.messages = messages;
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
+        this.restClient = RestClient.builder()
+                .baseUrl(baseUrl)
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .build();
     }
 
     public WhatsappIntegration getOrCreate(UUID storeId) {
@@ -59,7 +63,7 @@ public class WasenderApiService {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(personalToken)) integration.setPersonalAccessToken(personalToken.trim());
         if (hasText(apiKey)) integration.setApiKey(apiKey.trim());
-        if (hasText(sessionId)) integration.setSessionId(sessionId.trim());
+        if (hasText(sessionId)) integration.setSessionId(normalizeSessionId(sessionId));
         if (hasText(sessionName)) integration.setSessionName(sessionName.trim());
         if (hasText(phoneNumber)) integration.setPhoneNumber(normalizeInternationalPhone(phoneNumber));
         if (hasText(webhookSecret)) integration.setWebhookSecret(webhookSecret.trim());
@@ -117,7 +121,7 @@ public class WasenderApiService {
     public JsonNode connect(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
-        String sessionId = require(integration.getSessionId(), "Crie ou informe o ID da sessao antes de conectar.");
+        String sessionId = normalizeSessionId(require(integration.getSessionId(), "Crie ou informe o ID da sessao antes de conectar."));
         JsonNode response = restClient.post()
                 .uri("/api/whatsapp-sessions/{id}/connect", sessionId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -134,7 +138,7 @@ public class WasenderApiService {
     public JsonNode qrCode(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
-        String sessionId = require(integration.getSessionId(), "Crie ou informe o ID da sessao antes de pedir o QR Code.");
+        String sessionId = normalizeSessionId(require(integration.getSessionId(), "Crie ou informe o ID da sessao antes de pedir o QR Code."));
         return restClient.get()
                 .uri("/api/whatsapp-sessions/{id}/qrcode", sessionId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -274,6 +278,14 @@ public class WasenderApiService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o telefone com DDI. Exemplo: +5547999999999.");
         }
         return "+" + phone;
+    }
+
+    private static String normalizeSessionId(String value) {
+        String sessionId = Optional.ofNullable(value).orElse("").trim();
+        if (!sessionId.matches("\\d+")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o ID numerico da sessao WaSenderAPI, nao a API key.");
+        }
+        return sessionId;
     }
 
     private static boolean hasText(String value) {
