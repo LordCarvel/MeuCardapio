@@ -6551,23 +6551,13 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
   )
 }
 
-function ServiceSection({ storeId, orders, channels, recoveries, chatMessages, onToggleChannel, onToggleRobot, onToggleRecovery, onOpenModal }) {
+function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   const [whatsappConfig, setWhatsappConfig] = useState(null)
-  const [whatsappForm, setWhatsappForm] = useState({
-    personalAccessToken: '',
-    apiKey: '',
-    sessionId: '',
-    sessionName: 'MeuCardapio',
-    phoneNumber: '',
-    webhookSecret: '',
-  })
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
-  const [whatsappQr, setWhatsappQr] = useState('')
   const [whatsappConversations, setWhatsappConversations] = useState([])
   const [selectedWhatsappJid, setSelectedWhatsappJid] = useState('')
   const [whatsappMessages, setWhatsappMessages] = useState([])
   const [whatsappDraft, setWhatsappDraft] = useState('')
-  const webhookUrl = storeId ? `${API_BASE_URL}/stores/${storeId}/whatsapp/webhook` : ''
 
   useEffect(() => {
     if (!storeId) {
@@ -6583,15 +6573,6 @@ function ServiceSection({ storeId, orders, channels, recoveries, chatMessages, o
         ])
         if (cancelled) return
         setWhatsappConfig(config)
-        setWhatsappForm((current) => ({
-          ...current,
-          sessionId: config.sessionId || current.sessionId,
-          sessionName: config.sessionName || current.sessionName,
-          phoneNumber: config.phoneNumber || current.phoneNumber,
-          webhookSecret: current.webhookSecret,
-          apiKey: '',
-          personalAccessToken: '',
-        }))
         setWhatsappConversations(conversations)
         setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
       } catch (err) {
@@ -6635,6 +6616,131 @@ function ServiceSection({ storeId, orders, channels, recoveries, chatMessages, o
     }
   }, [selectedWhatsappJid, storeId])
 
+  async function refreshWhatsappStatus() {
+    if (!storeId) return
+    try {
+      const status = await getWhatsappStatus(storeId)
+      setWhatsappStatus({ type: 'success', message: status.status || 'Status consultado.' })
+    } catch (err) {
+      setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel consultar status.' })
+    }
+  }
+
+  async function sendWhatsapp(event) {
+    event.preventDefault()
+    if (!storeId || !selectedWhatsappJid || !whatsappDraft.trim()) return
+    try {
+      await sendWhatsappMessage(storeId, selectedWhatsappJid, whatsappDraft.trim())
+      setWhatsappDraft('')
+      setWhatsappMessages(await getWhatsappMessages(storeId, selectedWhatsappJid))
+      setWhatsappConversations(await getWhatsappConversations(storeId))
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
+    }
+  }
+
+  return (
+    <article className="module-card module-card--full whatsapp-mirror whatsapp-mirror--pure">
+      <header className="module-card__header">
+        <div>
+          <h2>WhatsApp</h2>
+          <p>{whatsappConfig?.status || 'Aguardando conexao'}</p>
+        </div>
+        <div className="module-header-actions">
+          <Button onClick={refreshWhatsappStatus}>Status</Button>
+          <Button variant="primary" onClick={() => onOpenModal('whatsappSetup')}>Conectar</Button>
+          <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">WhatsApp Web</a>
+        </div>
+      </header>
+      {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
+      <div className="whatsapp-mirror__body">
+        <div className="whatsapp-mirror__sidebar">
+          {whatsappConversations.length > 0 ? whatsappConversations.map((conversation) => (
+            <button
+              className={selectedWhatsappJid === conversation.remoteJid ? 'is-active' : ''}
+              key={conversation.id}
+              type="button"
+              onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
+            >
+              <strong>{conversation.contactName || conversation.phone || conversation.remoteJid}</strong>
+              <small>{conversation.lastMessage || 'Sem mensagens'} {conversation.unreadCount > 0 ? `(${conversation.unreadCount})` : ''}</small>
+            </button>
+          )) : orders.slice(0, 6).map((order) => (
+            <button key={order.id} type="button" onClick={() => onOpenModal('orderDetails', order)}>
+              <strong>#{order.id} - {order.customer}</strong>
+              <small>{order.phone} - {getOrderStageLabel(order.status)}</small>
+            </button>
+          ))}
+        </div>
+        <div className="whatsapp-mirror__conversation">
+          <header>
+            <strong>{selectedWhatsappJid || 'WhatsApp'}</strong>
+            <small>{whatsappConfig?.status || 'Aguardando conexao'}</small>
+          </header>
+          <div>
+            {(whatsappMessages.length > 0 ? whatsappMessages : chatMessages.slice(-4)).map((message) => (
+              <p className={message.fromMe ? 'is-outbound' : ''} key={message.id}>
+                <b>{message.fromMe ? 'Voce' : message.author || 'Cliente'}:</b> {message.body || message.text}
+              </p>
+            ))}
+          </div>
+          <form className="whatsapp-reply" onSubmit={sendWhatsapp}>
+            <input value={whatsappDraft} onChange={(event) => setWhatsappDraft(event.target.value)} placeholder="Responder pelo WhatsApp" />
+            <Button variant="primary" type="submit">Enviar</Button>
+          </form>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function WhatsappSetupPanel({ storeId }) {
+  const [whatsappConfig, setWhatsappConfig] = useState(null)
+  const [whatsappForm, setWhatsappForm] = useState({
+    personalAccessToken: '',
+    apiKey: '',
+    sessionId: '',
+    sessionName: 'MeuCardapio',
+    phoneNumber: '',
+    webhookSecret: '',
+  })
+  const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
+  const [whatsappQr, setWhatsappQr] = useState('')
+  const webhookUrl = storeId ? `${API_BASE_URL}/stores/${storeId}/whatsapp/webhook` : ''
+
+  useEffect(() => {
+    if (!storeId) {
+      return
+    }
+
+    let cancelled = false
+    async function loadWhatsappConfig() {
+      try {
+        const config = await getWhatsappConfig(storeId)
+        if (cancelled) return
+        setWhatsappConfig(config)
+        setWhatsappForm((current) => ({
+          ...current,
+          sessionId: config.sessionId || current.sessionId,
+          sessionName: config.sessionName || current.sessionName,
+          phoneNumber: config.phoneNumber || current.phoneNumber,
+          webhookSecret: current.webhookSecret,
+          apiKey: '',
+          personalAccessToken: '',
+        }))
+      } catch (err) {
+        if (!cancelled) {
+          setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar WhatsApp.' })
+        }
+      }
+    }
+
+    void loadWhatsappConfig()
+    return () => {
+      cancelled = true
+    }
+  }, [storeId])
+
   async function saveWhatsapp() {
     if (!storeId) return
     try {
@@ -6676,140 +6782,37 @@ function ServiceSection({ storeId, orders, channels, recoveries, chatMessages, o
     }
   }
 
-  async function sendWhatsapp(event) {
-    event.preventDefault()
-    if (!storeId || !selectedWhatsappJid || !whatsappDraft.trim()) return
-    try {
-      await sendWhatsappMessage(storeId, selectedWhatsappJid, whatsappDraft.trim())
-      setWhatsappDraft('')
-      setWhatsappMessages(await getWhatsappMessages(storeId, selectedWhatsappJid))
-      setWhatsappConversations(await getWhatsappConversations(storeId))
-    } catch (err) {
-      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
-    }
-  }
+  return (
+    <div className="whatsapp-setup">
+      {!storeId ? <div className="whatsapp-status whatsapp-status--warning">Abra uma loja conectada ao servidor antes de configurar o WhatsApp.</div> : null}
+      <div className="whatsapp-config">
+        <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder="Personal Access Token" type="password" />
+        <input value={whatsappForm.apiKey} onChange={(event) => setWhatsappForm({ ...whatsappForm, apiKey: event.target.value })} placeholder={whatsappConfig?.hasApiKey ? 'API key salva' : 'API key da sessao'} type="password" />
+        <input value={whatsappForm.sessionName} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionName: event.target.value })} placeholder="Nome da sessao" />
+        <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value })} placeholder="Telefone com DDI, ex: 554799999999" />
+        <input value={whatsappForm.sessionId} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionId: event.target.value })} placeholder={whatsappConfig?.sessionId ? `Sessao: ${whatsappConfig.sessionId}` : 'ID da sessao existente'} />
+        <input value={whatsappForm.webhookSecret} onChange={(event) => setWhatsappForm({ ...whatsappForm, webhookSecret: event.target.value })} placeholder={whatsappConfig?.hasWebhookSecret ? 'Webhook secret salvo' : 'Webhook secret'} type="password" />
+        <input readOnly value={webhookUrl} />
+      </div>
+      {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
+      {whatsappQr ? (
+        <div className="whatsapp-qr">
+          {whatsappQr.startsWith('data:image') ? <img alt="QR Code WhatsApp" src={whatsappQr} /> : <code>{whatsappQr}</code>}
+        </div>
+      ) : null}
+      <div className="module-header-actions">
+        <Button onClick={saveWhatsapp}>Salvar</Button>
+        <Button onClick={refreshWhatsappStatus}>Status</Button>
+        <Button variant="primary" onClick={startWhatsappSession}>Criar/conectar</Button>
+      </div>
+    </div>
+  )
+}
 
+function ServiceSection({ storeId, orders, chatMessages, onOpenModal }) {
   return (
     <section className="module-grid module-grid--service">
-      <article className="module-card module-card--span whatsapp-mirror">
-        <header className="module-card__header">
-          <div>
-            <h2>Espelho do WhatsApp</h2>
-            <p>Conecte uma sessao WaSenderAPI para atender dentro do painel.</p>
-          </div>
-          <div className="module-header-actions">
-            <Button onClick={refreshWhatsappStatus}>Status</Button>
-            <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">WhatsApp Web</a>
-          </div>
-        </header>
-        <div className="whatsapp-config">
-          <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder="Personal Access Token" type="password" />
-          <input value={whatsappForm.apiKey} onChange={(event) => setWhatsappForm({ ...whatsappForm, apiKey: event.target.value })} placeholder={whatsappConfig?.hasApiKey ? 'API key salva' : 'API key da sessao'} type="password" />
-          <input value={whatsappForm.sessionName} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionName: event.target.value })} placeholder="Nome da sessao" />
-          <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value })} placeholder="Telefone com DDI, ex: 554799999999" />
-          <input value={whatsappForm.sessionId} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionId: event.target.value })} placeholder={whatsappConfig?.sessionId ? `Sessao: ${whatsappConfig.sessionId}` : 'ID da sessao existente'} />
-          <input value={whatsappForm.webhookSecret} onChange={(event) => setWhatsappForm({ ...whatsappForm, webhookSecret: event.target.value })} placeholder={whatsappConfig?.hasWebhookSecret ? 'Webhook secret salvo' : 'Webhook secret'} type="password" />
-          <input readOnly value={webhookUrl} />
-          <Button onClick={saveWhatsapp}>Salvar</Button>
-          <Button variant="primary" onClick={startWhatsappSession}>Criar/conectar</Button>
-        </div>
-        {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
-        {whatsappQr ? (
-          <div className="whatsapp-qr">
-            {whatsappQr.startsWith('data:image') ? <img alt="QR Code WhatsApp" src={whatsappQr} /> : <code>{whatsappQr}</code>}
-          </div>
-        ) : null}
-        <div className="whatsapp-mirror__body">
-          <div className="whatsapp-mirror__sidebar">
-            {whatsappConversations.length > 0 ? whatsappConversations.map((conversation) => (
-              <button
-                className={selectedWhatsappJid === conversation.remoteJid ? 'is-active' : ''}
-                key={conversation.id}
-                type="button"
-                onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
-              >
-                <strong>{conversation.contactName || conversation.phone || conversation.remoteJid}</strong>
-                <small>{conversation.lastMessage || 'Sem mensagens'} {conversation.unreadCount > 0 ? `(${conversation.unreadCount})` : ''}</small>
-              </button>
-            )) : orders.slice(0, 6).map((order) => (
-              <button key={order.id} type="button" onClick={() => onOpenModal('orderDetails', order)}>
-                <strong>#{order.id} - {order.customer}</strong>
-                <small>{order.phone} - {getOrderStageLabel(order.status)}</small>
-              </button>
-            ))}
-          </div>
-          <div className="whatsapp-mirror__conversation">
-            <header>
-              <strong>{selectedWhatsappJid || 'WhatsApp'}</strong>
-              <small>{whatsappConfig?.status || 'Aguardando conexao'}</small>
-            </header>
-            <div>
-              {(whatsappMessages.length > 0 ? whatsappMessages : chatMessages.slice(-4)).map((message) => (
-                <p className={message.fromMe ? 'is-outbound' : ''} key={message.id}>
-                  <b>{message.fromMe ? 'Voce' : message.author || 'Cliente'}:</b> {message.body || message.text}
-                </p>
-              ))}
-            </div>
-            <form className="whatsapp-reply" onSubmit={sendWhatsapp}>
-              <input value={whatsappDraft} onChange={(event) => setWhatsappDraft(event.target.value)} placeholder="Responder pelo WhatsApp" />
-              <Button variant="primary" type="submit">Enviar</Button>
-            </form>
-          </div>
-        </div>
-      </article>
-
-      <article className="module-card">
-        <header className="module-card__header">
-          <div>
-            <h2>Robo e canais</h2>
-            <p>Atendimento automatizado por canal, com fila local.</p>
-          </div>
-          <Button data-testid="bot-training" variant="primary" onClick={() => onOpenModal('botTraining')}>Treinar robo</Button>
-        </header>
-        <div className="data-list">
-          {channels.map((channel) => (
-            <article className="data-row" key={channel.id}>
-              <span>
-                <strong>{channel.name}</strong>
-                <small>{channel.queue} conversa(s) na fila</small>
-              </span>
-              <StatusBadge tone={channel.active ? 'success' : 'muted'}>{channel.active ? 'Ativo' : 'Off'}</StatusBadge>
-              <Button onClick={() => onToggleRobot(channel.id)}>{channel.robot ? 'Robo on' : 'Robo off'}</Button>
-              <Button variant={channel.active ? 'danger' : 'primary'} onClick={() => onToggleChannel(channel.id)}>
-                {channel.active ? 'Desligar' : 'Ligar'}
-              </Button>
-            </article>
-          ))}
-        </div>
-      </article>
-
-      <article className="module-card">
-        <header className="module-card__header">
-          <div>
-            <h2>Recuperador</h2>
-            <p>Campanhas automaticas para clientes parados.</p>
-          </div>
-          <Button data-testid="new-recovery" onClick={() => onOpenModal('newRecovery')}>Nova regra</Button>
-        </header>
-        <div className="data-list">
-          {recoveries.map((recovery) => (
-            <article className="data-row" key={recovery.id}>
-              <span>
-                <strong>{recovery.name}</strong>
-                <small>{recovery.sent} mensagem(ns) via {recovery.channel} - atraso {recovery.delay || 15} min</small>
-              </span>
-              <StatusBadge tone={recovery.active ? 'success' : 'muted'}>{recovery.active ? 'Ativa' : 'Pausada'}</StatusBadge>
-              <Button onClick={() => onOpenModal('editRecovery', recovery)}>Editar</Button>
-              <Button variant={recovery.active ? 'danger' : 'primary'} onClick={() => onToggleRecovery(recovery.id)}>
-                {recovery.active ? 'Pausar' : 'Ativar'}
-              </Button>
-              <Button variant="danger" onClick={() => onOpenModal('deleteRecovery', recovery)}>Apagar</Button>
-            </article>
-          ))}
-        </div>
-      </article>
-
-      <ServiceInbox orders={orders} chatMessages={chatMessages} onOpenModal={onOpenModal} />
+      <WhatsappInbox storeId={storeId} orders={orders} chatMessages={chatMessages} onOpenModal={onOpenModal} />
     </section>
   )
 }
@@ -7680,7 +7683,7 @@ function App() {
 
     if (shortcut.id === 'whatsapp') {
       setActiveNav('service')
-      setModal({ type: 'chat', payload: { channel: 'WhatsApp' } })
+      setModal({ type: 'whatsappSetup', payload: null })
       return
     }
 
@@ -11322,44 +11325,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     notify('Zona de entrega apagada.')
   }
 
-  function toggleChannel(channelId) {
-    let updatedChannel = null
-
-    setChannels((current) =>
-      current.map((channel) => {
-        if (channel.id !== channelId) {
-          return channel
-        }
-
-        updatedChannel = { ...channel, active: !channel.active }
-        return updatedChannel
-      }),
-    )
-
-    if (updatedChannel) {
-      notify(`${updatedChannel.name} ${updatedChannel.active ? 'ligado' : 'desligado'}.`)
-    }
-  }
-
-  function toggleRobot(channelId) {
-    let updatedChannel = null
-
-    setChannels((current) =>
-      current.map((channel) => {
-        if (channel.id !== channelId) {
-          return channel
-        }
-
-        updatedChannel = { ...channel, robot: !channel.robot }
-        return updatedChannel
-      }),
-    )
-
-    if (updatedChannel) {
-      notify(`Robo de ${updatedChannel.name} ${updatedChannel.robot ? 'ativado' : 'pausado'}.`)
-    }
-  }
-
   function createRecoveryRule(recoveryId = null) {
     const normalizedRecovery = {
       name: recoveryForm.name || `Regra automatica ${recoveries.length + 1}`,
@@ -11388,15 +11353,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     closeModal()
     notify('Regra de recuperacao criada.')
     return
-  }
-
-  function toggleRecovery(recoveryId) {
-    setRecoveries((current) =>
-      current.map((recovery) =>
-        recovery.id === recoveryId ? { ...recovery, active: !recovery.active } : recovery,
-      ),
-    )
-    notify('Status da regra atualizado.')
   }
 
   function deleteRecovery(recoveryId) {
@@ -11694,12 +11650,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
         <ServiceSection
           storeId={pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')}
           orders={orders}
-          channels={channels}
-          recoveries={recoveries}
           chatMessages={chatMessages}
-          onToggleChannel={toggleChannel}
-          onToggleRobot={toggleRobot}
-          onToggleRecovery={toggleRecovery}
           onOpenModal={openModal}
         />
       )
@@ -14552,6 +14503,16 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <input data-testid="chat-input" value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} placeholder="Digite uma mensagem" />
             <Button variant="primary" type="submit">Enviar</Button>
           </form>
+        </Modal>
+      )
+    }
+
+    if (modal.type === 'whatsappSetup') {
+      const whatsappStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')
+
+      return (
+        <Modal title="Conectar WhatsApp" subtitle="Credenciais e sessao WaSenderAPI." onClose={closeModal}>
+          <WhatsappSetupPanel storeId={whatsappStoreId} />
         </Modal>
       )
     }

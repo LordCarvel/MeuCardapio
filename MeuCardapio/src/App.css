@@ -1635,6 +1635,19 @@
   min-height: 280px;
 }
 
+.whatsapp-mirror--pure {
+  min-height: min(720px, calc(100vh - 178px));
+}
+
+.whatsapp-mirror--pure .whatsapp-mirror__body {
+  min-height: min(560px, calc(100vh - 292px));
+}
+
+.whatsapp-setup {
+  display: grid;
+  gap: 10px;
+}
+
 .whatsapp-config {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
