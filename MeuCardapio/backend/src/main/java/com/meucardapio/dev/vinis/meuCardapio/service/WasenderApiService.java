@@ -261,9 +261,9 @@ public class WasenderApiService {
     private static String normalizeInternationalPhone(String value) {
         String phone = Optional.ofNullable(value).orElse("").replaceAll("\\D", "");
         if (phone.length() < 10 || phone.length() > 15) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o telefone com DDI e apenas numeros. Exemplo: 5547999999999.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o telefone com DDI. Exemplo: +5547999999999.");
         }
-        return phone;
+        return "+" + phone;
     }
 
     private static boolean hasText(String value) {

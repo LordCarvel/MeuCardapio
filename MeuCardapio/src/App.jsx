@@ -6789,7 +6789,7 @@ function WhatsappSetupPanel({ storeId }) {
         <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder="Personal Access Token" type="password" />
         <input value={whatsappForm.apiKey} onChange={(event) => setWhatsappForm({ ...whatsappForm, apiKey: event.target.value })} placeholder={whatsappConfig?.hasApiKey ? 'API key salva' : 'API key da sessao'} type="password" />
         <input value={whatsappForm.sessionName} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionName: event.target.value })} placeholder="Nome da sessao" />
-        <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value.replace(/\D/g, '') })} placeholder="Telefone com DDI, ex: 5547999999999" />
+        <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value.replace(/[^\d+]/g, '') })} placeholder="Telefone com DDI, ex: +5547999999999" />
         <input value={whatsappForm.sessionId} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionId: event.target.value })} placeholder={whatsappConfig?.sessionId ? `Sessao: ${whatsappConfig.sessionId}` : 'ID da sessao existente'} />
         <input value={whatsappForm.webhookSecret} onChange={(event) => setWhatsappForm({ ...whatsappForm, webhookSecret: event.target.value })} placeholder={whatsappConfig?.hasWebhookSecret ? 'Webhook secret salvo' : 'Webhook secret'} type="password" />
         <input readOnly value={webhookUrl} />

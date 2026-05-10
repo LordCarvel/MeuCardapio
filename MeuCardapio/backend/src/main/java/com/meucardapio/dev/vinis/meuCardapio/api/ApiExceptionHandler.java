@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
@@ -47,6 +48,18 @@ public class ApiExceptionHandler {
         return Map.of(
                 "ok", false,
                 "message", ex.getMessage() == null ? "Servico indisponivel." : ex.getMessage());
+    }
+
+    @ExceptionHandler(RestClientResponseException.class)
+    public ResponseEntity<Map<String, Object>> handleRestClientResponse(RestClientResponseException ex) {
+        String response = ex.getResponseBodyAsString();
+        String message = response == null || response.isBlank()
+                ? "Servico externo recusou a requisicao."
+                : response.substring(0, Math.min(response.length(), 500));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "ok", false,
+                "status", ex.getStatusCode().value(),
+                "message", message));
     }
 
     @ExceptionHandler(MailException.class)
