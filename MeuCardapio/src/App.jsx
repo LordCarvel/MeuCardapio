@@ -1,4 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Avatar,
+  ChatContainer,
+  Conversation,
+  ConversationHeader,
+  ConversationList,
+  MainContainer,
+  Message,
+  MessageInput,
+  MessageList,
+  MessageSeparator,
+  Sidebar as ChatSidebar,
+} from '@chatscope/chat-ui-kit-react'
 import { StoreAccess } from './modules/store/StoreAccess'
 import { StoreDeletePrompt } from './modules/store/StoreDeletePrompt'
 import { StoreProfileForm } from './modules/store/StoreProfileForm'
@@ -49,6 +62,7 @@ import {
   normalizeStoreProfile,
 } from './modules/store/storeProfile'
 import { parseMenuImportContent } from './modules/menu/menuImport'
+import '@chatscope/chat-ui-kit-styles/dist/default/styles.min.css'
 import './App.css'
 
 function getCustomerStoreIdFromPath() {
@@ -6551,6 +6565,59 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
   )
 }
 
+function formatWhatsappTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatWhatsappDay(value) {
+  if (!value) return 'Hoje'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Hoje'
+
+  const today = new Date()
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const diffDays = Math.round((startOfToday - startOfDate) / 86400000)
+
+  if (diffDays === 0) return 'Hoje'
+  if (diffDays === 1) return 'Ontem'
+
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
+
+function cleanWhatsappAddress(value = '') {
+  return String(value || '')
+    .replace('@s.whatsapp.net', '')
+    .replace('@c.us', '')
+    .replace('@g.us', '')
+    .trim()
+}
+
+function getWhatsappInitials(value = '') {
+  const text = cleanWhatsappAddress(value).replace(/[^\p{L}\p{N}\s+]/gu, ' ').trim()
+  if (!text) return 'WA'
+  const parts = text.split(/\s+/).filter(Boolean)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase()
+}
+
+function getWhatsappConversationTitle(conversation) {
+  return conversation?.contactName || conversation?.phone || cleanWhatsappAddress(conversation?.remoteJid) || 'Cliente'
+}
+
+function getWhatsappConversationPreview(conversation) {
+  return conversation?.lastMessage || (conversation?.source === 'order' ? 'Pedido recente do cardapio' : 'Sem mensagens')
+}
+
+function getWhatsappMessageText(message) {
+  return message?.body || message?.text || ''
+}
+
 function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   const [whatsappConfig, setWhatsappConfig] = useState(null)
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
@@ -6558,6 +6625,70 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   const [selectedWhatsappJid, setSelectedWhatsappJid] = useState('')
   const [whatsappMessages, setWhatsappMessages] = useState([])
   const [whatsappDraft, setWhatsappDraft] = useState('')
+  const [conversationSearch, setConversationSearch] = useState('')
+  const [conversationFilter, setConversationFilter] = useState('all')
+
+  const fallbackConversations = useMemo(() => orders
+    .filter((order) => order.phone)
+    .slice(0, 8)
+    .map((order) => ({
+      id: `order-${order.id}`,
+      remoteJid: order.phone,
+      contactName: order.customer,
+      phone: order.phone,
+      lastMessage: `Pedido #${order.id} - ${getOrderStageLabel(order.status)}`,
+      lastMessageAt: order.createdAt || order.updatedAt || '',
+      unreadCount: 0,
+      source: 'order',
+      order,
+    })), [orders])
+
+  const availableConversations = useMemo(() => (
+    whatsappConversations.length > 0 ? whatsappConversations : fallbackConversations
+  ), [fallbackConversations, whatsappConversations])
+  const effectiveSelectedWhatsappJid = selectedWhatsappJid || availableConversations[0]?.remoteJid || ''
+  const selectedConversation = useMemo(() => (
+    availableConversations.find((conversation) => conversation.remoteJid === effectiveSelectedWhatsappJid) || availableConversations[0] || null
+  ), [availableConversations, effectiveSelectedWhatsappJid])
+  const unreadTotal = whatsappConversations.reduce((sum, conversation) => sum + Number(conversation.unreadCount || 0), 0)
+  const filteredConversations = useMemo(() => availableConversations.filter((conversation) => {
+    const search = conversationSearch.trim().toLowerCase()
+    const haystack = [
+      getWhatsappConversationTitle(conversation),
+      conversation.phone,
+      conversation.remoteJid,
+      getWhatsappConversationPreview(conversation),
+    ].filter(Boolean).join(' ').toLowerCase()
+
+    if (conversationFilter === 'unread' && !conversation.unreadCount) return false
+    if (conversationFilter === 'groups' && !String(conversation.remoteJid || '').includes('@g.us')) return false
+    if (conversationFilter === 'favorites') return false
+
+    return !search || haystack.includes(search)
+  }), [availableConversations, conversationFilter, conversationSearch])
+  const selectedTitle = getWhatsappConversationTitle(selectedConversation)
+  const selectedPhone = cleanWhatsappAddress(selectedConversation?.phone || selectedConversation?.remoteJid || '')
+  const conversationMessages = useMemo(() => {
+    if (whatsappMessages.length > 0) {
+      return whatsappMessages
+    }
+
+    if (selectedConversation?.source === 'order') {
+      return [{
+        id: `order-message-${selectedConversation.order.id}`,
+        fromMe: false,
+        body: `Pedido #${selectedConversation.order.id} em ${getOrderStageLabel(selectedConversation.order.status)}. Total ${formatCurrency(selectedConversation.order.total)}.`,
+        createdAt: selectedConversation.lastMessageAt,
+      }]
+    }
+
+    return chatMessages.slice(-4).map((message) => ({
+      id: message.id,
+      fromMe: message.author === 'Voce',
+      body: message.text,
+      createdAt: '',
+    }))
+  }, [chatMessages, selectedConversation, whatsappMessages])
 
   useEffect(() => {
     if (!storeId) {
@@ -6590,17 +6721,17 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
   }, [storeId])
 
   useEffect(() => {
-    if (!storeId || !selectedWhatsappJid) {
+    if (!storeId || !effectiveSelectedWhatsappJid || whatsappConversations.length === 0) {
       return
     }
 
     let cancelled = false
     async function loadMessages() {
       try {
-        const loaded = await getWhatsappMessages(storeId, selectedWhatsappJid)
+        const loaded = await getWhatsappMessages(storeId, effectiveSelectedWhatsappJid)
         if (!cancelled) {
           setWhatsappMessages(loaded)
-          void markWhatsappConversationRead(storeId, selectedWhatsappJid)
+          void markWhatsappConversationRead(storeId, effectiveSelectedWhatsappJid)
         }
       } catch (err) {
         if (!cancelled) {
@@ -6614,7 +6745,7 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [selectedWhatsappJid, storeId])
+  }, [effectiveSelectedWhatsappJid, storeId, whatsappConversations.length])
 
   async function refreshWhatsappStatus() {
     if (!storeId) return
@@ -6626,13 +6757,13 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
     }
   }
 
-  async function sendWhatsapp(event) {
-    event.preventDefault()
-    if (!storeId || !selectedWhatsappJid || !whatsappDraft.trim()) return
+  async function sendWhatsappText(text) {
+    const textMessage = String(text || '').trim()
+    if (!storeId || !effectiveSelectedWhatsappJid || !textMessage) return
     try {
-      await sendWhatsappMessage(storeId, selectedWhatsappJid, whatsappDraft.trim())
+      await sendWhatsappMessage(storeId, effectiveSelectedWhatsappJid, textMessage)
       setWhatsappDraft('')
-      setWhatsappMessages(await getWhatsappMessages(storeId, selectedWhatsappJid))
+      setWhatsappMessages(await getWhatsappMessages(storeId, effectiveSelectedWhatsappJid))
       setWhatsappConversations(await getWhatsappConversations(storeId))
     } catch (err) {
       setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
@@ -6641,54 +6772,136 @@ function WhatsappInbox({ storeId, orders, chatMessages, onOpenModal }) {
 
   return (
     <article className="module-card module-card--full whatsapp-mirror whatsapp-mirror--pure">
-      <header className="module-card__header">
-        <div>
-          <h2>WhatsApp</h2>
-          <p>{whatsappConfig?.status || 'Aguardando conexao'}</p>
-        </div>
-        <div className="module-header-actions">
-          <Button onClick={refreshWhatsappStatus}>Status</Button>
-          <Button variant="primary" onClick={() => onOpenModal('whatsappSetup')}>Conectar</Button>
-          <a className="btn" href="https://web.whatsapp.com/" target="_blank" rel="noreferrer">WhatsApp Web</a>
-        </div>
-      </header>
-      {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
       <div className="whatsapp-mirror__body">
-        <div className="whatsapp-mirror__sidebar">
-          {whatsappConversations.length > 0 ? whatsappConversations.map((conversation) => (
-            <button
-              className={selectedWhatsappJid === conversation.remoteJid ? 'is-active' : ''}
-              key={conversation.id}
-              type="button"
-              onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
-            >
-              <strong>{conversation.contactName || conversation.phone || conversation.remoteJid}</strong>
-              <small>{conversation.lastMessage || 'Sem mensagens'} {conversation.unreadCount > 0 ? `(${conversation.unreadCount})` : ''}</small>
-            </button>
-          )) : orders.slice(0, 6).map((order) => (
-            <button key={order.id} type="button" onClick={() => onOpenModal('orderDetails', order)}>
-              <strong>#{order.id} - {order.customer}</strong>
-              <small>{order.phone} - {getOrderStageLabel(order.status)}</small>
-            </button>
-          ))}
-        </div>
-        <div className="whatsapp-mirror__conversation">
-          <header>
-            <strong>{selectedWhatsappJid || 'WhatsApp'}</strong>
-            <small>{whatsappConfig?.status || 'Aguardando conexao'}</small>
-          </header>
-          <div>
-            {(whatsappMessages.length > 0 ? whatsappMessages : chatMessages.slice(-4)).map((message) => (
-              <p className={message.fromMe ? 'is-outbound' : ''} key={message.id}>
-                <b>{message.fromMe ? 'Voce' : message.author || 'Cliente'}:</b> {message.body || message.text}
-              </p>
-            ))}
-          </div>
-          <form className="whatsapp-reply" onSubmit={sendWhatsapp}>
-            <input value={whatsappDraft} onChange={(event) => setWhatsappDraft(event.target.value)} placeholder="Responder pelo WhatsApp" />
-            <Button variant="primary" type="submit">Enviar</Button>
-          </form>
-        </div>
+        <aside className="whatsapp-mirror__rail" aria-label="Atalhos do atendimento">
+          <button className="is-active" type="button" title="WhatsApp">
+            <Icon name="message" size={21} />
+            {unreadTotal > 0 ? <span>{unreadTotal}</span> : null}
+          </button>
+          <button type="button" title="Pedidos" onClick={() => onOpenModal('orderDetails', orders[0])} disabled={!orders[0]}>
+            <Icon name="bag" size={20} />
+          </button>
+          <button type="button" title="Configuracoes" onClick={() => onOpenModal('whatsappSetup')}>
+            <Icon name="settings" size={20} />
+          </button>
+        </aside>
+
+        <MainContainer className="whatsapp-chatkit-shell" responsive>
+          <ChatSidebar position="left" scrollable={false} className="whatsapp-chatkit-sidebar">
+            <header className="whatsapp-list-header">
+              <div>
+                <h2>WhatsApp</h2>
+                <small>{whatsappConfig?.status || 'Aguardando conexao'}</small>
+              </div>
+              <div>
+                <button type="button" title="Conectar" onClick={() => onOpenModal('whatsappSetup')}>
+                  <Icon name="plus" size={19} />
+                </button>
+                <button type="button" title="Status" onClick={refreshWhatsappStatus}>
+                  <Icon name="bolt" size={18} />
+                </button>
+              </div>
+            </header>
+
+            <label className="whatsapp-search">
+              <Icon name="search" size={18} />
+              <input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Pesquisar ou comecar uma conversa" />
+            </label>
+
+            <div className="whatsapp-filter-tabs" role="tablist" aria-label="Filtrar conversas">
+              {[
+                ['all', 'Tudo'],
+                ['unread', 'Nao lidas'],
+                ['favorites', 'Favoritas'],
+                ['groups', 'Grupos'],
+              ].map(([id, label]) => (
+                <button className={conversationFilter === id ? 'is-active' : ''} key={id} type="button" onClick={() => setConversationFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
+
+            <ConversationList className="whatsapp-conversation-list">
+              {filteredConversations.map((conversation) => {
+                const title = getWhatsappConversationTitle(conversation)
+                return (
+                  <Conversation
+                    active={effectiveSelectedWhatsappJid === conversation.remoteJid}
+                    info={getWhatsappConversationPreview(conversation)}
+                    key={conversation.id}
+                    lastActivityTime={formatWhatsappTime(conversation.lastMessageAt)}
+                    name={title}
+                    onClick={() => setSelectedWhatsappJid(conversation.remoteJid)}
+                    unreadCnt={conversation.unreadCount || undefined}
+                  >
+                    <Avatar name={title} className="whatsapp-chatkit-avatar">
+                      <span>{getWhatsappInitials(title)}</span>
+                    </Avatar>
+                  </Conversation>
+                )
+              })}
+              {filteredConversations.length === 0 ? (
+                <div className="whatsapp-empty-list">
+                  <Icon name="message" size={22} />
+                  <strong>Nenhuma conversa</strong>
+                  <small>As mensagens recebidas pelo webhook aparecem aqui.</small>
+                </div>
+              ) : null}
+            </ConversationList>
+          </ChatSidebar>
+
+          <ChatContainer className="whatsapp-chatkit-chat">
+            <ConversationHeader>
+              <Avatar name={selectedTitle} className="whatsapp-chatkit-avatar whatsapp-chatkit-avatar--lg">
+                <span>{getWhatsappInitials(selectedTitle)}</span>
+              </Avatar>
+              <ConversationHeader.Content userName={selectedTitle} info={selectedPhone || whatsappConfig?.status || 'Aguardando conversa'} />
+              <ConversationHeader.Actions>
+                <Button className="whatsapp-tag-button">Etiquetar conversa</Button>
+                <button type="button" title="Pesquisar na conversa">
+                  <Icon name="search" size={20} />
+                </button>
+                <button type="button" title="Mais opcoes">
+                  <Icon name="filter" size={19} />
+                </button>
+              </ConversationHeader.Actions>
+            </ConversationHeader>
+
+            <MessageList autoScrollToBottom autoScrollToBottomOnMount scrollBehavior="smooth">
+              <MessageSeparator>{formatWhatsappDay(conversationMessages[0]?.createdAt || selectedConversation?.lastMessageAt)}</MessageSeparator>
+              {conversationMessages.map((message) => (
+                <Message
+                  key={message.id}
+                  model={{
+                    direction: message.fromMe ? 'outgoing' : 'incoming',
+                    message: getWhatsappMessageText(message),
+                    position: 'single',
+                    sender: message.fromMe ? 'Voce' : selectedTitle,
+                    sentTime: formatWhatsappTime(message.createdAt),
+                  }}
+                />
+              ))}
+              {conversationMessages.length === 0 ? (
+                <div className="whatsapp-empty-chat">
+                  <Icon name="message" size={24} />
+                  <strong>Selecione uma conversa</strong>
+                  <small>Quando a WaSenderAPI chamar o webhook, a conversa entra na lista.</small>
+                </div>
+              ) : null}
+            </MessageList>
+
+            <MessageInput
+              attachButton
+              onChange={(innerHtml, textContent) => setWhatsappDraft(textContent || innerHtml)}
+              onSend={(innerHtml, textContent) => void sendWhatsappText(textContent || innerHtml)}
+              placeholder="Digite uma mensagem"
+              sendButton
+              value={whatsappDraft}
+            />
+          </ChatContainer>
+        </MainContainer>
       </div>
     </article>
   )

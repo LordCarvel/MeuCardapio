@@ -221,16 +221,39 @@ public class WasenderApiService {
 
     private void saveWebhookMessage(UUID storeId, JsonNode item, JsonNode payload) {
         JsonNode key = item.path("key");
-        String remoteJid = key.path("remoteJid").asText("");
+        String remoteJid = firstText(
+                key.path("remoteJid"),
+                item.path("remoteJid"),
+                item.path("chatId"),
+                item.path("from"),
+                item.path("jid"));
         if (!hasText(remoteJid)) return;
-        boolean fromMe = key.path("fromMe").asBoolean(false);
-        String messageId = key.path("id").asText("");
+        boolean fromMe = key.path("fromMe").asBoolean(item.path("fromMe").asBoolean(false));
+        String messageId = firstText(key.path("id"), item.path("id"), item.path("messageId"), item.path("msgId"));
         if (hasText(messageId) && messages.findFirstByStoreIdAndProviderMessageId(storeId, messageId).isPresent()) {
             return;
         }
-        String phone = firstText(key.path("cleanedSenderPn"), key.path("senderPn"), key.path("participantPn"));
-        String body = firstText(item.path("messageBody"), item.path("message").path("conversation"));
-        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, phone, body, !fromMe);
+        String phone = firstText(
+                key.path("cleanedSenderPn"),
+                key.path("senderPn"),
+                key.path("participantPn"),
+                item.path("cleanedSenderPn"),
+                item.path("senderPn"),
+                item.path("participantPn"),
+                item.path("phone"),
+                item.path("sender"));
+        String contactName = firstText(
+                item.path("pushName"),
+                item.path("verifiedBizName"),
+                item.path("notifyName"),
+                item.path("contactName"),
+                item.path("name"),
+                payload.path("data").path("pushName"));
+        if (!hasText(contactName)) {
+            contactName = hasText(phone) ? phone : remoteJid;
+        }
+        String body = messageText(item);
+        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, !fromMe);
         WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, remoteJid, fromMe);
         message.setProviderMessageId(messageId);
         message.setBody(body);
@@ -255,6 +278,22 @@ public class WasenderApiService {
         } catch (Exception ex) {
             return "{}";
         }
+    }
+
+    private static String messageText(JsonNode item) {
+        JsonNode message = item.path("message");
+        return firstText(
+                item.path("messageBody"),
+                item.path("body"),
+                item.path("text"),
+                item.path("caption"),
+                message.path("conversation"),
+                message.path("extendedTextMessage").path("text"),
+                message.path("imageMessage").path("caption"),
+                message.path("videoMessage").path("caption"),
+                message.path("documentMessage").path("caption"),
+                message.path("buttonsResponseMessage").path("selectedDisplayText"),
+                message.path("listResponseMessage").path("title"));
     }
 
     private static String firstText(JsonNode... nodes) {
