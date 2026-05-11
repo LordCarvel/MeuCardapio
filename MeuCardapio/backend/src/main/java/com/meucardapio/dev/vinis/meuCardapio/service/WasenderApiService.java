@@ -124,11 +124,17 @@ public class WasenderApiService {
         if (botHandoffKeywords != null) integration.setBotHandoffKeywords(botHandoffKeywords.trim());
         integration.touch();
         WhatsappIntegration saved = integrations.save(integration);
-        if (hasText(saved.getPersonalAccessToken()) && hasText(saved.getSessionId()) && hasText(saved.getWebhookUrl())) {
+        if (hasText(saved.getPersonalAccessToken()) && hasText(saved.getSessionId())) {
             try {
-                updateSessionWebhook(saved, saved.getWebhookUrl());
-            } catch (RestClientException ignored) {
-                // Keep local credentials saved even when the provider is temporarily unavailable.
+                if (hasText(saved.getWebhookUrl())) {
+                    updateSessionWebhook(saved, saved.getWebhookUrl());
+                } else {
+                    fetchSessionDetails(saved);
+                }
+            } catch (RestClientException ex) {
+                if (hasText(personalToken) || hasText(sessionId) || hasText(webhookUrl)) {
+                    throw wasenderBadRequest("A WaSenderAPI recusou o Personal Access Token ou o ID da sessao.", ex);
+                }
             }
         }
         return saved;
@@ -139,8 +145,12 @@ public class WasenderApiService {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(integration.getSessionId())) {
             String hook = hasText(webhookUrl) ? webhookUrl.trim() : integration.getWebhookUrl();
-            if (hasText(integration.getPersonalAccessToken()) && hasText(hook)) {
-                updateSessionWebhook(integration, hook);
+            if (hasText(integration.getPersonalAccessToken())) {
+                if (hasText(hook)) {
+                    updateSessionWebhook(integration, hook);
+                } else {
+                    fetchSessionDetails(integration);
+                }
             }
             return objectMapper.createObjectNode()
                     .put("success", true)
@@ -171,17 +181,24 @@ public class WasenderApiService {
                 .retrieve()
                 .body(JsonNode.class);
 
-        JsonNode data = response == null ? objectMapper.createObjectNode() : response.path("data");
-        if (data.hasNonNull("id")) integration.setSessionId(data.path("id").asText());
-        if (data.hasNonNull("name")) integration.setSessionName(data.path("name").asText());
-        if (data.hasNonNull("phone_number")) integration.setPhoneNumber(data.path("phone_number").asText());
-        if (data.hasNonNull("api_key")) integration.setApiKey(data.path("api_key").asText());
-        if (data.hasNonNull("webhook_secret")) integration.setWebhookSecret(data.path("webhook_secret").asText());
-        if (data.hasNonNull("webhook_url")) integration.setWebhookUrl(data.path("webhook_url").asText());
-        if (data.hasNonNull("status")) integration.setStatus(data.path("status").asText());
+        applySessionData(integration, response == null ? objectMapper.createObjectNode() : response.path("data"));
         integration.touch();
         integrations.save(integration);
         return response;
+    }
+
+    private WhatsappIntegration fetchSessionDetails(WhatsappIntegration integration) {
+        String token = require(integration.getPersonalAccessToken(), "Informe o Personal Access Token da WaSenderAPI.");
+        String sessionId = normalizeSessionId(require(integration.getSessionId(), "Informe o ID numerico da sessao WaSenderAPI."));
+        JsonNode response = restClient.get()
+                .uri("/api/whatsapp-sessions/{id}", sessionId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .retrieve()
+                .body(JsonNode.class);
+
+        applySessionData(integration, response == null ? objectMapper.createObjectNode() : response.path("data"));
+        integration.touch();
+        return integrations.save(integration);
     }
 
     private JsonNode updateSessionWebhook(WhatsappIntegration integration, String webhookUrl) {
@@ -208,14 +225,23 @@ public class WasenderApiService {
                 .retrieve()
                 .body(JsonNode.class);
 
-        JsonNode data = response == null ? objectMapper.createObjectNode() : response.path("data");
+        applySessionData(integration, response == null ? objectMapper.createObjectNode() : response.path("data"));
+        integration.touch();
+        integrations.save(integration);
+        return response;
+    }
+
+    private void applySessionData(WhatsappIntegration integration, JsonNode data) {
+        if (data == null || data.isMissingNode() || data.isNull()) {
+            return;
+        }
+        if (data.hasNonNull("id")) integration.setSessionId(data.path("id").asText());
+        if (data.hasNonNull("name")) integration.setSessionName(data.path("name").asText());
+        if (data.hasNonNull("phone_number")) integration.setPhoneNumber(data.path("phone_number").asText());
         if (data.hasNonNull("api_key")) integration.setApiKey(data.path("api_key").asText());
         if (data.hasNonNull("webhook_secret")) integration.setWebhookSecret(data.path("webhook_secret").asText());
         if (data.hasNonNull("webhook_url")) integration.setWebhookUrl(data.path("webhook_url").asText());
         if (data.hasNonNull("status")) integration.setStatus(data.path("status").asText());
-        integration.touch();
-        integrations.save(integration);
-        return response;
     }
 
     public JsonNode connect(UUID storeId) {
@@ -248,7 +274,7 @@ public class WasenderApiService {
 
     public JsonNode status(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
-        String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
+        String apiKey = requireSessionApiKey(integration);
         JsonNode response = restClient.get()
                 .uri("/api/status")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
@@ -273,7 +299,7 @@ public class WasenderApiService {
 
     private WhatsappMessage sendOutboundMessage(UUID storeId, String to, String text, boolean validateRecipient, boolean pauseAsManual, boolean botMessage) {
         WhatsappIntegration integration = getOrCreate(storeId);
-        String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
+        String apiKey = requireSessionApiKey(integration);
         if (!hasText(to) || !hasText(text)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe destinatario e mensagem.");
         }
@@ -329,7 +355,7 @@ public class WasenderApiService {
     @Transactional
     public WhatsappConversationSyncResult syncConversations(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
-        String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
+        String apiKey = requireSessionApiKey(integration);
         conversations.deleteEmptyWithoutMessagesByStoreId(storeId);
         int page = 1;
         int totalPages = 1;
@@ -413,11 +439,28 @@ public class WasenderApiService {
     }
 
     private int importMessageLogs(UUID storeId, WhatsappIntegration integration) {
-        if (!hasText(integration.getSessionId()) || !hasText(integration.getApiKey())) {
+        if (hasText(integration.getPersonalAccessToken()) && hasText(integration.getSessionId()) && !hasText(integration.getApiKey())) {
+            integration = fetchSessionDetails(integration);
+        }
+        if (!hasText(integration.getSessionId()) || (!hasText(integration.getApiKey()) && !hasText(integration.getPersonalAccessToken()))) {
             return 0;
         }
         String sessionId = normalizeSessionId(integration.getSessionId());
-        String apiKey = integration.getApiKey();
+        String primaryToken = hasText(integration.getApiKey()) ? integration.getApiKey().trim() : integration.getPersonalAccessToken().trim();
+        String fallbackToken = hasText(integration.getPersonalAccessToken()) && !integration.getPersonalAccessToken().trim().equals(primaryToken)
+                ? integration.getPersonalAccessToken().trim()
+                : "";
+        try {
+            return importMessageLogsWithToken(storeId, sessionId, primaryToken);
+        } catch (RestClientResponseException ex) {
+            if (hasText(fallbackToken) && responseMentionsPersonalToken(ex)) {
+                return importMessageLogsWithToken(storeId, sessionId, fallbackToken);
+            }
+            throw ex;
+        }
+    }
+
+    private int importMessageLogsWithToken(UUID storeId, String sessionId, String token) {
         int page = 1;
         int totalPages = 1;
         int imported = 0;
@@ -430,7 +473,7 @@ public class WasenderApiService {
                             .queryParam("page", currentPage)
                             .queryParam("per_page", MESSAGE_LOG_SYNC_PAGE_LIMIT)
                             .build(sessionId))
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .retrieve()
                     .body(JsonNode.class);
             for (JsonNode item : paginatedDataItems(response)) {
@@ -468,12 +511,13 @@ public class WasenderApiService {
             return Optional.empty();
         }
         WhatsappIntegration integration = integrations.findById(order.getStore().getId()).orElse(null);
-        if (integration == null || !integration.isBotEnabled() || !hasText(integration.getApiKey())) {
+        if (integration == null || !integration.isBotEnabled()) {
             return Optional.empty();
         }
+        String apiKey = requireSessionApiKey(integration);
         String recipient = normalizeBrazilianWhatsappPhone(order.getCustomerPhone());
         Optional<WhatsappConversation> knownConversation = findKnownConversation(order.getStore().getId(), recipient);
-        if (knownConversation.isEmpty() && !isPhoneRegisteredOnWhatsapp(integration.getApiKey(), recipient)) {
+        if (knownConversation.isEmpty() && !isPhoneRegisteredOnWhatsapp(apiKey, recipient)) {
             return Optional.empty();
         }
         return Optional.of(sendOutboundMessage(order.getStore().getId(), recipient, buildOrderCreatedMessage(order), false, false, true));
@@ -626,9 +670,6 @@ public class WasenderApiService {
         if (existing.isEmpty()) {
             existing = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid);
         }
-        if (existing.isEmpty()) {
-            return false;
-        }
         String contactName = firstText(
                 contact.path("name"),
                 contact.path("notify"),
@@ -637,15 +678,22 @@ public class WasenderApiService {
                 contact.path("pushName"),
                 contact.path("displayName"));
         String avatarUrl = firstText(contact.path("imgUrl"), contact.path("profilePicUrl"), contact.path("picture"), contact.path("avatarUrl"));
-        WhatsappConversation conversation = existing.get();
+        WhatsappConversation conversation = existing.orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
         if (hasText(phone)) {
             conversation.setPhone(cleanWhatsappPhone(phone));
+        } else if (!hasText(conversation.getPhone())) {
+            conversation.setPhone(cleanWhatsappPhone(remoteJid));
         }
         if (hasText(contactName) && (!looksLikePhone(contactName) || !hasText(conversation.getContactName()))) {
             conversation.setContactName(cleanWhatsappAddress(contactName));
+        } else if (!hasText(conversation.getContactName())) {
+            conversation.setContactName(cleanWhatsappAddress(hasText(phone) ? phone : remoteJid));
         }
         if (hasText(avatarUrl)) {
             conversation.setAvatarUrl(avatarUrl.trim());
+        }
+        if (!hasText(conversation.getLastMessage())) {
+            conversation.setLastMessage("");
         }
         conversations.save(conversation);
         return true;
@@ -958,6 +1006,17 @@ public class WasenderApiService {
     private record BotDecision(String text, boolean pauseAfterReply) {
     }
 
+    private String requireSessionApiKey(WhatsappIntegration integration) {
+        if (!hasText(integration.getApiKey()) && hasText(integration.getPersonalAccessToken()) && hasText(integration.getSessionId())) {
+            try {
+                integration = fetchSessionDetails(integration);
+            } catch (RestClientException ex) {
+                throw wasenderBadRequest("Nao consegui buscar a API key da sessao na WaSenderAPI.", ex);
+            }
+        }
+        return require(integration.getApiKey(), "Informe a API key da sessao ou salve um Personal Access Token valido junto com o ID numerico da sessao.");
+    }
+
     private Optional<WhatsappConversation> findKnownConversation(UUID storeId, String recipient) {
         Optional<WhatsappConversation> byRemoteJid = conversations.findByStoreIdAndRemoteJid(storeId, recipient);
         if (byRemoteJid.isPresent()) {
@@ -1055,6 +1114,39 @@ public class WasenderApiService {
             return "A WaSenderAPI demorou para carregar logs de mensagens. Tente sincronizar novamente em instantes.";
         }
         return "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
+    }
+
+    private boolean responseMentionsPersonalToken(RestClientResponseException ex) {
+        String detail = (Optional.ofNullable(ex.getResponseBodyAsString()).orElse("") + " " + Optional.ofNullable(ex.getMessage()).orElse(""))
+                .toLowerCase();
+        return detail.contains("personal access token") || detail.contains("access token");
+    }
+
+    private ResponseStatusException wasenderBadRequest(String fallback, RestClientException ex) {
+        String providerMessage = providerMessage(ex);
+        String message = hasText(providerMessage) ? fallback + " " + providerMessage : fallback;
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+
+    private String providerMessage(RestClientException ex) {
+        if (ex instanceof RestClientResponseException responseEx) {
+            String body = responseEx.getResponseBodyAsString();
+            if (hasText(body)) {
+                try {
+                    JsonNode response = objectMapper.readTree(body);
+                    String message = firstText(
+                            response.path("message"),
+                            response.path("error"),
+                            response.path("detail"));
+                    if (hasText(message)) {
+                        return message;
+                    }
+                } catch (Exception ignored) {
+                    return body;
+                }
+            }
+        }
+        return Optional.ofNullable(ex.getMessage()).orElse("");
     }
 
     private static String contactSyncFailureMessage(JsonNode response) {

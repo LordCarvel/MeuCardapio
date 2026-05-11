@@ -6671,7 +6671,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
 
     if (conversationFilter === 'unread' && !conversation.unreadCount) return false
     if (conversationFilter === 'groups' && !String(conversation.remoteJid || '').includes('@g.us')) return false
-    if (conversationFilter === 'favorites') return false
+    if (conversationFilter === 'contacts' && getWhatsappConversationPreview(conversation) !== 'Sem mensagens') return false
 
     return !search || haystack.includes(search)
   }), [availableConversations, conversationFilter, conversationSearch])
@@ -6850,7 +6850,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
               {[
                 ['all', 'Tudo'],
                 ['unread', 'Nao lidas'],
-                ['favorites', 'Favoritas'],
+                ['contacts', 'Contatos'],
                 ['groups', 'Grupos'],
               ].map(([id, label]) => (
                 <button className={conversationFilter === id ? 'is-active' : ''} key={id} type="button" onClick={() => setConversationFilter(id)}>
@@ -6936,8 +6936,8 @@ function WhatsappInbox({ storeId, onOpenModal }) {
               {conversationMessages.length === 0 ? (
                 <div className="whatsapp-empty-chat">
                   <Icon name="message" size={24} />
-                  <strong>Selecione uma conversa</strong>
-                  <small>Quando a WaSenderAPI chamar o webhook, a conversa entra na lista.</small>
+                  <strong>{selectedConversation ? 'Sem mensagens neste contato' : 'Selecione uma conversa'}</strong>
+                  <small>{selectedConversation ? 'Envie uma mensagem para iniciar o atendimento por aqui.' : 'Contatos sincronizados e mensagens recebidas pelo webhook aparecem aqui.'}</small>
                 </div>
               ) : null}
             </MessageList>

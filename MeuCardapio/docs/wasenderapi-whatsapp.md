@@ -5,15 +5,22 @@ Este fluxo conecta o painel de Atendimento do MeuCardapio a uma sessao da WaSend
 ## 1. Criar credenciais
 
 1. Entre na WaSenderAPI.
-2. Crie ou copie seu **Personal Access Token**.
+2. Crie ou copie seu **Personal Access Token** em `Settings > Personal Access Token`.
 3. No MeuCardapio, abra `Atendimento`.
 4. Cole o token em `Personal Access Token`.
 5. Informe o telefone com DDI e DDD, sem sinais. Exemplo: `5547999999999`.
-6. Confira o campo `Webhook URL`. Ele deve apontar para:
+6. Se a sessao ja existir na WaSenderAPI, informe tambem o `ID numerico da sessao`. O backend usa o Personal Access Token para buscar e salvar automaticamente a API key da sessao.
+7. Confira o campo `Webhook URL`. Ele deve apontar para:
 
 ```text
 https://SUA-API-DO-RENDER/api/stores/ID-DA-LOJA/whatsapp/webhook
 ```
+
+### Personal Access Token x API key
+
+- Endpoints de conta/sessao (`/api/whatsapp-sessions`, criar, atualizar, conectar, QR Code e detalhes da sessao) usam `Authorization: Bearer PERSONAL_ACCESS_TOKEN`.
+- Endpoints da sessao conectada (`/api/status`, `/api/contacts`, `/api/send-message`, `/api/on-whatsapp`) usam `Authorization: Bearer API_KEY_DA_SESSAO`.
+- O MeuCardapio agora tenta obter a API key sozinho pelo endpoint de detalhes da sessao quando voce salva PAT + ID numerico da sessao. Voce so precisa colar a API key manualmente se a WaSenderAPI nao retornar esse campo.
 
 ## 2. Criar e conectar sessao
 
@@ -26,12 +33,12 @@ Quando a sessao for criada, a API key da sessao fica salva no backend. Campos se
 
 ## 3. Espelhar conversas reais
 
-- A inbox nao cria conversa a partir de pedido. Ela mostra somente conversas reais sincronizadas da sessao WhatsApp.
-- Clique em `Sincronizar sessao` no painel para importar mensagens registradas pela WaSenderAPI e atualizar nomes/fotos dos contatos que ja possuem conversa real no MeuCardapio.
-- A lista de contatos da WaSenderAPI nao e historico de conversas. Conversas e mensagens atuais entram pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) depois que a sessao esta conectada com o webhook atualizado.
-- O endpoint de logs da WaSenderAPI recupera mensagens registradas pela sessao. Se o log de mensagens estiver desligado na WaSenderAPI, o conteudo pode vir vazio.
-- Se a WaSenderAPI demorar ao listar contatos, o painel mantem as conversas ja salvas e continua recebendo novas conversas pelo webhook.
-- Novas conversas e mensagens chegam pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) e aparecem em `Atendimento`.
+- Clique em `Sincronizar sessao` no painel para importar contatos, nomes/fotos e mensagens registradas pela WaSenderAPI.
+- Contatos retornados por `/api/contacts` entram na lista mesmo sem mensagem salva. Use a aba `Contatos` para ver somente esses contatos.
+- Conversas com mensagens reais entram por webhook (`chats.upsert`, `messages.upsert`, `messages.received` e `message.sent`) depois que a sessao esta conectada com o webhook atualizado.
+- O endpoint de logs (`/api/whatsapp-sessions/{id}/message-logs`) recupera mensagens enviadas pela API quando `log_messages` esta ativo. A propria doc informa que, se o log estiver desligado, `content` e `to` podem vir vazios.
+- A WaSenderAPI nao documenta um endpoint REST para baixar todo o historico antigo do WhatsApp como o app oficial faz. Historico anterior so entra se vier pelos logs da WaSenderAPI; mensagens novas entram pelo webhook a partir da conexao.
+- Se a WaSenderAPI demorar ao listar contatos, o painel mantem o que ja esta salvo e continua recebendo novas conversas pelo webhook.
 - Selecione uma conversa na lateral.
 - Digite a resposta no campo inferior e clique em `Enviar`.
 - Ao iniciar envio para um numero digitado, o backend consulta se o numero existe no WhatsApp antes de criar a conversa.
