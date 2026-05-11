@@ -623,7 +623,7 @@ public class WasenderApiService {
             return;
         }
         LocalDateTime messageAt = extractTimestamp(item, payload);
-        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, messageAt, !fromMe, null);
+        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, messageAt, !fromMe, null, !fromMe);
         applyConversationAvatar(conversation, item, payload.path("data"));
         WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, remoteJid, fromMe);
         message.setProviderMessageId(messageId);
@@ -773,10 +773,14 @@ public class WasenderApiService {
     }
 
     private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, LocalDateTime lastMessageAt, boolean unread, Integer unreadCount) {
+        return upsertConversation(storeId, remoteJid, phone, contactName, lastMessage, lastMessageAt, unread, unreadCount, false);
+    }
+
+    private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, LocalDateTime lastMessageAt, boolean unread, Integer unreadCount, boolean allowNameOverwrite) {
         WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
                 .orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
         if (hasText(phone)) conversation.setPhone(cleanWhatsappPhone(phone));
-        if (hasText(contactName)) applyConversationName(conversation, contactName);
+        if (hasText(contactName)) applyConversationName(conversation, contactName, allowNameOverwrite);
         if (hasText(lastMessage) || !hasText(conversation.getLastMessage())) {
             conversation.setLastMessage(lastMessage == null ? "" : lastMessage);
         }
@@ -790,12 +794,20 @@ public class WasenderApiService {
     }
 
     private void applyConversationName(WhatsappConversation conversation, String candidate) {
+        applyConversationName(conversation, candidate, false);
+    }
+
+    private void applyConversationName(WhatsappConversation conversation, String candidate, boolean allowOverwrite) {
         String name = cleanWhatsappAddress(candidate);
         if (!hasText(name)) {
             return;
         }
         String current = conversation.getContactName();
         if (!hasText(current) || looksLikePhone(current)) {
+            conversation.setContactName(name);
+            return;
+        }
+        if (allowOverwrite && !looksLikePhone(name) && !name.equalsIgnoreCase(current)) {
             conversation.setContactName(name);
         }
     }
