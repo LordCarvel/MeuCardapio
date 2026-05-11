@@ -1794,6 +1794,12 @@
   font-weight: 900;
 }
 
+.whatsapp-chatkit-avatar.cs-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .whatsapp-chatkit-avatar--lg.cs-avatar {
   width: 42px;
   min-width: 42px;

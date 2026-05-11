@@ -6596,6 +6596,7 @@ function cleanWhatsappAddress(value = '') {
     .replace('@s.whatsapp.net', '')
     .replace('@c.us', '')
     .replace('@g.us', '')
+    .replace('@lid', '')
     .trim()
 }
 
@@ -6755,13 +6756,15 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   async function syncWhatsappFromSession() {
     if (!storeId) return
     try {
-      setWhatsappStatus({ type: 'warning', message: 'Puxando contatos e conversas do WhatsApp...' })
+      setWhatsappStatus({ type: 'warning', message: 'Atualizando nomes e fotos dos contatos...' })
       const syncResult = await syncWhatsappConversations(storeId)
       const conversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
       setWhatsappConversations(conversations)
       setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
       if (!Array.isArray(syncResult) && syncResult.partial) {
         setWhatsappStatus({ type: 'warning', message: syncResult.message || `${conversations.length} conversa(s) disponivel(is). A sincronizacao ficou parcial.` })
+      } else if (!Array.isArray(syncResult) && syncResult.message) {
+        setWhatsappStatus({ type: 'success', message: syncResult.message })
       } else {
         setWhatsappStatus({ type: 'success', message: `${conversations.length} conversa(s) sincronizada(s).` })
       }
@@ -6829,7 +6832,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
                 <button type="button" title="Conectar" onClick={() => onOpenModal('whatsappSetup')}>
                   <Icon name="plus" size={19} />
                 </button>
-                <button type="button" title="Puxar conversas" onClick={syncWhatsappFromSession}>
+                <button type="button" title="Atualizar nomes e fotos" onClick={syncWhatsappFromSession}>
                   <Icon name="upload" size={18} />
                 </button>
                 <button type="button" title="Status" onClick={refreshWhatsappStatus}>
@@ -6874,8 +6877,8 @@ function WhatsappInbox({ storeId, onOpenModal }) {
                     }}
                     unreadCnt={conversation.unreadCount || undefined}
                   >
-                    <Avatar name={title} className="whatsapp-chatkit-avatar">
-                      <span>{getWhatsappInitials(title)}</span>
+                    <Avatar src={conversation.avatarUrl || undefined} name={title} className="whatsapp-chatkit-avatar">
+                      {conversation.avatarUrl ? null : <span>{getWhatsappInitials(title)}</span>}
                     </Avatar>
                   </Conversation>
                 )
@@ -6892,8 +6895,8 @@ function WhatsappInbox({ storeId, onOpenModal }) {
 
           <ChatContainer className="whatsapp-chatkit-chat">
             <ConversationHeader>
-              <Avatar name={selectedTitle} className="whatsapp-chatkit-avatar whatsapp-chatkit-avatar--lg">
-                <span>{getWhatsappInitials(selectedTitle)}</span>
+              <Avatar src={selectedConversation?.avatarUrl || undefined} name={selectedTitle} className="whatsapp-chatkit-avatar whatsapp-chatkit-avatar--lg">
+                {selectedConversation?.avatarUrl ? null : <span>{getWhatsappInitials(selectedTitle)}</span>}
               </Avatar>
               <ConversationHeader.Content userName={selectedTitle} info={[selectedPhone || whatsappConfig?.status || 'Aguardando conversa', selectedBotState.label].filter(Boolean).join(' - ')} />
               <ConversationHeader.Actions>

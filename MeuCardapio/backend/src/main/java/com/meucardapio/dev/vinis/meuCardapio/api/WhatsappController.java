@@ -98,7 +98,7 @@ public class WhatsappController {
 
     @GetMapping("/stores/{storeId}/whatsapp/conversations")
     public List<WhatsappConversationResponse> conversations(@PathVariable UUID storeId) {
-        return conversations.findByStoreIdOrderByLastMessageAtDesc(storeId).stream().map(WhatsappConversationResponse::from).toList();
+        return conversations.findVisibleByStoreIdOrderByLastMessageAtDesc(storeId).stream().map(WhatsappConversationResponse::from).toList();
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/conversations/sync")

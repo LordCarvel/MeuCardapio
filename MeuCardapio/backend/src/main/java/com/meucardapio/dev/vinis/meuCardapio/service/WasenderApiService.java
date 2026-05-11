@@ -121,7 +121,11 @@ public class WasenderApiService {
         if (botMenuUrl != null) integration.setBotMenuUrl(botMenuUrl.trim());
         if (botHandoffKeywords != null) integration.setBotHandoffKeywords(botHandoffKeywords.trim());
         integration.touch();
-        return integrations.save(integration);
+        WhatsappIntegration saved = integrations.save(integration);
+        if (hasText(saved.getPersonalAccessToken()) && hasText(saved.getSessionId()) && hasText(saved.getWebhookUrl())) {
+            updateSessionWebhook(saved, saved.getWebhookUrl());
+        }
+        return saved;
     }
 
     @Transactional
@@ -320,9 +324,13 @@ public class WasenderApiService {
     public WhatsappConversationSyncResult syncConversations(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
+        if (hasText(integration.getPersonalAccessToken()) && hasText(integration.getSessionId()) && hasText(integration.getWebhookUrl())) {
+            updateSessionWebhook(integration, integration.getWebhookUrl());
+        }
+        conversations.deleteEmptyWithoutMessagesByStoreId(storeId);
         int page = 1;
         int totalPages = 1;
-        int imported = 0;
+        int enriched = 0;
         boolean partial = false;
         String message = "";
 
@@ -347,23 +355,26 @@ public class WasenderApiService {
             }
             List<JsonNode> contacts = contactItems(response);
             for (JsonNode contact : contacts) {
-                if (upsertContactConversation(storeId, contact)) {
-                    imported += 1;
+                if (enrichContactConversation(storeId, contact)) {
+                    enriched += 1;
                 }
             }
             totalPages = Math.min(CONTACT_SYNC_MAX_PAGES, Math.max(totalPages, contactPageCount(response)));
             page += 1;
         } while (page <= totalPages && page <= CONTACT_SYNC_MAX_PAGES);
 
-        if (imported > 0) {
+        if (enriched > 0) {
             integration.touch();
             integrations.save(integration);
         }
+        List<WhatsappConversation> visibleConversations = conversations.findVisibleByStoreIdOrderByLastMessageAtDesc(storeId);
         return new WhatsappConversationSyncResult(
-                conversations.findByStoreIdOrderByLastMessageAtDesc(storeId),
-                imported,
+                visibleConversations,
+                enriched,
                 partial,
-                message);
+                hasText(message)
+                        ? message
+                        : visibleConversations.size() + " conversa(s) real(is) carregada(s). " + enriched + " contato(s) atualizaram nome/foto; historico antigo do WhatsApp nao vem pela lista de contatos.");
     }
 
     private JsonNode fetchContactPage(String apiKey, int page) {
@@ -436,7 +447,7 @@ public class WasenderApiService {
         }
         if (event.startsWith("contacts.")) {
             for (JsonNode item : webhookItems(payload, "")) {
-                upsertContactConversation(storeId, item);
+                enrichContactConversation(storeId, item);
             }
             return;
         }
@@ -508,6 +519,7 @@ public class WasenderApiService {
         String body = messageText(item);
         LocalDateTime messageAt = extractTimestamp(item, payload);
         WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, messageAt, !fromMe, null);
+        applyConversationAvatar(conversation, item, payload.path("data"));
         WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, remoteJid, fromMe);
         message.setProviderMessageId(messageId);
         message.setBody(body);
@@ -540,10 +552,11 @@ public class WasenderApiService {
         String phone = firstText(item.path("phone"), item.path("number"), item.path("cleanedSenderPn"), item.path("senderPn"), item.path("id"));
         String lastMessage = firstText(item.path("lastMessage"), item.path("messageBody"), item.path("body"));
         Integer unreadCount = item.hasNonNull("unreadCount") ? Math.max(0, item.path("unreadCount").asInt(0)) : null;
-        upsertConversation(storeId, remoteJid, phone, contactName, lastMessage, extractTimestamp(item, payload), false, unreadCount);
+        WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, lastMessage, extractTimestamp(item, payload), false, unreadCount);
+        applyConversationAvatar(conversation, item);
     }
 
-    private boolean upsertContactConversation(UUID storeId, JsonNode contact) {
+    private boolean enrichContactConversation(UUID storeId, JsonNode contact) {
         String remoteJid = firstText(
                 contact.path("jid"),
                 contact.path("id"),
@@ -553,22 +566,33 @@ public class WasenderApiService {
         if (!hasText(remoteJid)) {
             return false;
         }
+        String phone = firstText(contact.path("phone"), contact.path("number"), contact.path("jid"), contact.path("id"));
+        Optional<WhatsappConversation> existing = findKnownConversation(storeId, hasText(phone) ? phone : remoteJid);
+        if (existing.isEmpty()) {
+            existing = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid);
+        }
+        if (existing.isEmpty()) {
+            return false;
+        }
         String contactName = firstText(
                 contact.path("name"),
                 contact.path("notify"),
                 contact.path("verifiedName"),
                 contact.path("verifiedBizName"),
-                contact.path("pushName"));
-        String phone = firstText(contact.path("phone"), contact.path("number"), contact.path("jid"), contact.path("id"));
-        upsertConversation(
-                storeId,
-                remoteJid,
-                phone,
-                hasText(contactName) ? contactName : cleanWhatsappAddress(remoteJid),
-                "",
-                LocalDateTime.now(),
-                false,
-                null);
+                contact.path("pushName"),
+                contact.path("displayName"));
+        String avatarUrl = firstText(contact.path("imgUrl"), contact.path("profilePicUrl"), contact.path("picture"), contact.path("avatarUrl"));
+        WhatsappConversation conversation = existing.get();
+        if (hasText(phone)) {
+            conversation.setPhone(cleanWhatsappPhone(phone));
+        }
+        if (hasText(contactName) && (!looksLikePhone(contactName) || !hasText(conversation.getContactName()))) {
+            conversation.setContactName(cleanWhatsappAddress(contactName));
+        }
+        if (hasText(avatarUrl)) {
+            conversation.setAvatarUrl(avatarUrl.trim());
+        }
+        conversations.save(conversation);
         return true;
     }
 
@@ -587,6 +611,25 @@ public class WasenderApiService {
             conversation.setUnreadCount(conversation.getUnreadCount() + 1);
         }
         return conversations.save(conversation);
+    }
+
+    private void applyConversationAvatar(WhatsappConversation conversation, JsonNode... nodes) {
+        String avatarUrl = "";
+        for (JsonNode node : nodes) {
+            avatarUrl = firstText(
+                    node.path("imgUrl"),
+                    node.path("profilePicUrl"),
+                    node.path("profilePictureUrl"),
+                    node.path("picture"),
+                    node.path("avatarUrl"));
+            if (hasText(avatarUrl)) {
+                break;
+            }
+        }
+        if (hasText(avatarUrl)) {
+            conversation.setAvatarUrl(avatarUrl.trim());
+            conversations.save(conversation);
+        }
     }
 
     private void runBotIfNeeded(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
@@ -1035,6 +1078,11 @@ public class WasenderApiService {
 
     private static boolean isPhoneAddress(String value) {
         return hasText(value) && !value.contains("@") && value.replaceAll("\\D", "").length() >= 10;
+    }
+
+    private static boolean looksLikePhone(String value) {
+        String phone = Optional.ofNullable(value).orElse("").replaceAll("\\D", "");
+        return phone.length() >= 8 && phone.length() >= Optional.ofNullable(value).orElse("").replaceAll("\\s", "").length() - 2;
     }
 
     private static String cleanWhatsappPhone(String value) {

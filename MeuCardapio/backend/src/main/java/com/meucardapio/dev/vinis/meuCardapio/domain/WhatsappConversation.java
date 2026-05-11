@@ -22,6 +22,8 @@ public class WhatsappConversation {
     @Column(length = 60)
     private String phone;
     @Column(length = 1000)
+    private String avatarUrl;
+    @Column(length = 1000)
     private String lastMessage;
     @Column(nullable = false)
     private LocalDateTime lastMessageAt;
@@ -51,6 +53,8 @@ public class WhatsappConversation {
     public void setContactName(String contactName) { this.contactName = contactName; }
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
+    public String getAvatarUrl() { return avatarUrl; }
+    public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
     public String getLastMessage() { return lastMessage; }
     public void setLastMessage(String lastMessage) { this.lastMessage = lastMessage; }
     public LocalDateTime getLastMessageAt() { return lastMessageAt; }
