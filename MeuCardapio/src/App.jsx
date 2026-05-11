@@ -6675,6 +6675,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
 
     return !search || haystack.includes(search)
   }), [availableConversations, conversationFilter, conversationSearch])
+  const hasConversationFilters = conversationSearch.trim() || conversationFilter !== 'all'
   const selectedTitle = getWhatsappConversationTitle(selectedConversation)
   const selectedPhone = cleanWhatsappAddress(selectedConversation?.phone || selectedConversation?.remoteJid || '')
   const selectedBotState = getWhatsappBotState(selectedConversation)
@@ -6759,8 +6760,12 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       setWhatsappStatus({ type: 'warning', message: 'Sincronizando sessao: mensagens registradas, nomes e fotos...' })
       const syncResult = await syncWhatsappConversations(storeId)
       const conversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
+      setConversationSearch('')
+      setConversationFilter('all')
       setWhatsappConversations(conversations)
-      setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
+      setSelectedWhatsappJid((current) => (
+        conversations.some((conversation) => conversation.remoteJid === current) ? current : conversations[0]?.remoteJid || ''
+      ))
       if (!Array.isArray(syncResult) && syncResult.partial) {
         setWhatsappStatus({ type: 'warning', message: syncResult.message || `${conversations.length} conversa(s) disponivel(is). A sincronizacao ficou parcial.` })
       } else if (!Array.isArray(syncResult) && syncResult.message) {
@@ -6886,8 +6891,24 @@ function WhatsappInbox({ storeId, onOpenModal }) {
               {filteredConversations.length === 0 ? (
                 <div className="whatsapp-empty-list">
                   <Icon name="message" size={22} />
-                  <strong>Nenhuma conversa</strong>
-                  <small>As mensagens recebidas pelo webhook aparecem aqui.</small>
+                  <strong>{whatsappConversations.length > 0 && hasConversationFilters ? 'Filtro sem resultado' : 'Nenhuma conversa'}</strong>
+                  <small>
+                    {whatsappConversations.length > 0 && hasConversationFilters
+                      ? `${whatsappConversations.length} conversa(s)/contato(s) carregado(s), mas o filtro atual nao encontrou correspondencia.`
+                      : 'As mensagens recebidas pelo webhook aparecem aqui.'}
+                  </small>
+                  {whatsappConversations.length > 0 && hasConversationFilters ? (
+                    <button
+                      className="whatsapp-clear-filter"
+                      type="button"
+                      onClick={() => {
+                        setConversationSearch('')
+                        setConversationFilter('all')
+                      }}
+                    >
+                      Limpar filtros
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </ConversationList>
@@ -6920,6 +6941,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
             </ConversationHeader>
 
             <MessageList autoScrollToBottom autoScrollToBottomOnMount scrollBehavior="smooth">
+              {conversationMessages.length > 0 ? <div className="whatsapp-chat-bottom-spacer" aria-hidden="true" /> : null}
               <MessageSeparator>{formatWhatsappDay(conversationMessages[0]?.createdAt || selectedConversation?.lastMessageAt)}</MessageSeparator>
               {conversationMessages.map((message) => (
                 <Message

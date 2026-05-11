@@ -422,7 +422,7 @@ public class WasenderApiService {
                 partial,
                 hasText(message)
                         ? message
-                        : visibleConversations.size() + " conversa(s) carregada(s). " + importedLogs + " mensagem(ns) de log importada(s); " + enriched + " contato(s) atualizaram nome/foto.");
+                        : visibleConversations.size() + " conversa(s)/contato(s) carregado(s). " + importedLogs + " mensagem(ns) de log importada(s); " + enriched + " contato(s) atualizaram nome/foto.");
     }
 
     private JsonNode fetchContactPage(String apiKey, int page) {
