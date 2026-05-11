@@ -6621,6 +6621,10 @@ function getWhatsappMessageText(message) {
   return message?.body || message?.text || ''
 }
 
+function sameWhatsappPayload(left, right) {
+  return JSON.stringify(left || []) === JSON.stringify(right || [])
+}
+
 function getWhatsappBotState(conversation) {
   if (!conversation) {
     return { paused: false, label: 'Robo ativo' }
@@ -6655,7 +6659,8 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   const [conversationFilter, setConversationFilter] = useState('all')
 
   const availableConversations = whatsappConversations
-  const effectiveSelectedWhatsappJid = selectedWhatsappJid || whatsappConversations[0]?.remoteJid || ''
+  const selectedWhatsappStillVisible = whatsappConversations.some((conversation) => conversation.remoteJid === selectedWhatsappJid)
+  const effectiveSelectedWhatsappJid = selectedWhatsappStillVisible ? selectedWhatsappJid : whatsappConversations[0]?.remoteJid || ''
   const selectedConversation = useMemo(() => (
     availableConversations.find((conversation) => conversation.remoteJid === effectiveSelectedWhatsappJid) || availableConversations[0] || null
   ), [availableConversations, effectiveSelectedWhatsappJid])
@@ -6681,7 +6686,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   const selectedBotState = getWhatsappBotState(selectedConversation)
   const conversationMessages = useMemo(() => {
     if (whatsappMessages.length > 0) {
-      return whatsappMessages
+      return whatsappMessages.filter((message) => getWhatsappMessageText(message).trim())
     }
 
     return []
@@ -6701,8 +6706,10 @@ function WhatsappInbox({ storeId, onOpenModal }) {
         ])
         if (cancelled) return
         setWhatsappConfig(config)
-        setWhatsappConversations(conversations)
-        setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
+        setWhatsappConversations((current) => (sameWhatsappPayload(current, conversations) ? current : conversations))
+        setSelectedWhatsappJid((current) => (
+          conversations.some((conversation) => conversation.remoteJid === current) ? current : conversations[0]?.remoteJid || ''
+        ))
       } catch (err) {
         if (!cancelled) {
           setWhatsappStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar WhatsApp.' })
@@ -6710,7 +6717,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       }
     }
     void loadWhatsapp()
-    const interval = window.setInterval(loadWhatsapp, 8000)
+    const interval = window.setInterval(loadWhatsapp, 15000)
     return () => {
       cancelled = true
       window.clearInterval(interval)
@@ -6727,8 +6734,10 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       try {
         const loaded = await getWhatsappMessages(storeId, effectiveSelectedWhatsappJid)
         if (!cancelled) {
-          setWhatsappMessages(loaded)
-          void markWhatsappConversationRead(storeId, effectiveSelectedWhatsappJid)
+          setWhatsappMessages((current) => (sameWhatsappPayload(current, loaded) ? current : loaded))
+          if (selectedConversation?.unreadCount) {
+            void markWhatsappConversationRead(storeId, effectiveSelectedWhatsappJid)
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -6737,12 +6746,12 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       }
     }
     void loadMessages()
-    const interval = window.setInterval(loadMessages, 6000)
+    const interval = window.setInterval(loadMessages, 12000)
     return () => {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [effectiveSelectedWhatsappJid, storeId])
+  }, [effectiveSelectedWhatsappJid, selectedConversation?.unreadCount, storeId])
 
   async function refreshWhatsappStatus() {
     if (!storeId) return
@@ -6878,7 +6887,9 @@ function WhatsappInbox({ storeId, onOpenModal }) {
                     name={title}
                     onClick={() => {
                       setSelectedWhatsappJid(conversation.remoteJid)
-                      setWhatsappMessages([])
+                      if (conversation.remoteJid !== effectiveSelectedWhatsappJid) {
+                        setWhatsappMessages([])
+                      }
                     }}
                     unreadCnt={conversation.unreadCount || undefined}
                   >

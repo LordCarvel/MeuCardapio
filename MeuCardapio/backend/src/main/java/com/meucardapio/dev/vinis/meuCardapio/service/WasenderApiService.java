@@ -446,14 +446,14 @@ public class WasenderApiService {
             return 0;
         }
         String sessionId = normalizeSessionId(integration.getSessionId());
-        String primaryToken = hasText(integration.getApiKey()) ? integration.getApiKey().trim() : integration.getPersonalAccessToken().trim();
-        String fallbackToken = hasText(integration.getPersonalAccessToken()) && !integration.getPersonalAccessToken().trim().equals(primaryToken)
-                ? integration.getPersonalAccessToken().trim()
+        String primaryToken = hasText(integration.getPersonalAccessToken()) ? integration.getPersonalAccessToken().trim() : integration.getApiKey().trim();
+        String fallbackToken = hasText(integration.getApiKey()) && !integration.getApiKey().trim().equals(primaryToken)
+                ? integration.getApiKey().trim()
                 : "";
         try {
             return importMessageLogsWithToken(storeId, sessionId, primaryToken);
         } catch (RestClientResponseException ex) {
-            if (hasText(fallbackToken) && responseMentionsPersonalToken(ex)) {
+            if (hasText(fallbackToken)) {
                 return importMessageLogsWithToken(storeId, sessionId, fallbackToken);
             }
             throw ex;
@@ -605,7 +605,7 @@ public class WasenderApiService {
                 item.path("phone"),
                 item.path("to"),
                 item.path("sender"));
-        String contactName = firstText(
+        String contactName = fromMe ? "" : firstText(
                 item.path("pushName"),
                 item.path("verifiedBizName"),
                 item.path("notifyName"),
@@ -613,9 +613,15 @@ public class WasenderApiService {
                 item.path("name"),
                 payload.path("data").path("pushName"));
         if (!hasText(contactName)) {
-            contactName = hasText(phone) ? phone : remoteJid;
+            contactName = fromMe ? "" : hasText(phone) ? phone : remoteJid;
         }
         String body = messageText(item);
+        if (!hasText(body)) {
+            body = mediaMessageLabel(item);
+        }
+        if (!hasText(body)) {
+            return;
+        }
         LocalDateTime messageAt = extractTimestamp(item, payload);
         WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, body, messageAt, !fromMe, null);
         applyConversationAvatar(conversation, item, payload.path("data"));
@@ -677,15 +683,37 @@ public class WasenderApiService {
                 contact.path("verifiedBizName"),
                 contact.path("pushName"),
                 contact.path("displayName"));
-        String avatarUrl = firstText(contact.path("imgUrl"), contact.path("profilePicUrl"), contact.path("picture"), contact.path("avatarUrl"));
-        WhatsappConversation conversation = existing.orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
+        String avatarUrl = firstText(
+                contact.path("imgUrl"),
+                contact.path("profilePicUrl"),
+                contact.path("profilePictureUrl"),
+                contact.path("profilePicture"),
+                contact.path("profilePicture").path("url"),
+                contact.path("profilePicture").path("eurl"),
+                contact.path("profilePic"),
+                contact.path("profilePic").path("url"),
+                contact.path("profilePic").path("eurl"),
+                contact.path("picture"),
+                contact.path("picture").path("url"),
+                contact.path("pictureUrl"),
+                contact.path("avatarUrl"),
+                contact.path("avatar"),
+                contact.path("avatar").path("url"),
+                contact.path("photo"),
+                contact.path("photo").path("url"),
+                contact.path("photoUrl"),
+                contact.path("image"));
+        if (existing.isEmpty()) {
+            return false;
+        }
+        WhatsappConversation conversation = existing.get();
         if (hasText(phone)) {
             conversation.setPhone(cleanWhatsappPhone(phone));
         } else if (!hasText(conversation.getPhone())) {
             conversation.setPhone(cleanWhatsappPhone(remoteJid));
         }
-        if (hasText(contactName) && (!looksLikePhone(contactName) || !hasText(conversation.getContactName()))) {
-            conversation.setContactName(cleanWhatsappAddress(contactName));
+        if (hasText(contactName)) {
+            applyConversationName(conversation, contactName);
         } else if (!hasText(conversation.getContactName())) {
             conversation.setContactName(cleanWhatsappAddress(hasText(phone) ? phone : remoteJid));
         }
@@ -748,7 +776,7 @@ public class WasenderApiService {
         WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
                 .orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
         if (hasText(phone)) conversation.setPhone(cleanWhatsappPhone(phone));
-        if (hasText(contactName)) conversation.setContactName(cleanWhatsappAddress(contactName));
+        if (hasText(contactName)) applyConversationName(conversation, contactName);
         if (hasText(lastMessage) || !hasText(conversation.getLastMessage())) {
             conversation.setLastMessage(lastMessage == null ? "" : lastMessage);
         }
@@ -761,6 +789,17 @@ public class WasenderApiService {
         return conversations.save(conversation);
     }
 
+    private void applyConversationName(WhatsappConversation conversation, String candidate) {
+        String name = cleanWhatsappAddress(candidate);
+        if (!hasText(name)) {
+            return;
+        }
+        String current = conversation.getContactName();
+        if (!hasText(current) || looksLikePhone(current)) {
+            conversation.setContactName(name);
+        }
+    }
+
     private void applyConversationAvatar(WhatsappConversation conversation, JsonNode... nodes) {
         String avatarUrl = "";
         for (JsonNode node : nodes) {
@@ -768,8 +807,22 @@ public class WasenderApiService {
                     node.path("imgUrl"),
                     node.path("profilePicUrl"),
                     node.path("profilePictureUrl"),
+                    node.path("profilePicture"),
+                    node.path("profilePicture").path("url"),
+                    node.path("profilePicture").path("eurl"),
+                    node.path("profilePic"),
+                    node.path("profilePic").path("url"),
+                    node.path("profilePic").path("eurl"),
                     node.path("picture"),
-                    node.path("avatarUrl"));
+                    node.path("picture").path("url"),
+                    node.path("pictureUrl"),
+                    node.path("avatarUrl"),
+                    node.path("avatar"),
+                    node.path("avatar").path("url"),
+                    node.path("photo"),
+                    node.path("photo").path("url"),
+                    node.path("photoUrl"),
+                    node.path("image"));
             if (hasText(avatarUrl)) {
                 break;
             }
@@ -1116,12 +1169,6 @@ public class WasenderApiService {
         return "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
     }
 
-    private boolean responseMentionsPersonalToken(RestClientResponseException ex) {
-        String detail = (Optional.ofNullable(ex.getResponseBodyAsString()).orElse("") + " " + Optional.ofNullable(ex.getMessage()).orElse(""))
-                .toLowerCase();
-        return detail.contains("personal access token") || detail.contains("access token");
-    }
-
     private ResponseStatusException wasenderBadRequest(String fallback, RestClientException ex) {
         String providerMessage = providerMessage(ex);
         String message = hasText(providerMessage) ? fallback + " " + providerMessage : fallback;
@@ -1249,6 +1296,18 @@ public class WasenderApiService {
                 message.path("documentMessage").path("caption"),
                 message.path("buttonsResponseMessage").path("selectedDisplayText"),
                 message.path("listResponseMessage").path("title"));
+    }
+
+    private static String mediaMessageLabel(JsonNode item) {
+        JsonNode message = item.path("message");
+        if (message.path("imageMessage").isObject()) return "[imagem]";
+        if (message.path("videoMessage").isObject()) return "[video]";
+        if (message.path("audioMessage").isObject()) return "[audio]";
+        if (message.path("documentMessage").isObject()) return "[documento]";
+        if (message.path("stickerMessage").isObject()) return "[figurinha]";
+        if (message.path("locationMessage").isObject()) return "[localizacao]";
+        if (message.path("contactMessage").isObject() || message.path("contactsArrayMessage").isObject()) return "[contato]";
+        return "";
     }
 
     private String messageLogText(JsonNode content) {

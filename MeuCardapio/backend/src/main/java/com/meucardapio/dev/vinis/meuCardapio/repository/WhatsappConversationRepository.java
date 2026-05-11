@@ -18,9 +18,6 @@ public interface WhatsappConversationRepository extends JpaRepository<WhatsappCo
             where c.store_id = :storeId
               and (coalesce(c.last_message, '') <> ''
                 or c.unread_count > 0
-                or coalesce(c.contact_name, '') <> ''
-                or coalesce(c.phone, '') <> ''
-                or coalesce(c.avatar_url, '') <> ''
                 or exists (select 1 from whatsapp_messages m where m.conversation_id = c.id))
             order by c.last_message_at desc
             """, nativeQuery = true)
@@ -33,9 +30,6 @@ public interface WhatsappConversationRepository extends JpaRepository<WhatsappCo
             where store_id = :storeId
               and coalesce(last_message, '') = ''
               and unread_count = 0
-              and coalesce(contact_name, '') = ''
-              and coalesce(phone, '') = ''
-              and coalesce(avatar_url, '') = ''
               and not exists (
                 select 1 from whatsapp_messages
                 where whatsapp_messages.conversation_id = whatsapp_conversations.id
