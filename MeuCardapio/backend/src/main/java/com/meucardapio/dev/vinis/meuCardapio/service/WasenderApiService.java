@@ -20,6 +20,8 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
@@ -41,6 +43,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class WasenderApiService {
+    private static final int CONTACT_SYNC_PAGE_LIMIT = 20;
+    private static final int CONTACT_SYNC_MAX_PAGES = 5;
     private static final List<String> MIRROR_WEBHOOK_EVENTS = List.of(
             "chats.upsert",
             "chats.update",
@@ -313,40 +317,66 @@ public class WasenderApiService {
     }
 
     @Transactional
-    public List<WhatsappConversation> syncConversations(UUID storeId) {
+    public WhatsappConversationSyncResult syncConversations(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
         int page = 1;
         int totalPages = 1;
         int imported = 0;
+        boolean partial = false;
+        String message = "";
 
         do {
             int currentPage = page;
-            JsonNode response = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/api/contacts")
-                            .queryParam("paginated", "true")
-                            .queryParam("page", currentPage)
-                            .queryParam("limit", 100)
-                            .build())
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                    .retrieve()
-                    .body(JsonNode.class);
+            JsonNode response;
+            try {
+                response = fetchContactPage(apiKey, currentPage);
+            } catch (RestClientResponseException ex) {
+                partial = true;
+                message = contactSyncFailureMessage(ex.getResponseBodyAsString(), ex);
+                break;
+            } catch (RestClientException ex) {
+                partial = true;
+                message = contactSyncFailureMessage("", ex);
+                break;
+            }
+            if (response != null && !response.path("success").asBoolean(true)) {
+                partial = true;
+                message = contactSyncFailureMessage(response);
+                break;
+            }
             List<JsonNode> contacts = contactItems(response);
             for (JsonNode contact : contacts) {
                 if (upsertContactConversation(storeId, contact)) {
                     imported += 1;
                 }
             }
-            totalPages = Math.max(totalPages, contactPageCount(response));
+            totalPages = Math.min(CONTACT_SYNC_MAX_PAGES, Math.max(totalPages, contactPageCount(response)));
             page += 1;
-        } while (page <= totalPages && page <= 20);
+        } while (page <= totalPages && page <= CONTACT_SYNC_MAX_PAGES);
 
         if (imported > 0) {
             integration.touch();
             integrations.save(integration);
         }
-        return conversations.findByStoreIdOrderByLastMessageAtDesc(storeId);
+        return new WhatsappConversationSyncResult(
+                conversations.findByStoreIdOrderByLastMessageAtDesc(storeId),
+                imported,
+                partial,
+                message);
+    }
+
+    private JsonNode fetchContactPage(String apiKey, int page) {
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/contacts")
+                        .queryParam("paginated", "true")
+                        .queryParam("page", page)
+                        .queryParam("limit", CONTACT_SYNC_PAGE_LIMIT)
+                        .build())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                .retrieve()
+                .body(JsonNode.class);
     }
 
     @Transactional
@@ -775,6 +805,13 @@ public class WasenderApiService {
         return "R$ " + amount.setScale(2, RoundingMode.HALF_UP).toPlainString().replace(".", ",");
     }
 
+    public record WhatsappConversationSyncResult(
+            List<WhatsappConversation> conversations,
+            int imported,
+            boolean partial,
+            String message) {
+    }
+
     private record BotDecision(String text, boolean pauseAfterReply) {
     }
 
@@ -831,6 +868,41 @@ public class WasenderApiService {
             items.forEach(result::add);
         }
         return result;
+    }
+
+    private String contactSyncFailureMessage(String responseBody, Exception ex) {
+        if (hasText(responseBody)) {
+            try {
+                return contactSyncFailureMessage(objectMapper.readTree(responseBody));
+            } catch (Exception ignored) {
+                if (responseBody.toLowerCase().contains("took longer")) {
+                    return contactSyncTimeoutMessage();
+                }
+                return "A WaSenderAPI recusou a listagem de contatos. Tente novamente em alguns instantes.";
+            }
+        }
+        String detail = ex == null ? "" : Optional.ofNullable(ex.getMessage()).orElse("");
+        if (detail.toLowerCase().contains("timed out") || detail.toLowerCase().contains("timeout")) {
+            return contactSyncTimeoutMessage();
+        }
+        return "Nao foi possivel listar contatos na WaSenderAPI agora. As conversas recebidas por webhook continuam salvas.";
+    }
+
+    private static String contactSyncFailureMessage(JsonNode response) {
+        String providerMessage = firstText(
+                response.path("message"),
+                response.path("error"),
+                response.path("detail"));
+        if (providerMessage.toLowerCase().contains("took longer")) {
+            return contactSyncTimeoutMessage();
+        }
+        return hasText(providerMessage)
+                ? providerMessage
+                : "A WaSenderAPI nao conseguiu concluir a listagem de contatos agora.";
+    }
+
+    private static String contactSyncTimeoutMessage() {
+        return "A WaSenderAPI demorou para listar contatos. Mantive as conversas ja salvas; novas conversas entram pelo webhook.";
     }
 
     private static int contactPageCount(JsonNode response) {

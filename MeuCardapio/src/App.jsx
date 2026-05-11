@@ -6756,10 +6756,15 @@ function WhatsappInbox({ storeId, onOpenModal }) {
     if (!storeId) return
     try {
       setWhatsappStatus({ type: 'warning', message: 'Puxando contatos e conversas do WhatsApp...' })
-      const conversations = await syncWhatsappConversations(storeId)
+      const syncResult = await syncWhatsappConversations(storeId)
+      const conversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
       setWhatsappConversations(conversations)
       setSelectedWhatsappJid((current) => current || conversations[0]?.remoteJid || '')
-      setWhatsappStatus({ type: 'success', message: `${conversations.length} conversa(s) sincronizada(s).` })
+      if (!Array.isArray(syncResult) && syncResult.partial) {
+        setWhatsappStatus({ type: 'warning', message: syncResult.message || `${conversations.length} conversa(s) disponivel(is). A sincronizacao ficou parcial.` })
+      } else {
+        setWhatsappStatus({ type: 'success', message: `${conversations.length} conversa(s) sincronizada(s).` })
+      }
     } catch (err) {
       setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel sincronizar conversas.' })
     }

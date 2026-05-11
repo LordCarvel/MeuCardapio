@@ -21,6 +21,7 @@ import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfig
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotControlRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationResponse;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationSyncResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappMessageResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappQrResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappSendMessageRequest;
@@ -101,8 +102,13 @@ public class WhatsappController {
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/conversations/sync")
-    public List<WhatsappConversationResponse> syncConversations(@PathVariable UUID storeId) {
-        return wasender.syncConversations(storeId).stream().map(WhatsappConversationResponse::from).toList();
+    public WhatsappConversationSyncResponse syncConversations(@PathVariable UUID storeId) {
+        var result = wasender.syncConversations(storeId);
+        return new WhatsappConversationSyncResponse(
+                result.conversations().stream().map(WhatsappConversationResponse::from).toList(),
+                result.imported(),
+                result.partial(),
+                result.message());
     }
 
     @GetMapping("/stores/{storeId}/whatsapp/messages")

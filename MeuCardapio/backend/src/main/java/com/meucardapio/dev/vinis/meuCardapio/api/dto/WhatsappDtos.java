@@ -1,6 +1,7 @@
 package com.meucardapio.dev.vinis.meuCardapio.api.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
@@ -99,6 +100,13 @@ public final class WhatsappDtos {
                     conversation.isBotPausedIndefinitely(),
                     conversation.getBotLastAutoReplyAt());
         }
+    }
+
+    public record WhatsappConversationSyncResponse(
+            List<WhatsappConversationResponse> conversations,
+            int imported,
+            boolean partial,
+            String message) {
     }
 
     public record WhatsappMessageResponse(

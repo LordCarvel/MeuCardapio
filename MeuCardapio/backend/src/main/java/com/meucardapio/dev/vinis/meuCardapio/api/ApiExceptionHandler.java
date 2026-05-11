@@ -12,8 +12,17 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    private final ObjectMapper objectMapper;
+
+    public ApiExceptionHandler(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
@@ -70,7 +79,28 @@ public class ApiExceptionHandler {
             return "WaSenderAPI retornou uma pagina HTML em vez de JSON. Confira se o Personal Access Token esta correto e se o ID da sessao e numerico.";
         }
 
+        if (normalized.startsWith("{")) {
+            try {
+                JsonNode json = objectMapper.readTree(normalized);
+                String message = firstText(json.path("message"), json.path("error"), json.path("detail"));
+                if (!message.isBlank()) {
+                    return message;
+                }
+            } catch (Exception ignored) {
+                // Keep the compact raw response below when the provider body is not valid JSON.
+            }
+        }
+
         return normalized.substring(0, Math.min(normalized.length(), 500));
+    }
+
+    private static String firstText(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && !node.isMissingNode() && !node.asText("").isBlank()) {
+                return node.asText();
+            }
+        }
+        return "";
     }
 
     @ExceptionHandler(MailException.class)

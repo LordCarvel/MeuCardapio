@@ -27,7 +27,8 @@ Quando a sessao for criada, a API key da sessao fica salva no backend.
 ## 3. Espelhar conversas reais
 
 - A inbox nao cria conversa a partir de pedido. Ela mostra somente conversas reais sincronizadas da sessao WhatsApp.
-- Clique em `Puxar conversas` no painel para importar os contatos/conversas sincronizados pela WaSenderAPI.
+- Clique em `Puxar conversas` no painel para importar uma amostra paginada dos contatos/conversas sincronizados pela WaSenderAPI.
+- Se a WaSenderAPI demorar ao listar contatos, o painel mantem as conversas ja salvas e continua recebendo novas conversas pelo webhook.
 - Novas conversas e mensagens chegam pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) e aparecem em `Atendimento`.
 - Selecione uma conversa na lateral.
 - Digite a resposta no campo inferior e clique em `Enviar`.
