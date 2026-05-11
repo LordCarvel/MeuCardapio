@@ -6756,7 +6756,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   async function syncWhatsappFromSession() {
     if (!storeId) return
     try {
-      setWhatsappStatus({ type: 'warning', message: 'Atualizando nomes e fotos dos contatos...' })
+      setWhatsappStatus({ type: 'warning', message: 'Sincronizando sessao: mensagens registradas, nomes e fotos...' })
       const syncResult = await syncWhatsappConversations(storeId)
       const conversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
       setWhatsappConversations(conversations)
@@ -6832,7 +6832,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
                 <button type="button" title="Conectar" onClick={() => onOpenModal('whatsappSetup')}>
                   <Icon name="plus" size={19} />
                 </button>
-                <button type="button" title="Atualizar nomes e fotos" onClick={syncWhatsappFromSession}>
+                <button type="button" title="Sincronizar sessao" onClick={syncWhatsappFromSession}>
                   <Icon name="upload" size={18} />
                 </button>
                 <button type="button" title="Status" onClick={refreshWhatsappStatus}>
@@ -6976,6 +6976,12 @@ function WhatsappSetupPanel({ storeId }) {
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
   const [whatsappQr, setWhatsappQr] = useState('')
   const webhookUrl = storeId ? `${API_BASE_URL}/stores/${storeId}/whatsapp/webhook` : ''
+  const savedWhatsappFlags = [
+    [whatsappConfig?.hasPersonalAccessToken, 'Personal token'],
+    [whatsappConfig?.hasApiKey, 'API key'],
+    [whatsappConfig?.hasWebhookSecret, 'Webhook secret'],
+    [Boolean(whatsappConfig?.sessionId), 'Sessao'],
+  ]
 
   useEffect(() => {
     if (!storeId) {
@@ -7062,8 +7068,16 @@ function WhatsappSetupPanel({ storeId }) {
   return (
     <div className="whatsapp-setup">
       {!storeId ? <div className="whatsapp-status whatsapp-status--warning">Abra uma loja conectada ao servidor antes de configurar o WhatsApp.</div> : null}
+      {whatsappConfig ? (
+        <div className="whatsapp-saved-config">
+          {savedWhatsappFlags.map(([saved, label]) => (
+            <span className={saved ? 'is-saved' : 'is-missing'} key={label}>{label}: {saved ? 'salvo' : 'pendente'}</span>
+          ))}
+          <small>Campos secretos salvos podem ficar em branco; o backend mantem o valor atual.</small>
+        </div>
+      ) : null}
       <div className="whatsapp-config">
-        <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder="Personal Access Token" type="password" />
+        <input value={whatsappForm.personalAccessToken} onChange={(event) => setWhatsappForm({ ...whatsappForm, personalAccessToken: event.target.value })} placeholder={whatsappConfig?.hasPersonalAccessToken ? 'Personal token salvo' : 'Personal Access Token'} type="password" />
         <input value={whatsappForm.apiKey} onChange={(event) => setWhatsappForm({ ...whatsappForm, apiKey: event.target.value })} placeholder={whatsappConfig?.hasApiKey ? 'API key salva' : 'API key da sessao'} type="password" />
         <input value={whatsappForm.sessionName} onChange={(event) => setWhatsappForm({ ...whatsappForm, sessionName: event.target.value })} placeholder="Nome da sessao" />
         <input value={whatsappForm.phoneNumber} onChange={(event) => setWhatsappForm({ ...whatsappForm, phoneNumber: event.target.value.replace(/[^\d+]/g, '') })} placeholder="Telefone com DDI, ex: +5547999999999" />

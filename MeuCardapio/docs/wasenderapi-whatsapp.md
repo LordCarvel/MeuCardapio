@@ -22,13 +22,14 @@ https://SUA-API-DO-RENDER/api/stores/ID-DA-LOJA/whatsapp/webhook
 3. Escaneie o QR Code retornado pela WaSenderAPI com o WhatsApp do numero.
 4. Clique em `Status` para confirmar a conexao.
 
-Quando a sessao for criada, a API key da sessao fica salva no backend.
+Quando a sessao for criada, a API key da sessao fica salva no backend. Campos secretos ja salvos aparecem como `salvo` no painel e podem ficar em branco nos proximos acessos.
 
 ## 3. Espelhar conversas reais
 
 - A inbox nao cria conversa a partir de pedido. Ela mostra somente conversas reais sincronizadas da sessao WhatsApp.
-- Clique em `Puxar conversas` no painel para atualizar nomes/fotos dos contatos que ja possuem conversa real no MeuCardapio.
+- Clique em `Sincronizar sessao` no painel para importar mensagens registradas pela WaSenderAPI e atualizar nomes/fotos dos contatos que ja possuem conversa real no MeuCardapio.
 - A lista de contatos da WaSenderAPI nao e historico de conversas. Conversas e mensagens atuais entram pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) depois que a sessao esta conectada com o webhook atualizado.
+- O endpoint de logs da WaSenderAPI recupera mensagens registradas pela sessao. Se o log de mensagens estiver desligado na WaSenderAPI, o conteudo pode vir vazio.
 - Se a WaSenderAPI demorar ao listar contatos, o painel mantem as conversas ja salvas e continua recebendo novas conversas pelo webhook.
 - Novas conversas e mensagens chegam pelo webhook (`chats.upsert`, `messages.upsert` e `messages.received`) e aparecem em `Atendimento`.
 - Selecione uma conversa na lateral.

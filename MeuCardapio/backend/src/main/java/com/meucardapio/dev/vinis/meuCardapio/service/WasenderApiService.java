@@ -45,6 +45,8 @@ import tools.jackson.databind.ObjectMapper;
 public class WasenderApiService {
     private static final int CONTACT_SYNC_PAGE_LIMIT = 20;
     private static final int CONTACT_SYNC_MAX_PAGES = 5;
+    private static final int MESSAGE_LOG_SYNC_PAGE_LIMIT = 20;
+    private static final int MESSAGE_LOG_SYNC_MAX_PAGES = 3;
     private static final List<String> MIRROR_WEBHOOK_EVENTS = List.of(
             "chats.upsert",
             "chats.update",
@@ -123,7 +125,11 @@ public class WasenderApiService {
         integration.touch();
         WhatsappIntegration saved = integrations.save(integration);
         if (hasText(saved.getPersonalAccessToken()) && hasText(saved.getSessionId()) && hasText(saved.getWebhookUrl())) {
-            updateSessionWebhook(saved, saved.getWebhookUrl());
+            try {
+                updateSessionWebhook(saved, saved.getWebhookUrl());
+            } catch (RestClientException ignored) {
+                // Keep local credentials saved even when the provider is temporarily unavailable.
+            }
         }
         return saved;
     }
@@ -324,15 +330,21 @@ public class WasenderApiService {
     public WhatsappConversationSyncResult syncConversations(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String apiKey = require(integration.getApiKey(), "Informe a API key da sessao.");
-        if (hasText(integration.getPersonalAccessToken()) && hasText(integration.getSessionId()) && hasText(integration.getWebhookUrl())) {
-            updateSessionWebhook(integration, integration.getWebhookUrl());
-        }
         conversations.deleteEmptyWithoutMessagesByStoreId(storeId);
         int page = 1;
         int totalPages = 1;
         int enriched = 0;
+        int importedLogs = 0;
         boolean partial = false;
         String message = "";
+        if (hasText(integration.getPersonalAccessToken()) && hasText(integration.getSessionId()) && hasText(integration.getWebhookUrl())) {
+            try {
+                updateSessionWebhook(integration, integration.getWebhookUrl());
+            } catch (RestClientException ex) {
+                partial = true;
+                message = "Credenciais salvas, mas nao consegui atualizar o webhook na WaSenderAPI agora. Confira o Personal token e o ID da sessao.";
+            }
+        }
 
         do {
             int currentPage = page;
@@ -363,6 +375,16 @@ public class WasenderApiService {
             page += 1;
         } while (page <= totalPages && page <= CONTACT_SYNC_MAX_PAGES);
 
+        try {
+            importedLogs = importMessageLogs(storeId, integration);
+        } catch (RestClientResponseException ex) {
+            partial = true;
+            message = hasText(message) ? message : messageLogFailureMessage(ex.getResponseBodyAsString(), ex);
+        } catch (RestClientException ex) {
+            partial = true;
+            message = hasText(message) ? message : "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
+        }
+
         if (enriched > 0) {
             integration.touch();
             integrations.save(integration);
@@ -370,11 +392,11 @@ public class WasenderApiService {
         List<WhatsappConversation> visibleConversations = conversations.findVisibleByStoreIdOrderByLastMessageAtDesc(storeId);
         return new WhatsappConversationSyncResult(
                 visibleConversations,
-                enriched,
+                enriched + importedLogs,
                 partial,
                 hasText(message)
                         ? message
-                        : visibleConversations.size() + " conversa(s) real(is) carregada(s). " + enriched + " contato(s) atualizaram nome/foto; historico antigo do WhatsApp nao vem pela lista de contatos.");
+                        : visibleConversations.size() + " conversa(s) carregada(s). " + importedLogs + " mensagem(ns) de log importada(s); " + enriched + " contato(s) atualizaram nome/foto.");
     }
 
     private JsonNode fetchContactPage(String apiKey, int page) {
@@ -388,6 +410,39 @@ public class WasenderApiService {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .retrieve()
                 .body(JsonNode.class);
+    }
+
+    private int importMessageLogs(UUID storeId, WhatsappIntegration integration) {
+        if (!hasText(integration.getSessionId()) || !hasText(integration.getApiKey())) {
+            return 0;
+        }
+        String sessionId = normalizeSessionId(integration.getSessionId());
+        String apiKey = integration.getApiKey();
+        int page = 1;
+        int totalPages = 1;
+        int imported = 0;
+
+        do {
+            int currentPage = page;
+            JsonNode response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/whatsapp-sessions/{sessionId}/message-logs")
+                            .queryParam("page", currentPage)
+                            .queryParam("per_page", MESSAGE_LOG_SYNC_PAGE_LIMIT)
+                            .build(sessionId))
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .retrieve()
+                    .body(JsonNode.class);
+            for (JsonNode item : paginatedDataItems(response)) {
+                if (saveMessageLog(storeId, item)) {
+                    imported += 1;
+                }
+            }
+            totalPages = Math.min(MESSAGE_LOG_SYNC_MAX_PAGES, Math.max(totalPages, contactPageCount(response)));
+            page += 1;
+        } while (page <= totalPages && page <= MESSAGE_LOG_SYNC_MAX_PAGES);
+
+        return imported;
     }
 
     @Transactional
@@ -593,6 +648,51 @@ public class WasenderApiService {
             conversation.setAvatarUrl(avatarUrl.trim());
         }
         conversations.save(conversation);
+        return true;
+    }
+
+    private boolean saveMessageLog(UUID storeId, JsonNode item) {
+        String id = firstText(item.path("id"), item.path("message_id"), item.path("msgId"));
+        if (!hasText(id)) {
+            return false;
+        }
+        String providerMessageId = "log:" + id;
+        if (messages.findFirstByStoreIdAndProviderMessageId(storeId, providerMessageId).isPresent()) {
+            return false;
+        }
+        String recipient = firstText(item.path("to"), item.path("recipient"), item.path("phone"), item.path("remoteJid"));
+        String body = messageLogText(item.path("content"));
+        if (!hasText(recipient) || !hasText(body)) {
+            return false;
+        }
+        String normalizedRecipient = normalizeRecipient(recipient);
+        LocalDateTime createdAt = extractTimestamp(item, item);
+        WhatsappConversation conversation = findKnownConversation(storeId, normalizedRecipient)
+                .map(existing -> upsertConversation(
+                        storeId,
+                        existing.getRemoteJid(),
+                        existing.getPhone(),
+                        existing.getContactName(),
+                        body,
+                        createdAt,
+                        false,
+                        null))
+                .orElseGet(() -> upsertConversation(
+                        storeId,
+                        normalizedRecipient,
+                        cleanWhatsappPhone(normalizedRecipient),
+                        cleanWhatsappAddress(normalizedRecipient),
+                        body,
+                        createdAt,
+                        false,
+                        null));
+        WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, conversation.getRemoteJid(), true);
+        message.setProviderMessageId(providerMessageId);
+        message.setBody(body);
+        message.setStatus(firstText(item.path("status"), item.path("state")));
+        message.setCreatedAt(createdAt);
+        message.setPayload(toJson(item));
+        messages.save(message);
         return true;
     }
 
@@ -898,6 +998,10 @@ public class WasenderApiService {
     }
 
     private static List<JsonNode> contactItems(JsonNode response) {
+        return paginatedDataItems(response);
+    }
+
+    private static List<JsonNode> paginatedDataItems(JsonNode response) {
         JsonNode data = response == null ? null : response.path("data");
         JsonNode items = data == null ? null : data.path("items");
         if (items == null || items.isMissingNode()) {
@@ -929,6 +1033,28 @@ public class WasenderApiService {
             return contactSyncTimeoutMessage();
         }
         return "Nao foi possivel listar contatos na WaSenderAPI agora. As conversas recebidas por webhook continuam salvas.";
+    }
+
+    private String messageLogFailureMessage(String responseBody, Exception ex) {
+        if (hasText(responseBody)) {
+            try {
+                JsonNode response = objectMapper.readTree(responseBody);
+                String providerMessage = firstText(
+                        response.path("message"),
+                        response.path("error"),
+                        response.path("detail"));
+                return hasText(providerMessage)
+                        ? providerMessage
+                        : "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
+            } catch (Exception ignored) {
+                return "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
+            }
+        }
+        String detail = ex == null ? "" : Optional.ofNullable(ex.getMessage()).orElse("");
+        if (detail.toLowerCase().contains("timed out") || detail.toLowerCase().contains("timeout")) {
+            return "A WaSenderAPI demorou para carregar logs de mensagens. Tente sincronizar novamente em instantes.";
+        }
+        return "Nao foi possivel carregar logs de mensagens da WaSenderAPI agora.";
     }
 
     private static String contactSyncFailureMessage(JsonNode response) {
@@ -1031,6 +1157,42 @@ public class WasenderApiService {
                 message.path("documentMessage").path("caption"),
                 message.path("buttonsResponseMessage").path("selectedDisplayText"),
                 message.path("listResponseMessage").path("title"));
+    }
+
+    private String messageLogText(JsonNode content) {
+        if (content == null || content.isMissingNode() || content.isNull()) {
+            return "";
+        }
+        if (content.isObject()) {
+            return firstText(
+                    content.path("text"),
+                    content.path("body"),
+                    content.path("message"),
+                    content.path("caption"),
+                    content.path("conversation"));
+        }
+        String raw = content.asText("");
+        if (!hasText(raw)) {
+            return "";
+        }
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("{")) {
+            try {
+                JsonNode parsed = objectMapper.readTree(trimmed);
+                String parsedText = firstText(
+                        parsed.path("text"),
+                        parsed.path("body"),
+                        parsed.path("message"),
+                        parsed.path("caption"),
+                        parsed.path("conversation"));
+                if (hasText(parsedText)) {
+                    return parsedText;
+                }
+            } catch (Exception ignored) {
+                return trimmed;
+            }
+        }
+        return trimmed;
     }
 
     private static String firstText(JsonNode... nodes) {
