@@ -1814,8 +1814,12 @@
 }
 
 .whatsapp-chatkit-chat.cs-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
   background: #efe8dc;
+  overflow: hidden;
 }
 
 .whatsapp-chatkit-chat .cs-conversation-header {
@@ -2337,14 +2341,21 @@
 }
 
 .whatsapp-chat-feed {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
+  width: 100%;
+  height: 0;
   min-height: 0;
   overflow-y: auto;
   padding: 14px 18px 18px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.52) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.58) 1px, transparent 1px),
+    #efe8dc;
+  background-size: 46px 46px;
 }
 
 .whatsapp-message-group {
@@ -2439,8 +2450,9 @@
 }
 
 .whatsapp-empty-chat {
-  justify-self: center;
   align-self: center;
+  margin: auto;
+  justify-self: center;
   width: min(320px, 90%);
   min-height: 160px;
   border-radius: 8px;

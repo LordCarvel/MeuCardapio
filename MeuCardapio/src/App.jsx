@@ -6690,8 +6690,19 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       return whatsappMessages.filter((message) => getWhatsappMessageText(message).trim())
     }
 
+    if (selectedConversation?.lastMessage) {
+      return [{
+        id: `summary-${selectedConversation.id || selectedConversation.remoteJid}`,
+        remoteJid: selectedConversation.remoteJid,
+        fromMe: false,
+        body: selectedConversation.lastMessage,
+        status: 'summary',
+        createdAt: selectedConversation.lastMessageAt,
+      }]
+    }
+
     return []
-  }, [whatsappMessages])
+  }, [selectedConversation, whatsappMessages])
   const renderedConversationMessages = useMemo(() => {
     let lastDay = ''
 

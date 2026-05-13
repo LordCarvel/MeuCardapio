@@ -296,7 +296,17 @@ public class WasenderApiService {
     public List<WhatsappMessage> messages(UUID storeId, String remoteJid) {
         WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
-        return messages.findByConversationOrderByCreatedAtAsc(conversation);
+        List<WhatsappMessage> savedMessages = messages.findByConversationOrderByCreatedAtAsc(conversation);
+        if (!savedMessages.isEmpty() || !hasText(conversation.getLastMessage())) {
+            return savedMessages;
+        }
+
+        WhatsappMessage summary = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, conversation.getRemoteJid(), false);
+        summary.setProviderMessageId("summary:" + conversation.getId());
+        summary.setBody(conversation.getLastMessage());
+        summary.setStatus("summary");
+        summary.setCreatedAt(Optional.ofNullable(conversation.getLastMessageAt()).orElse(LocalDateTime.now()));
+        return List.of(summary);
     }
 
     @Transactional
