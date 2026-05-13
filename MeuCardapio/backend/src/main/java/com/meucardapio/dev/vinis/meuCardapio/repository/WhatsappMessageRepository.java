@@ -11,5 +11,6 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappMessage;
 
 public interface WhatsappMessageRepository extends JpaRepository<WhatsappMessage, UUID> {
     List<WhatsappMessage> findByConversationOrderByCreatedAtAsc(WhatsappConversation conversation);
+    boolean existsByConversation(WhatsappConversation conversation);
     Optional<WhatsappMessage> findFirstByStoreIdAndProviderMessageId(UUID storeId, String providerMessageId);
 }

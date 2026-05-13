@@ -288,6 +288,25 @@ public class WasenderApiService {
         return response;
     }
 
+    public List<WhatsappConversation> conversations(UUID storeId) {
+        getOrCreate(storeId);
+        return conversations.findVisibleByStoreIdOrderByLastMessageAtDesc(storeId);
+    }
+
+    public List<WhatsappMessage> messages(UUID storeId, String remoteJid) {
+        WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
+        return messages.findByConversationOrderByCreatedAtAsc(conversation);
+    }
+
+    @Transactional
+    public void markRead(UUID storeId, String remoteJid) {
+        WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
+        conversation.setUnreadCount(0);
+        conversations.save(conversation);
+    }
+
     @Transactional
     public WhatsappMessage send(UUID storeId, String to, String text) {
         return sendOutboundMessage(storeId, to, text, true, true, false);
@@ -489,7 +508,7 @@ public class WasenderApiService {
 
     @Transactional
     public WhatsappConversation controlBot(UUID storeId, String remoteJid, String action) {
-        WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
+        WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
         String normalizedAction = Optional.ofNullable(action).orElse("").trim().toLowerCase();
 
@@ -501,7 +520,7 @@ public class WasenderApiService {
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Acao do robo invalida.");
         }
 
-        return conversations.findByStoreIdAndRemoteJid(storeId, remoteJid).orElse(conversation);
+        return resolveDisplayConversation(storeId, remoteJid).orElse(conversation);
     }
 
     @Transactional
@@ -773,7 +792,7 @@ public class WasenderApiService {
 
     private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, LocalDateTime lastMessageAt, boolean unread, Integer unreadCount, boolean allowNameOverwrite) {
         WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
-                .or(() -> hasText(phone) ? findKnownConversation(storeId, phone) : Optional.empty())
+                .or(() -> findKnownConversation(storeId, hasText(phone) ? phone : remoteJid))
                 .orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
         if (hasText(phone)) conversation.setPhone(cleanWhatsappPhone(phone));
         if (hasText(contactName)) applyConversationName(conversation, contactName, allowNameOverwrite);
@@ -1079,6 +1098,10 @@ public class WasenderApiService {
     }
 
     private Optional<WhatsappConversation> findKnownConversation(UUID storeId, String recipient) {
+        Optional<WhatsappConversation> bestMatch = bestMatchingConversation(storeId, recipient);
+        if (bestMatch.isPresent()) {
+            return bestMatch;
+        }
         Optional<WhatsappConversation> byRemoteJid = conversations.findByStoreIdAndRemoteJid(storeId, recipient);
         if (byRemoteJid.isPresent()) {
             return byRemoteJid;
@@ -1091,7 +1114,57 @@ public class WasenderApiService {
         if (byPhone.isPresent()) {
             return byPhone;
         }
-        return conversations.findFirstByStoreIdAndPhone(storeId, "+" + phone);
+        Optional<WhatsappConversation> byPlusPhone = conversations.findFirstByStoreIdAndPhone(storeId, "+" + phone);
+        if (byPlusPhone.isPresent()) {
+            return byPlusPhone;
+        }
+        return Optional.empty();
+    }
+
+    private Optional<WhatsappConversation> resolveDisplayConversation(UUID storeId, String address) {
+        return bestMatchingConversation(storeId, address)
+                .or(() -> conversations.findByStoreIdAndRemoteJid(storeId, address));
+    }
+
+    private Optional<WhatsappConversation> bestMatchingConversation(UUID storeId, String address) {
+        String lookupAddress = Optional.ofNullable(address).orElse("").trim();
+        String lookupPhone = cleanWhatsappPhone(lookupAddress);
+
+        return conversations.findByStoreIdOrderByLastMessageAtDesc(storeId).stream()
+                .filter(conversation -> sameWhatsappAddress(conversation, lookupAddress, lookupPhone))
+                .sorted((left, right) -> {
+                    int contentCompare = Boolean.compare(hasConversationContent(right), hasConversationContent(left));
+                    if (contentCompare != 0) {
+                        return contentCompare;
+                    }
+                    return Optional.ofNullable(right.getLastMessageAt()).orElse(LocalDateTime.MIN)
+                            .compareTo(Optional.ofNullable(left.getLastMessageAt()).orElse(LocalDateTime.MIN));
+                })
+                .findFirst();
+    }
+
+    private boolean hasConversationContent(WhatsappConversation conversation) {
+        return hasText(conversation.getLastMessage())
+                || conversation.getUnreadCount() > 0
+                || messages.existsByConversation(conversation);
+    }
+
+    private static boolean sameWhatsappAddress(WhatsappConversation conversation, String lookupAddress, String lookupPhone) {
+        if (!hasText(lookupAddress)) {
+            return false;
+        }
+        String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
+        String phone = Optional.ofNullable(conversation.getPhone()).orElse("");
+        String cleanRemote = cleanWhatsappAddress(remoteJid);
+        String cleanLookup = cleanWhatsappAddress(lookupAddress);
+
+        return remoteJid.equalsIgnoreCase(lookupAddress)
+                || cleanRemote.equalsIgnoreCase(cleanLookup)
+                || (hasText(lookupPhone) && (
+                    phoneMatches(lookupPhone, phone)
+                    || phoneMatches(lookupPhone, remoteJid)
+                    || phoneMatches(lookupPhone, cleanRemote)
+                ));
     }
 
     private boolean isPhoneRegisteredOnWhatsapp(String apiKey, String recipient) {

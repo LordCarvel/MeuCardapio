@@ -4,8 +4,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
@@ -27,10 +24,7 @@ import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappQrResp
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappSendMessageRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappSessionRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappStatusResponse;
-import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappConversation;
 import com.meucardapio.dev.vinis.meuCardapio.domain.WhatsappIntegration;
-import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappConversationRepository;
-import com.meucardapio.dev.vinis.meuCardapio.repository.WhatsappMessageRepository;
 import com.meucardapio.dev.vinis.meuCardapio.service.WasenderApiService;
 
 import tools.jackson.databind.JsonNode;
@@ -39,13 +33,9 @@ import tools.jackson.databind.JsonNode;
 @RequestMapping("/api")
 public class WhatsappController {
     private final WasenderApiService wasender;
-    private final WhatsappConversationRepository conversations;
-    private final WhatsappMessageRepository messages;
 
-    public WhatsappController(WasenderApiService wasender, WhatsappConversationRepository conversations, WhatsappMessageRepository messages) {
+    public WhatsappController(WasenderApiService wasender) {
         this.wasender = wasender;
-        this.conversations = conversations;
-        this.messages = messages;
     }
 
     @GetMapping("/stores/{storeId}/whatsapp/config")
@@ -98,7 +88,7 @@ public class WhatsappController {
 
     @GetMapping("/stores/{storeId}/whatsapp/conversations")
     public List<WhatsappConversationResponse> conversations(@PathVariable UUID storeId) {
-        return conversations.findVisibleByStoreIdOrderByLastMessageAtDesc(storeId).stream().map(WhatsappConversationResponse::from).toList();
+        return wasender.conversations(storeId).stream().map(WhatsappConversationResponse::from).toList();
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/conversations/sync")
@@ -113,9 +103,7 @@ public class WhatsappController {
 
     @GetMapping("/stores/{storeId}/whatsapp/messages")
     public List<WhatsappMessageResponse> messages(@PathVariable UUID storeId, @RequestParam String remoteJid) {
-        WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
-        return messages.findByConversationOrderByCreatedAtAsc(conversation).stream().map(WhatsappMessageResponse::from).toList();
+        return wasender.messages(storeId, remoteJid).stream().map(WhatsappMessageResponse::from).toList();
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/messages")
@@ -144,12 +132,8 @@ public class WhatsappController {
     }
 
     @PostMapping("/stores/{storeId}/whatsapp/read")
-    @Transactional
     public Map<String, Object> markRead(@PathVariable UUID storeId, @RequestParam String remoteJid) {
-        WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
-        conversation.setUnreadCount(0);
-        conversations.save(conversation);
+        wasender.markRead(storeId, remoteJid);
         return Map.of("ok", true);
     }
 
