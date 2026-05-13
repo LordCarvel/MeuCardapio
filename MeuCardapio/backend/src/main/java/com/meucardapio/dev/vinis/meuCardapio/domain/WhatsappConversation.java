@@ -23,6 +23,16 @@ public class WhatsappConversation {
     private String phone;
     @Column(length = 1000)
     private String avatarUrl;
+    @Column(length = 80)
+    private String assignedAgent;
+    @Column(length = 80)
+    private String label;
+    @Column(nullable = false)
+    private boolean favorite;
+    @Column(nullable = false)
+    private boolean pinned;
+    @Column(length = 1000)
+    private String pinnedNote;
     @Column(length = 1000)
     private String lastMessage;
     @Column(nullable = false)
@@ -55,6 +65,16 @@ public class WhatsappConversation {
     public void setPhone(String phone) { this.phone = phone; }
     public String getAvatarUrl() { return avatarUrl; }
     public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
+    public String getAssignedAgent() { return assignedAgent; }
+    public void setAssignedAgent(String assignedAgent) { this.assignedAgent = assignedAgent; }
+    public String getLabel() { return label; }
+    public void setLabel(String label) { this.label = label; }
+    public boolean isFavorite() { return favorite; }
+    public void setFavorite(boolean favorite) { this.favorite = favorite; }
+    public boolean isPinned() { return pinned; }
+    public void setPinned(boolean pinned) { this.pinned = pinned; }
+    public String getPinnedNote() { return pinnedNote; }
+    public void setPinnedNote(String pinnedNote) { this.pinnedNote = pinnedNote; }
     public String getLastMessage() { return lastMessage; }
     public void setLastMessage(String lastMessage) { this.lastMessage = lastMessage; }
     public LocalDateTime getLastMessageAt() { return lastMessageAt; }

@@ -377,6 +377,13 @@ export async function syncWhatsappConversations(storeId) {
   return request(`/stores/${storeId}/whatsapp/conversations/sync`, { method: 'POST' })
 }
 
+export async function patchWhatsappConversation(storeId, remoteJid, patch) {
+  return request(`/stores/${storeId}/whatsapp/conversations?remoteJid=${encodeURIComponent(remoteJid)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
 export async function getWhatsappMessages(storeId, remoteJid) {
   return request(`/stores/${storeId}/whatsapp/messages?remoteJid=${encodeURIComponent(remoteJid)}`)
 }

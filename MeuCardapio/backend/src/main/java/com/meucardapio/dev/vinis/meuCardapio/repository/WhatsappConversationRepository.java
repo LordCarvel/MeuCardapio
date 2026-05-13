@@ -17,6 +17,7 @@ public interface WhatsappConversationRepository extends JpaRepository<WhatsappCo
             select c.* from whatsapp_conversations c
             where c.store_id = :storeId
             order by
+              case when c.pinned = true then 0 else 1 end,
               case
                 when coalesce(c.last_message, '') <> ''
                   or c.unread_count > 0

@@ -25,6 +25,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationPatchRequest;
 import com.meucardapio.dev.vinis.meuCardapio.domain.CustomerOrder;
 import com.meucardapio.dev.vinis.meuCardapio.domain.Product;
 import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
@@ -56,6 +57,8 @@ public class WasenderApiService {
             "messages.upsert",
             "message.sent",
             "messages.update",
+            "message-receipt.update",
+            "messages.delete",
             "session.status");
 
     private final StoreRepository stores;
@@ -318,6 +321,31 @@ public class WasenderApiService {
     }
 
     @Transactional
+    public WhatsappConversation updateConversation(UUID storeId, String remoteJid, WhatsappConversationPatchRequest request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe os dados da conversa.");
+        }
+        WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
+        if (request.assignedAgent() != null) {
+            conversation.setAssignedAgent(trimToNull(request.assignedAgent(), 80));
+        }
+        if (request.label() != null) {
+            conversation.setLabel(trimToNull(request.label(), 80));
+        }
+        if (request.favorite() != null) {
+            conversation.setFavorite(request.favorite());
+        }
+        if (request.pinned() != null) {
+            conversation.setPinned(request.pinned());
+        }
+        if (request.pinnedNote() != null) {
+            conversation.setPinnedNote(trimToNull(request.pinnedNote(), 1000));
+        }
+        return conversations.save(conversation);
+    }
+
+    @Transactional
     public WhatsappMessage send(UUID storeId, String to, String text) {
         return sendOutboundMessage(storeId, to, text, true, true, false);
     }
@@ -562,7 +590,7 @@ public class WasenderApiService {
             updateSessionStatus(integration, payload);
             return;
         }
-        if (event.equals("messages.update")) {
+        if (event.equals("messages.update") || event.equals("message-receipt.update")) {
             updateMessageStatus(storeId, payload);
             return;
         }
@@ -597,10 +625,20 @@ public class WasenderApiService {
     }
 
     private void updateMessageStatus(UUID storeId, JsonNode payload) {
-        String messageId = payload.path("data").path("key").path("id").asText("");
+        JsonNode data = payload.path("data");
+        String messageId = firstText(
+                data.path("key").path("id"),
+                data.path("id"),
+                data.path("messageId"),
+                data.path("msgId"));
         if (!hasText(messageId)) return;
         messages.findFirstByStoreIdAndProviderMessageId(storeId, messageId).ifPresent(message -> {
-            message.setStatus(String.valueOf(payload.path("data").path("update").path("status").asInt()));
+            String status = firstText(
+                    data.path("update").path("status"),
+                    data.path("status"),
+                    data.path("receipt"),
+                    data.path("type"));
+            message.setStatus(hasText(status) ? status : message.getStatus());
             messages.save(message);
         });
     }
@@ -621,18 +659,7 @@ public class WasenderApiService {
         if (hasText(messageId) && messages.findFirstByStoreIdAndProviderMessageId(storeId, messageId).isPresent()) {
             return;
         }
-        String phone = firstText(
-                key.path("cleanedSenderPn"),
-                key.path("cleanedParticipantPn"),
-                key.path("senderPn"),
-                key.path("participantPn"),
-                item.path("cleanedSenderPn"),
-                item.path("cleanedParticipantPn"),
-                item.path("senderPn"),
-                item.path("participantPn"),
-                item.path("phone"),
-                item.path("to"),
-                item.path("sender"));
+        String phone = extractedPhone(remoteJid, key, item);
         String contactName = fromMe ? "" : firstText(
                 item.path("pushName"),
                 item.path("verifiedBizName"),
@@ -682,7 +709,7 @@ public class WasenderApiService {
                 item.path("notify"),
                 item.path("verifiedName"),
                 item.path("subject"));
-        String phone = firstText(item.path("phone"), item.path("number"), item.path("cleanedSenderPn"), item.path("senderPn"), item.path("id"));
+        String phone = extractedPhone(remoteJid, item);
         String lastMessage = firstText(item.path("lastMessage"), item.path("messageBody"), item.path("body"));
         Integer unreadCount = item.hasNonNull("unreadCount") ? Math.max(0, item.path("unreadCount").asInt(0)) : null;
         WhatsappConversation conversation = upsertConversation(storeId, remoteJid, phone, contactName, lastMessage, extractTimestamp(item, payload), false, unreadCount);
@@ -699,7 +726,7 @@ public class WasenderApiService {
         if (!hasText(remoteJid)) {
             return false;
         }
-        String phone = firstText(contact.path("phone"), contact.path("number"), contact.path("jid"), contact.path("id"));
+        String phone = extractedPhone(remoteJid, contact);
         Optional<WhatsappConversation> existing = findKnownConversation(storeId, hasText(phone) ? phone : remoteJid);
         if (existing.isEmpty()) {
             existing = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid);
@@ -1056,6 +1083,14 @@ public class WasenderApiService {
 
     private static String defaultText(String value, String fallback) {
         return hasText(value) ? value.trim() : fallback;
+    }
+
+    private static String trimToNull(String value, int maxLength) {
+        String text = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(text)) {
+            return null;
+        }
+        return text.length() > maxLength ? text.substring(0, maxLength) : text;
     }
 
     private static String orderReference(CustomerOrder order) {
@@ -1498,7 +1533,37 @@ public class WasenderApiService {
         return phone.length() >= 8 && phone.length() >= Optional.ofNullable(value).orElse("").replaceAll("\\s", "").length() - 2;
     }
 
+    private static String extractedPhone(String remoteJid, JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            String explicitPhone = firstText(
+                    node.path("cleanedSenderPn"),
+                    node.path("cleanedParticipantPn"),
+                    node.path("cleanedPhone"),
+                    node.path("phone"),
+                    node.path("number"),
+                    node.path("senderPhone"),
+                    node.path("participantPhone"));
+            String cleanedExplicitPhone = cleanWhatsappPhone(explicitPhone);
+            if (hasText(cleanedExplicitPhone)) {
+                return cleanedExplicitPhone;
+            }
+            String senderPn = cleanWhatsappPhone(firstText(
+                    node.path("senderPn"),
+                    node.path("participantPn"),
+                    node.path("to"),
+                    node.path("sender"),
+                    node.path("recipient")));
+            if (hasText(senderPn)) {
+                return senderPn;
+            }
+        }
+        return cleanWhatsappPhone(remoteJid);
+    }
+
     private static String cleanWhatsappPhone(String value) {
+        if (isOpaqueWhatsappId(value)) {
+            return "";
+        }
         String text = cleanWhatsappAddress(value);
         return text.replaceAll("[^\\d+]", "");
     }
@@ -1510,6 +1575,11 @@ public class WasenderApiService {
                 .replace("@lid", "")
                 .replace("@g.us", "")
                 .trim();
+    }
+
+    private static boolean isOpaqueWhatsappId(String value) {
+        String address = Optional.ofNullable(value).orElse("").toLowerCase();
+        return address.contains("@lid") || address.contains("@g.us") || address.contains("@newsletter");
     }
 
     private static String normalizeSessionId(String value) {

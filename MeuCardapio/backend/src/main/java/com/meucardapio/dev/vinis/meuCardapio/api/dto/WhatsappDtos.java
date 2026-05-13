@@ -80,6 +80,11 @@ public final class WhatsappDtos {
             String contactName,
             String phone,
             String avatarUrl,
+            String assignedAgent,
+            String label,
+            boolean favorite,
+            boolean pinned,
+            String pinnedNote,
             String lastMessage,
             LocalDateTime lastMessageAt,
             int unreadCount,
@@ -94,6 +99,11 @@ public final class WhatsappDtos {
                     conversation.getContactName(),
                     conversation.getPhone(),
                     conversation.getAvatarUrl(),
+                    conversation.getAssignedAgent(),
+                    conversation.getLabel(),
+                    conversation.isFavorite(),
+                    conversation.isPinned(),
+                    conversation.getPinnedNote(),
                     conversation.getLastMessage(),
                     conversation.getLastMessageAt(),
                     conversation.getUnreadCount(),
@@ -109,6 +119,14 @@ public final class WhatsappDtos {
             int imported,
             boolean partial,
             String message) {
+    }
+
+    public record WhatsappConversationPatchRequest(
+            String assignedAgent,
+            String label,
+            Boolean favorite,
+            Boolean pinned,
+            String pinnedNote) {
     }
 
     public record WhatsappMessageResponse(

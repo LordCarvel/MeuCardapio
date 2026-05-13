@@ -1,19 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Avatar,
-  ChatContainer,
-  Conversation,
-  ConversationHeader,
-  ConversationList,
-  MainContainer,
-  MessageInput,
-  Sidebar as ChatSidebar,
-} from '@chatscope/chat-ui-kit-react'
 import { StoreAccess } from './modules/store/StoreAccess'
 import { StoreDeletePrompt } from './modules/store/StoreDeletePrompt'
 import { StoreProfileForm } from './modules/store/StoreProfileForm'
 import { BackendDiagnostics } from './modules/backend/BackendDiagnostics'
 import { CustomerStorefront } from './modules/customer/CustomerStorefront'
+import { WhatsappDesk } from './modules/whatsapp/WhatsappDesk'
 import {
   API_BASE_URL,
   checkBackendHealth,
@@ -61,7 +52,6 @@ import {
   normalizeStoreProfile,
 } from './modules/store/storeProfile'
 import { parseMenuImportContent } from './modules/menu/menuImport'
-import '@chatscope/chat-ui-kit-styles/dist/default/styles.min.css'
 import './App.css'
 
 function getCustomerStoreIdFromPath() {
@@ -157,8 +147,8 @@ function buildQrImageUrl(value = '') {
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
 const PILOT_BACKEND_REFRESH_MS = 2 * 60 * 1000
-const WHATSAPP_CONVERSATIONS_REFRESH_MS = 15 * 1000
-const WHATSAPP_MESSAGES_REFRESH_MS = 8 * 1000
+const WHATSAPP_CONVERSATIONS_REFRESH_MS = 60 * 1000
+const WHATSAPP_MESSAGES_REFRESH_MS = 20 * 1000
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
 const OSM_TILE_SIZE = 256
 const DELIVERY_ZONE_COLORS = ['#248a72', '#d94f3d', '#0b84e3', '#c28a20', '#7c5cc4', '#4f7d8a']
@@ -7183,7 +7173,7 @@ function WhatsappSetupPanel({ storeId }) {
 function ServiceSection({ storeId, onOpenModal }) {
   return (
     <section className="module-grid module-grid--service">
-      <WhatsappInbox storeId={storeId} onOpenModal={onOpenModal} />
+      <WhatsappDesk storeId={storeId} onOpenModal={onOpenModal} />
     </section>
   )
 }

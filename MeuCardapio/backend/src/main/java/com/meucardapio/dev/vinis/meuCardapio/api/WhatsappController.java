@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -18,6 +19,7 @@ import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfig
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotControlRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationResponse;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationPatchRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationSyncResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappMessageResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappQrResponse;
@@ -99,6 +101,14 @@ public class WhatsappController {
                 result.imported(),
                 result.partial(),
                 result.message());
+    }
+
+    @PatchMapping("/stores/{storeId}/whatsapp/conversations")
+    public WhatsappConversationResponse updateConversation(
+            @PathVariable UUID storeId,
+            @RequestParam String remoteJid,
+            @RequestBody WhatsappConversationPatchRequest request) {
+        return WhatsappConversationResponse.from(wasender.updateConversation(storeId, remoteJid, request));
     }
 
     @GetMapping("/stores/{storeId}/whatsapp/messages")
