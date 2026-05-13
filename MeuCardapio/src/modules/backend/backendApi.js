@@ -1,5 +1,9 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
 const REQUEST_TIMEOUT_MS = 30000
+const HEALTH_CACHE_MS = 5 * 60 * 1000
+
+let healthCache = null
+let healthRequest = null
 
 function getApiConfigurationHint() {
   if (/github\.io/i.test(API_BASE_URL)) {
@@ -102,12 +106,31 @@ function attachMenuSnapshot(workspace) {
   }
 }
 
-export async function checkBackendHealth() {
-  return request('/health')
+export async function checkBackendHealth({ force = false } = {}) {
+  const now = Date.now()
+
+  if (!force && healthCache && now - healthCache.checkedAt < HEALTH_CACHE_MS) {
+    return healthCache.value
+  }
+
+  if (!force && healthRequest) {
+    return healthRequest
+  }
+
+  healthRequest = request('/health')
+    .then((value) => {
+      healthCache = { value, checkedAt: Date.now() }
+      return value
+    })
+    .finally(() => {
+      healthRequest = null
+    })
+
+  return healthRequest
 }
 
 export async function loadBackendDiagnostics() {
-  const health = await checkBackendHealth()
+  const health = await checkBackendHealth({ force: true })
   const stores = await request('/stores')
   const store = stores[0] || null
 

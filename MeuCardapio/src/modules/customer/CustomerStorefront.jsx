@@ -32,6 +32,7 @@ const emptyAddress = {
 const DEFAULT_MAP_CENTER = { lat: -26.7693, lng: -48.6452 }
 const MAP_TILE_SIZE = 256
 const CUSTOMER_DIRECTORY_VERSION = 'v1'
+const TRACKED_ORDER_REFRESH_MS = 30 * 1000
 
 const PAYMENT_OPTIONS = [
   { id: 'Pix', title: 'Pix', subtitle: 'Pague agora', group: 'Pagar agora' },
@@ -1010,7 +1011,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
 
     refreshTrackedOrder()
-    const intervalId = window.setInterval(refreshTrackedOrder, 5000)
+    const intervalId = window.setInterval(refreshTrackedOrder, TRACKED_ORDER_REFRESH_MS)
 
     return () => {
       cancelled = true

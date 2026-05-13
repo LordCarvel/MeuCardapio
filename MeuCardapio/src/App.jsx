@@ -159,6 +159,9 @@ function buildQrImageUrl(value = '') {
 }
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
+const PILOT_BACKEND_REFRESH_MS = 2 * 60 * 1000
+const WHATSAPP_CONVERSATIONS_REFRESH_MS = 60 * 1000
+const WHATSAPP_MESSAGES_REFRESH_MS = 45 * 1000
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
 const OSM_TILE_SIZE = 256
 const DELIVERY_ZONE_COLORS = ['#248a72', '#d94f3d', '#0b84e3', '#c28a20', '#7c5cc4', '#4f7d8a']
@@ -6717,7 +6720,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       }
     }
     void loadWhatsapp()
-    const interval = window.setInterval(loadWhatsapp, 15000)
+    const interval = window.setInterval(loadWhatsapp, WHATSAPP_CONVERSATIONS_REFRESH_MS)
     return () => {
       cancelled = true
       window.clearInterval(interval)
@@ -6746,7 +6749,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       }
     }
     void loadMessages()
-    const interval = window.setInterval(loadMessages, 12000)
+    const interval = window.setInterval(loadMessages, WHATSAPP_MESSAGES_REFRESH_MS)
     return () => {
       cancelled = true
       window.clearInterval(interval)
@@ -7955,7 +7958,7 @@ function App() {
 
     const intervalId = window.setInterval(() => {
       void refreshPilotFromBackendRef.current?.({ silent: true })
-    }, 6000)
+    }, PILOT_BACKEND_REFRESH_MS)
 
     return () => window.clearInterval(intervalId)
   }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
@@ -8612,7 +8615,7 @@ function App() {
     updatePilotSync({ status: 'checking', message: 'Checando saude da API...' })
 
     try {
-      const health = await checkBackendHealth()
+      const health = await checkBackendHealth({ force: true })
       updatePilotSync({
         status: 'online',
         lastCheckedAt: nowDateTime(),
