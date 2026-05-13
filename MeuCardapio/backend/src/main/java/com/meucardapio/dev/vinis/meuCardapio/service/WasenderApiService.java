@@ -43,10 +43,10 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class WasenderApiService {
-    private static final int CONTACT_SYNC_PAGE_LIMIT = 20;
-    private static final int CONTACT_SYNC_MAX_PAGES = 5;
-    private static final int MESSAGE_LOG_SYNC_PAGE_LIMIT = 20;
-    private static final int MESSAGE_LOG_SYNC_MAX_PAGES = 3;
+    private static final int CONTACT_SYNC_PAGE_LIMIT = 100;
+    private static final int CONTACT_SYNC_MAX_PAGES = 10;
+    private static final int MESSAGE_LOG_SYNC_PAGE_LIMIT = 50;
+    private static final int MESSAGE_LOG_SYNC_MAX_PAGES = 10;
     private static final List<String> MIRROR_WEBHOOK_EVENTS = List.of(
             "chats.upsert",
             "chats.update",
@@ -356,7 +356,6 @@ public class WasenderApiService {
     public WhatsappConversationSyncResult syncConversations(UUID storeId) {
         WhatsappIntegration integration = getOrCreate(storeId);
         String apiKey = requireSessionApiKey(integration);
-        conversations.deleteEmptyWithoutMessagesByStoreId(storeId);
         int page = 1;
         int totalPages = 1;
         int enriched = 0;
@@ -662,12 +661,12 @@ public class WasenderApiService {
     }
 
     private boolean enrichContactConversation(UUID storeId, JsonNode contact) {
-        String remoteJid = firstText(
+        String remoteJid = normalizeContactAddress(firstText(
                 contact.path("jid"),
                 contact.path("id"),
                 contact.path("remoteJid"),
                 contact.path("phone"),
-                contact.path("number"));
+                contact.path("number")));
         if (!hasText(remoteJid)) {
             return false;
         }
@@ -703,10 +702,12 @@ public class WasenderApiService {
                 contact.path("photo").path("url"),
                 contact.path("photoUrl"),
                 contact.path("image"));
-        if (existing.isEmpty()) {
-            return false;
-        }
-        WhatsappConversation conversation = existing.get();
+        WhatsappConversation conversation = existing.orElseGet(() -> {
+            WhatsappConversation created = new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid);
+            created.setLastMessage("");
+            created.setLastMessageAt(extractTimestamp(contact, contact));
+            return created;
+        });
         if (hasText(phone)) {
             conversation.setPhone(cleanWhatsappPhone(phone));
         } else if (!hasText(conversation.getPhone())) {
@@ -743,25 +744,19 @@ public class WasenderApiService {
         }
         String normalizedRecipient = normalizeRecipient(recipient);
         LocalDateTime createdAt = extractTimestamp(item, item);
-        WhatsappConversation conversation = findKnownConversation(storeId, normalizedRecipient)
-                .map(existing -> upsertConversation(
-                        storeId,
-                        existing.getRemoteJid(),
-                        existing.getPhone(),
-                        existing.getContactName(),
-                        body,
-                        createdAt,
-                        false,
-                        null))
-                .orElseGet(() -> upsertConversation(
-                        storeId,
-                        normalizedRecipient,
-                        cleanWhatsappPhone(normalizedRecipient),
-                        cleanWhatsappAddress(normalizedRecipient),
-                        body,
-                        createdAt,
-                        false,
-                        null));
+        Optional<WhatsappConversation> existing = findKnownConversation(storeId, normalizedRecipient);
+        if (existing.isEmpty()) {
+            return false;
+        }
+        WhatsappConversation conversation = upsertConversation(
+                storeId,
+                existing.get().getRemoteJid(),
+                existing.get().getPhone(),
+                existing.get().getContactName(),
+                body,
+                createdAt,
+                false,
+                null);
         WhatsappMessage message = new WhatsappMessage(UUID.randomUUID(), storeId, conversation, conversation.getRemoteJid(), true);
         message.setProviderMessageId(providerMessageId);
         message.setBody(body);
@@ -778,6 +773,7 @@ public class WasenderApiService {
 
     private WhatsappConversation upsertConversation(UUID storeId, String remoteJid, String phone, String contactName, String lastMessage, LocalDateTime lastMessageAt, boolean unread, Integer unreadCount, boolean allowNameOverwrite) {
         WhatsappConversation conversation = conversations.findByStoreIdAndRemoteJid(storeId, remoteJid)
+                .or(() -> hasText(phone) ? findKnownConversation(storeId, phone) : Optional.empty())
                 .orElseGet(() -> new WhatsappConversation(UUID.randomUUID(), storeId, remoteJid));
         if (hasText(phone)) conversation.setPhone(cleanWhatsappPhone(phone));
         if (hasText(contactName)) applyConversationName(conversation, contactName, allowNameOverwrite);
@@ -1399,6 +1395,15 @@ public class WasenderApiService {
             return recipient;
         }
         return normalizeInternationalPhone(recipient);
+    }
+
+    private static String normalizeContactAddress(String value) {
+        String contact = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(contact) || contact.contains("@")) {
+            return contact;
+        }
+        String phone = cleanWhatsappPhone(contact);
+        return hasText(phone) ? phone : contact;
     }
 
     private static boolean isPhoneAddress(String value) {

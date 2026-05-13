@@ -6,10 +6,7 @@ import {
   ConversationHeader,
   ConversationList,
   MainContainer,
-  Message,
   MessageInput,
-  MessageList,
-  MessageSeparator,
   Sidebar as ChatSidebar,
 } from '@chatscope/chat-ui-kit-react'
 import { StoreAccess } from './modules/store/StoreAccess'
@@ -160,8 +157,8 @@ function buildQrImageUrl(value = '') {
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
 const PILOT_BACKEND_REFRESH_MS = 2 * 60 * 1000
-const WHATSAPP_CONVERSATIONS_REFRESH_MS = 60 * 1000
-const WHATSAPP_MESSAGES_REFRESH_MS = 45 * 1000
+const WHATSAPP_CONVERSATIONS_REFRESH_MS = 15 * 1000
+const WHATSAPP_MESSAGES_REFRESH_MS = 8 * 1000
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
 const OSM_TILE_SIZE = 256
 const DELIVERY_ZONE_COLORS = ['#248a72', '#d94f3d', '#0b84e3', '#c28a20', '#7c5cc4', '#4f7d8a']
@@ -6617,7 +6614,7 @@ function getWhatsappConversationTitle(conversation) {
 }
 
 function getWhatsappConversationPreview(conversation) {
-  return conversation?.lastMessage || (conversation?.source === 'order' ? 'Pedido recente do cardapio' : 'Sem mensagens')
+  return conversation?.lastMessage || (conversation?.source === 'order' ? 'Pedido recente do cardapio' : 'Contato sincronizado')
 }
 
 function getWhatsappMessageText(message) {
@@ -6660,6 +6657,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   const [whatsappDraft, setWhatsappDraft] = useState('')
   const [conversationSearch, setConversationSearch] = useState('')
   const [conversationFilter, setConversationFilter] = useState('all')
+  const whatsappFeedRef = useRef(null)
 
   const availableConversations = whatsappConversations
   const selectedWhatsappStillVisible = whatsappConversations.some((conversation) => conversation.remoteJid === selectedWhatsappJid)
@@ -6679,7 +6677,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
 
     if (conversationFilter === 'unread' && !conversation.unreadCount) return false
     if (conversationFilter === 'groups' && !String(conversation.remoteJid || '').includes('@g.us')) return false
-    if (conversationFilter === 'contacts' && getWhatsappConversationPreview(conversation) !== 'Sem mensagens') return false
+    if (conversationFilter === 'contacts' && String(conversation.lastMessage || '').trim()) return false
 
     return !search || haystack.includes(search)
   }), [availableConversations, conversationFilter, conversationSearch])
@@ -6694,6 +6692,25 @@ function WhatsappInbox({ storeId, onOpenModal }) {
 
     return []
   }, [whatsappMessages])
+  const renderedConversationMessages = useMemo(() => {
+    let lastDay = ''
+
+    return conversationMessages.map((message) => {
+      const day = formatWhatsappDay(message.createdAt)
+      const showDay = day !== lastDay
+      lastDay = day
+
+      return { message, day, showDay }
+    })
+  }, [conversationMessages])
+  const lastConversationMessageId = conversationMessages[conversationMessages.length - 1]?.id || ''
+
+  useEffect(() => {
+    const feed = whatsappFeedRef.current
+    if (!feed) return
+
+    feed.scrollTop = feed.scrollHeight
+  }, [effectiveSelectedWhatsappJid, lastConversationMessageId])
 
   useEffect(() => {
     if (!storeId) {
@@ -6740,6 +6757,11 @@ function WhatsappInbox({ storeId, onOpenModal }) {
           setWhatsappMessages((current) => (sameWhatsappPayload(current, loaded) ? current : loaded))
           if (selectedConversation?.unreadCount) {
             void markWhatsappConversationRead(storeId, effectiveSelectedWhatsappJid)
+            setWhatsappConversations((current) => current.map((conversation) => (
+              conversation.remoteJid === effectiveSelectedWhatsappJid
+                ? { ...conversation, unreadCount: 0 }
+                : conversation
+            )))
           }
         }
       } catch (err) {
@@ -6772,12 +6794,16 @@ function WhatsappInbox({ storeId, onOpenModal }) {
       setWhatsappStatus({ type: 'warning', message: 'Sincronizando sessao: mensagens registradas, nomes e fotos...' })
       const syncResult = await syncWhatsappConversations(storeId)
       const conversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
+      const nextSelectedJid = conversations.some((conversation) => conversation.remoteJid === selectedWhatsappJid)
+        ? selectedWhatsappJid
+        : conversations[0]?.remoteJid || ''
       setConversationSearch('')
       setConversationFilter('all')
       setWhatsappConversations(conversations)
-      setSelectedWhatsappJid((current) => (
-        conversations.some((conversation) => conversation.remoteJid === current) ? current : conversations[0]?.remoteJid || ''
-      ))
+      setSelectedWhatsappJid(nextSelectedJid)
+      if (nextSelectedJid) {
+        setWhatsappMessages(await getWhatsappMessages(storeId, nextSelectedJid))
+      }
       if (!Array.isArray(syncResult) && syncResult.partial) {
         setWhatsappStatus({ type: 'warning', message: syncResult.message || `${conversations.length} conversa(s) disponivel(is). A sincronizacao ficou parcial.` })
       } else if (!Array.isArray(syncResult) && syncResult.message) {
@@ -6954,20 +6980,19 @@ function WhatsappInbox({ storeId, onOpenModal }) {
               </ConversationHeader.Actions>
             </ConversationHeader>
 
-            <MessageList autoScrollToBottom autoScrollToBottomOnMount scrollBehavior="smooth">
-              {conversationMessages.length > 0 ? <div className="whatsapp-chat-bottom-spacer" aria-hidden="true" /> : null}
-              <MessageSeparator>{formatWhatsappDay(conversationMessages[0]?.createdAt || selectedConversation?.lastMessageAt)}</MessageSeparator>
-              {conversationMessages.map((message) => (
-                <Message
-                  key={message.id}
-                  model={{
-                    direction: message.fromMe ? 'outgoing' : 'incoming',
-                    message: getWhatsappMessageText(message),
-                    position: 'single',
-                    sender: message.fromMe ? 'Voce' : selectedTitle,
-                    sentTime: formatWhatsappTime(message.createdAt),
-                  }}
-                />
+            <div className="whatsapp-chat-feed" ref={whatsappFeedRef} role="log" aria-live="polite" aria-label="Historico da conversa">
+              {renderedConversationMessages.map(({ message, day, showDay }) => (
+                <div className="whatsapp-message-group" key={message.id}>
+                  {showDay ? <div className="whatsapp-day-pill">{day}</div> : null}
+                  <article className={`whatsapp-message ${message.fromMe ? 'is-outbound' : 'is-inbound'}`}>
+                    <p>{getWhatsappMessageText(message)}</p>
+                    <footer>
+                      <small>{message.fromMe ? 'Voce' : selectedTitle}</small>
+                      <time>{formatWhatsappTime(message.createdAt)}</time>
+                      {message.fromMe ? <span aria-label="Enviada">ok</span> : null}
+                    </footer>
+                  </article>
+                </div>
               ))}
               {conversationMessages.length === 0 ? (
                 <div className="whatsapp-empty-chat">
@@ -6976,7 +7001,7 @@ function WhatsappInbox({ storeId, onOpenModal }) {
                   <small>{selectedConversation ? 'Envie uma mensagem para iniciar o atendimento por aqui.' : 'Contatos sincronizados e mensagens recebidas pelo webhook aparecem aqui.'}</small>
                 </div>
               ) : null}
-            </MessageList>
+            </div>
 
             <MessageInput
               attachButton

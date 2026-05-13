@@ -16,10 +16,16 @@ public interface WhatsappConversationRepository extends JpaRepository<WhatsappCo
     @Query(value = """
             select c.* from whatsapp_conversations c
             where c.store_id = :storeId
-              and (coalesce(c.last_message, '') <> ''
-                or c.unread_count > 0
-                or exists (select 1 from whatsapp_messages m where m.conversation_id = c.id))
-            order by c.last_message_at desc
+            order by
+              case
+                when coalesce(c.last_message, '') <> ''
+                  or c.unread_count > 0
+                  or exists (select 1 from whatsapp_messages m where m.conversation_id = c.id)
+                then 0
+                else 1
+              end,
+              c.last_message_at desc,
+              lower(coalesce(c.contact_name, c.phone, c.remote_jid))
             """, nativeQuery = true)
     List<WhatsappConversation> findVisibleByStoreIdOrderByLastMessageAtDesc(@Param("storeId") UUID storeId);
     Optional<WhatsappConversation> findByStoreIdAndRemoteJid(UUID storeId, String remoteJid);
