@@ -12,6 +12,7 @@ import {
   createBackendOrder,
   controlWhatsappBot,
   deleteBackendOrder,
+  getBackendOrders,
   getBackendStore,
   loadBackendWorkspace,
   loadBackendWorkspaceByAccessKey,
@@ -147,7 +148,8 @@ function buildQrImageUrl(value = '') {
 }
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
-const PILOT_BACKEND_REFRESH_MS = 2 * 60 * 1000
+const PILOT_BACKEND_REFRESH_MS = 15 * 1000
+const PILOT_BACKEND_HIDDEN_REFRESH_MS = 60 * 1000
 const WHATSAPP_CONVERSATIONS_REFRESH_MS = 60 * 1000
 const WHATSAPP_MESSAGES_REFRESH_MS = 20 * 1000
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
@@ -330,6 +332,7 @@ const blankOrder = {
 }
 
 const ORDER_PAYMENT_OPTIONS = [
+  { id: 'Pix', hotkey: 'P', label: 'Pix', description: 'pagamento por chave ou QR code', icon: 'cash' },
   { id: 'Cartao', hotkey: 'C', label: 'Cartao', description: 'debito ou credito na maquininha', icon: 'card' },
   { id: 'Dinheiro', hotkey: 'D', label: 'Dinheiro', description: 'pagamento em especie no balcao', icon: 'cash' },
   { id: 'Dividir', hotkey: 'R', label: 'Dividir', description: 'combinar formas de pagamento', icon: 'card' },
@@ -718,10 +721,6 @@ const blankPassword = {
 }
 
 function normalizeOrderPayment(payment) {
-  if (payment === 'Pix') {
-    return 'Cartao'
-  }
-
   return ORDER_PAYMENT_OPTIONS.some((option) => option.id === payment) || payment === 'Mesa'
     ? payment
     : 'Cartao'
@@ -3036,6 +3035,10 @@ function getPrintableOrderNote(order = {}) {
     'zona',
     'documento',
     'itens',
+    'forma de pagamento',
+    'pagamento',
+    'troco para',
+    'troco',
   ])
   const ignoredExactNotes = new Set([
     'pedido criado pelo painel.',
@@ -3098,6 +3101,34 @@ function getReceiptCustomerAddress(order = {}) {
   return receiptAddress.replace(/\s*\|\s*/g, ' - ')
 }
 
+function getOrderChangeInfo(order = {}, total = 0) {
+  const paymentText = [
+    order.payment,
+    getBackendNoteValue(order.note, 'Forma de Pagamento'),
+    getBackendNoteValue(order.note, 'Pagamento'),
+  ].filter(Boolean).join(' ')
+  const isCashPayment = /dinheiro|cash/i.test(paymentText)
+
+  if (!isCashPayment) {
+    return null
+  }
+
+  const changeText = getBackendNoteValue(order.note, 'Troco para')
+    || getBackendNoteValue(order.note, 'Troco')
+    || ''
+  const changeFor = parseCurrencyInput(changeText)
+
+  if (changeFor <= 0) {
+    return { needsChange: false, label: 'Nao precisa de troco' }
+  }
+
+  return {
+    needsChange: true,
+    changeFor,
+    changeAmount: Math.max(0, changeFor - (Number(total) || 0)),
+  }
+}
+
 function createPrinterTestOrder() {
   return normalizeOrderRecord({
     id: '8459',
@@ -3138,8 +3169,8 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
   const normalizedConfig = normalizePrinterConfig(config)
   const normalizedOrder = normalizeOrderRecord(order)
   const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
-  const showFinancials = variant !== 'kitchen' && (
-    normalizedConfig.showFinancials
+  const showFinancials = normalizedConfig.showFinancials || (
+    variant === 'kitchen'
     || variant === 'order'
     || variant === 'dispatch'
     || variant === 'fiscal'
@@ -3157,6 +3188,7 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
     : fulfillment === 'dinein'
       ? 'Consumo no local'
       : 'Retirada no balcao'
+  const changeInfo = getOrderChangeInfo(normalizedOrder, financialBreakdown.total)
   const note = printableNote && normalizedConfig.showNotes
     ? `
       ${buildReceiptDivider()}
@@ -3199,6 +3231,9 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
         <section class="receipt-section">
           <h3>Pagamento</h3>
           <p><span>Forma de Pagamento:</span> ${escapeHtml(receiptPayment)}</p>
+          ${changeInfo?.needsChange ? `<p><span>Troco para:</span> ${escapeHtml(formatReceiptCurrency(changeInfo.changeFor))}</p>` : ''}
+          ${changeInfo?.needsChange ? `<p><span>Troco:</span> ${escapeHtml(formatReceiptCurrency(changeInfo.changeAmount))}</p>` : ''}
+          ${changeInfo && !changeInfo.needsChange ? `<p><span>Troco:</span> ${escapeHtml(changeInfo.label)}</p>` : ''}
           ${normalizedOrder.document ? `<p><span>CPF/CNPJ:</span> ${escapeHtml(normalizedOrder.document)}</p>` : ''}
         </section>
         ${buildReceiptDivider()}
@@ -7666,6 +7701,7 @@ function App() {
   const geocodeCacheRef = useRef(new Map())
   const nominatimLastRequestRef = useRef(0)
   const refreshPilotFromBackendRef = useRef(null)
+  const refreshPilotOrdersFromBackendRef = useRef(null)
   const [stores, setStores] = useState(initialWorkspace.stores)
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
 
@@ -8090,16 +8126,65 @@ function App() {
 
   refreshPilotFromBackendRef.current = refreshPilotFromBackend
 
+  async function refreshPilotOrdersFromBackend({ silent = true } = {}) {
+    if (!pilotSync.storeId) {
+      return []
+    }
+
+    try {
+      const backendOrders = await getBackendOrders(pilotSync.storeId)
+      const nextOrders = Array.isArray(backendOrders) ? backendOrders.map(backendOrderToFrontOrder) : []
+
+      setOrders((current) => mergeBackendOrders(current, nextOrders))
+      updatePilotSync({
+        enabled: pilotSync.enabled,
+        status: 'online',
+        lastCheckedAt: nowDateTime(),
+        lastSyncedAt: nowDateTime(),
+        message: `${nextOrders.length} pedido(s) lido(s) da API.`,
+      })
+
+      if (!silent) {
+        notify(`${nextOrders.length} pedido(s) atualizado(s) da API.`)
+      }
+
+      return nextOrders
+    } catch (err) {
+      updatePilotSync({
+        enabled: pilotSync.enabled,
+        status: 'offline',
+        lastCheckedAt: nowDateTime(),
+        message: err instanceof Error ? err.message : 'Nao foi possivel atualizar pedidos da API.',
+      })
+      return []
+    }
+  }
+
+  refreshPilotOrdersFromBackendRef.current = refreshPilotOrdersFromBackend
+
   useEffect(() => {
     if (customerStoreId || !hasValidStoreSession || !isStoreReady || !pilotSync.enabled || !pilotSync.storeId) {
       return undefined
     }
 
-    const intervalId = window.setInterval(() => {
-      void refreshPilotFromBackendRef.current?.({ silent: true })
-    }, PILOT_BACKEND_REFRESH_MS)
+    let cancelled = false
+    let timeoutId = 0
+    async function run() {
+      if (!cancelled) {
+        await refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+      }
 
-    return () => window.clearInterval(intervalId)
+      if (!cancelled) {
+        timeoutId = window.setTimeout(run, document.hidden ? PILOT_BACKEND_HIDDEN_REFRESH_MS : PILOT_BACKEND_REFRESH_MS)
+      }
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
   }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
 
   async function copyStorefrontShareUrl() {
@@ -10949,6 +11034,13 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     })
   }
 
+  function scrollPosConfigToTop() {
+    window.setTimeout(() => {
+      document.querySelector('.pos-catalog')?.scrollTo({ top: 0, behavior: 'smooth' })
+      document.querySelector('.pos-config__body')?.scrollTo({ top: 0, behavior: 'smooth' })
+    }, 0)
+  }
+
   function ensureCartItemStepSelection(step) {
     if (isCartStepSelectionValid(step, cartItemForm)) {
       return true
@@ -10974,10 +11066,12 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     }
 
     setCartItemStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))
+    scrollPosConfigToTop()
   }
 
   function goToPreviousCartItemStep() {
     setCartItemStepIndex((current) => Math.max(current - 1, 0))
+    scrollPosConfigToTop()
   }
 
   function commitOrderCartItem() {
@@ -12308,6 +12402,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const configuredAddonEntries = configuredProduct ? getSelectedCartAddonEntries(configuredProduct, cartItemForm.addonSelections) : []
       const hasConfiguredTrail = Boolean(configuredFlavorLabel) || configuredAddonEntries.length > 0
       const hasCartItemNote = Boolean(cartItemForm.note.trim())
+      const canAdvanceConfiguredItem = currentConfigStep
+        ? isCartStepSelectionValid(currentConfigStep, cartItemForm)
+        : true
       const canFinalizeConfiguredItem = configuredProduct
         ? getCartConfigurationSteps(configuredProduct).every((step) => isCartStepSelectionValid(step, cartItemForm))
         : false
@@ -12707,7 +12804,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                         resetOrderCatalog(false)
                       }}>[ V ] Voltar</button>
                       {hasNextConfigStep ? (
-                        <button type="button" onClick={() => configuredProduct && goToNextCartItemStep(configuredProduct)}>[ A ] Proximo</button>
+                        <button disabled={!canAdvanceConfiguredItem} type="button" onClick={() => configuredProduct && goToNextCartItemStep(configuredProduct)}>[ A ] Proximo</button>
                       ) : null}
                       <button type="button" disabled={!canFinalizeConfiguredItem} onClick={commitOrderCartItem}>[ F ] Finalizar item</button>
                     </>

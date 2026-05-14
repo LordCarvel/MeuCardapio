@@ -67,6 +67,16 @@ function parseCurrency(value) {
   return Number(normalized) || 0
 }
 
+function getCashChangeAmount(changeFor, total) {
+  const paidAmount = parseCurrency(changeFor)
+
+  if (paidAmount <= 0) {
+    return 0
+  }
+
+  return Math.max(0, paidAmount - (Number(total) || 0))
+}
+
 function normalizePhoneKey(value = '') {
   const digits = String(value || '').replace(/\D/g, '')
 
@@ -1302,6 +1312,13 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     })
   }
 
+  function scrollConfigToTop() {
+    window.setTimeout(() => {
+      document.querySelector('.customer-step-page')?.scrollIntoView({ block: 'start' })
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }, 0)
+  }
+
   function goNextConfigStep() {
     if (!configProduct) {
       return
@@ -1317,11 +1334,13 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
 
     setStatus({ type: 'idle', message: '' })
     setConfigStepIndex((current) => Math.min(current + 1, Math.max(steps.length - 1, 0)))
+    scrollConfigToTop()
   }
 
   function goBackConfigStep() {
     if (configStepIndex > 0) {
       setConfigStepIndex((current) => Math.max(current - 1, 0))
+      scrollConfigToTop()
       return
     }
 
@@ -1556,6 +1575,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
     }
 
     const customerProfile = saveCustomerIdentity()
+    const changeAmount = payment === 'Dinheiro' ? getCashChangeAmount(customer.changeFor, total) : 0
     const request = {
       customerName: customer.name.trim(),
       customerPhone: customer.phone.trim(),
@@ -1570,6 +1590,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       deliveryZoneName: address.deliveryZoneName,
       note: [
         payment === 'Dinheiro' && customer.changeFor.trim() ? `Troco para: ${customer.changeFor.trim()}` : '',
+        payment === 'Dinheiro' && customer.changeFor.trim() ? `Troco: ${formatCurrency(changeAmount)}` : '',
         payment === 'Dinheiro' && !customer.changeFor.trim() ? 'Nao precisa de troco' : '',
         customer.note.trim() ? `Obs: ${customer.note.trim()}` : '',
       ].filter(Boolean).join(' | '),
@@ -1641,6 +1662,9 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const configUnitPrice = configProduct ? getCartItemUnitPrice(configProduct, configForm.flavorIds, configForm.addonSelections) : 0
   const configQuantity = Math.max(1, Number(configForm.quantity) || 1)
   const hasNextConfigStep = configStepIndex < Math.max(configSteps.length - 1, 0)
+  const currentConfigStepValid = currentConfigStep
+    ? isCartStepSelectionValid(currentConfigStep, configForm)
+    : true
   const canCommitConfig = configProduct
     ? configSteps.every((step) => isCartStepSelectionValid(step, configForm))
     : false
@@ -1845,7 +1869,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
                 Voltar
               </button>
               {hasNextConfigStep ? (
-                <button type="button" onClick={goNextConfigStep}>Proximo</button>
+                <button disabled={!currentConfigStepValid} type="button" onClick={goNextConfigStep}>Proximo</button>
               ) : (
                 <button disabled={!canCommitConfig} type="button" onClick={commitConfiguredItem}>
                   Adicionar
@@ -1854,7 +1878,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
             </div>
 
             <StickyAction
-              disabled={!canCommitConfig}
+              disabled={hasNextConfigStep ? !currentConfigStepValid : !canCommitConfig}
               label={hasNextConfigStep ? 'Proximo' : 'Adicionar ao carrinho'}
               total={configUnitPrice * configQuantity}
               onClick={hasNextConfigStep ? goNextConfigStep : commitConfiguredItem}
