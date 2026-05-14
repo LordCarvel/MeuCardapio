@@ -2,6 +2,7 @@ package com.meucardapio.dev.vinis.meuCardapio.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -69,6 +70,7 @@ public class WasenderApiService {
     private final ProductRepository products;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
+    private final RestClient externalRestClient;
 
     public WasenderApiService(
             StoreRepository stores,
@@ -90,6 +92,7 @@ public class WasenderApiService {
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .build();
+        this.externalRestClient = RestClient.builder().build();
     }
 
     public WhatsappIntegration getOrCreate(UUID storeId) {
@@ -362,6 +365,35 @@ public class WasenderApiService {
             return conversations.save(conversation);
         }
         return conversation;
+    }
+
+    @Transactional
+    public WhatsappAvatarImage avatarImage(UUID storeId, String remoteJid) {
+        WhatsappConversation conversation = refreshConversationAvatar(storeId, remoteJid);
+        String avatarUrl = conversation.getAvatarUrl();
+        if (!hasText(avatarUrl)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto de perfil nao encontrada.");
+        }
+        URI uri = URI.create(avatarUrl.trim());
+        if (!"https".equalsIgnoreCase(uri.getScheme()) && !"http".equalsIgnoreCase(uri.getScheme())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL de foto invalida.");
+        }
+        try {
+            var response = externalRestClient.get()
+                    .uri(uri)
+                    .retrieve()
+                    .toEntity(byte[].class);
+            byte[] content = response.getBody();
+            if (content == null || content.length == 0) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto de perfil vazia.");
+            }
+            String contentType = Optional.ofNullable(response.getHeaders().getContentType())
+                    .map(MediaType::toString)
+                    .orElse(MediaType.IMAGE_JPEG_VALUE);
+            return new WhatsappAvatarImage(content, contentType);
+        } catch (RestClientException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Nao consegui carregar a foto de perfil.");
+        }
     }
 
     @Transactional
@@ -927,10 +959,6 @@ public class WasenderApiService {
     }
 
     private String profilePictureContactAddress(String apiKey, WhatsappConversation conversation) {
-        String phone = cleanWhatsappPhone(firstTextValue(conversation.getPhone(), conversation.getRemoteJid()));
-        if (hasText(phone)) {
-            return phone.replace("+", "");
-        }
         String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
         if (remoteJid.toLowerCase().contains("@lid")) {
             String resolvedPhone = phoneNumberFromLid(apiKey, remoteJid);
@@ -939,6 +967,10 @@ public class WasenderApiService {
                 conversations.save(conversation);
                 return resolvedPhone.replace("+", "");
             }
+        }
+        String phone = cleanWhatsappPhone(firstTextValue(conversation.getPhone(), conversation.getRemoteJid()));
+        if (hasText(phone)) {
+            return phone.replace("+", "");
         }
         return "";
     }
@@ -1214,6 +1246,9 @@ public class WasenderApiService {
             int imported,
             boolean partial,
             String message) {
+    }
+
+    public record WhatsappAvatarImage(byte[] content, String contentType) {
     }
 
     private record BotDecision(String text, boolean pauseAfterReply) {
@@ -1636,29 +1671,49 @@ public class WasenderApiService {
 
     private static String extractedPhone(String remoteJid, JsonNode... nodes) {
         for (JsonNode node : nodes) {
-            String explicitPhone = firstText(
+            String trustedPhone = firstText(
                     node.path("cleanedSenderPn"),
                     node.path("cleanedParticipantPn"),
                     node.path("cleanedPhone"),
-                    node.path("phone"),
-                    node.path("number"),
                     node.path("senderPhone"),
                     node.path("participantPhone"));
-            String cleanedExplicitPhone = cleanWhatsappPhone(explicitPhone);
+            String cleanedTrustedPhone = cleanPhoneCandidate(trustedPhone, remoteJid);
+            if (hasText(cleanedTrustedPhone)) {
+                return cleanedTrustedPhone;
+            }
+            String explicitPhone = firstText(
+                    node.path("phone"),
+                    node.path("number"));
+            String cleanedExplicitPhone = cleanPhoneCandidate(explicitPhone, remoteJid);
             if (hasText(cleanedExplicitPhone)) {
                 return cleanedExplicitPhone;
             }
-            String senderPn = cleanWhatsappPhone(firstText(
+            String senderPn = cleanPhoneCandidate(firstText(
                     node.path("senderPn"),
                     node.path("participantPn"),
                     node.path("to"),
                     node.path("sender"),
-                    node.path("recipient")));
+                    node.path("recipient")), remoteJid);
             if (hasText(senderPn)) {
                 return senderPn;
             }
         }
         return cleanWhatsappPhone(remoteJid);
+    }
+
+    private static String cleanPhoneCandidate(String value, String remoteJid) {
+        String phone = cleanWhatsappPhone(value);
+        if (!hasText(phone)) {
+            return "";
+        }
+        if (isOpaqueWhatsappId(remoteJid)) {
+            String candidateDigits = phone.replaceAll("\\D", "");
+            String opaqueDigits = cleanWhatsappAddress(remoteJid).replaceAll("\\D", "");
+            if (hasText(opaqueDigits) && candidateDigits.equals(opaqueDigits)) {
+                return "";
+            }
+        }
+        return phone;
     }
 
     private static String cleanWhatsappPhone(String value) {

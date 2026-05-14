@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -116,6 +119,17 @@ public class WhatsappController {
             @PathVariable UUID storeId,
             @RequestParam String remoteJid) {
         return WhatsappConversationResponse.from(wasender.refreshConversationAvatar(storeId, remoteJid));
+    }
+
+    @GetMapping("/stores/{storeId}/whatsapp/conversations/avatar-image")
+    public ResponseEntity<byte[]> conversationAvatarImage(
+            @PathVariable UUID storeId,
+            @RequestParam String remoteJid) {
+        var image = wasender.avatarImage(storeId, remoteJid);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=3600")
+                .contentType(MediaType.parseMediaType(image.contentType()))
+                .body(image.content());
     }
 
     @GetMapping("/stores/{storeId}/whatsapp/messages")

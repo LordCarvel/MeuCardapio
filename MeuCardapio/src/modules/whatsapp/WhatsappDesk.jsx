@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  API_BASE_URL,
   controlWhatsappBot,
   getWhatsappConfig,
   getWhatsappConversations,
@@ -151,15 +152,21 @@ function botState(conversation) {
   return { paused: false, label: 'Robo ativo' }
 }
 
-function avatarFor(conversation, title, large = false) {
+function avatarImageUrl(storeId, conversation) {
+  if (!storeId || !conversation?.remoteJid || !conversation?.avatarUrl) return ''
+  return `${API_BASE_URL}/stores/${storeId}/whatsapp/conversations/avatar-image?remoteJid=${encodeURIComponent(conversation.remoteJid)}`
+}
+
+function avatarFor(conversation, title, large = false, storeId = '') {
   const initials = getInitials(title)
+  const imageUrl = avatarImageUrl(storeId, conversation)
   return (
     <span className={`wa-avatar ${large ? 'wa-avatar--large' : ''}`.trim()}>
       <span className="wa-avatar__fallback">{initials}</span>
-      {conversation?.avatarUrl ? (
+      {imageUrl ? (
         <img
           alt=""
-          src={conversation.avatarUrl}
+          src={imageUrl}
           onError={(event) => {
             event.currentTarget.hidden = true
           }}
@@ -272,7 +279,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
         avatarRequestsRef.current.add(conversation.remoteJid)
         refreshWhatsappConversationAvatar(storeId, conversation.remoteJid)
           .then((updated) => {
-            if (!updated?.avatarUrl) return
+            if (!updated?.remoteJid) return
             setConversations((current) => current.map((item) => (
               item.remoteJid === updated.remoteJid ? updated : item
             )))
@@ -280,6 +287,12 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
           .catch(() => {})
       })
   }
+
+  useEffect(() => {
+    if (selectedConversation?.remoteJid && !selectedConversation.avatarUrl) {
+      refreshMissingAvatars([selectedConversation])
+    }
+  }, [selectedConversation?.remoteJid, selectedConversation?.avatarUrl, storeId])
 
   async function loadMessages(silent = true) {
     if (!storeId || !effectiveSelectedJid) {
@@ -538,7 +551,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
                     setMessages([])
                   }}
                 >
-                  {avatarFor(conversation, conversationTitle)}
+                  {avatarFor(conversation, conversationTitle, false, storeId)}
                   <span className="wa-conversations__main">
                     <strong>{conversationTitle}</strong>
                     <small>{getConversationPreview(conversation)}</small>
@@ -566,7 +579,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
 
         <section className="wa-chat" aria-label="Historico da conversa">
           <header className="wa-chat__header">
-            {avatarFor(selectedConversation, title, true)}
+            {avatarFor(selectedConversation, title, true, storeId)}
             <div>
               <strong>{title}</strong>
               <small>{[phone, selectedConversation?.assignedAgent ? `Atendente: ${selectedConversation.assignedAgent}` : '', state.label].filter(Boolean).join(' - ')}</small>
