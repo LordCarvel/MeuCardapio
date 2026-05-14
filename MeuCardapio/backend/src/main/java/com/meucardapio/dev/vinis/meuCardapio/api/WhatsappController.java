@@ -111,6 +111,13 @@ public class WhatsappController {
         return WhatsappConversationResponse.from(wasender.updateConversation(storeId, remoteJid, request));
     }
 
+    @PostMapping("/stores/{storeId}/whatsapp/conversations/avatar")
+    public WhatsappConversationResponse refreshConversationAvatar(
+            @PathVariable UUID storeId,
+            @RequestParam String remoteJid) {
+        return WhatsappConversationResponse.from(wasender.refreshConversationAvatar(storeId, remoteJid));
+    }
+
     @GetMapping("/stores/{storeId}/whatsapp/messages")
     public List<WhatsappMessageResponse> messages(@PathVariable UUID storeId, @RequestParam String remoteJid) {
         return wasender.messages(storeId, remoteJid).stream().map(WhatsappMessageResponse::from).toList();

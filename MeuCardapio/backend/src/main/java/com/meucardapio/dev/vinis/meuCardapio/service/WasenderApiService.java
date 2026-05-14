@@ -346,6 +346,25 @@ public class WasenderApiService {
     }
 
     @Transactional
+    public WhatsappConversation refreshConversationAvatar(UUID storeId, String remoteJid) {
+        WhatsappIntegration integration = getOrCreate(storeId);
+        WhatsappConversation conversation = resolveDisplayConversation(storeId, remoteJid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversa nao encontrada"));
+        String apiKey;
+        try {
+            apiKey = requireSessionApiKey(integration);
+        } catch (ResponseStatusException ex) {
+            return conversation;
+        }
+        String avatarUrl = fetchProfilePictureUrl(apiKey, conversation);
+        if (hasText(avatarUrl)) {
+            conversation.setAvatarUrl(avatarUrl.trim());
+            return conversations.save(conversation);
+        }
+        return conversation;
+    }
+
+    @Transactional
     public WhatsappMessage send(UUID storeId, String to, String text) {
         return sendOutboundMessage(storeId, to, text, true, true, false);
     }
@@ -867,26 +886,7 @@ public class WasenderApiService {
     private void applyConversationAvatar(WhatsappConversation conversation, JsonNode... nodes) {
         String avatarUrl = "";
         for (JsonNode node : nodes) {
-            avatarUrl = firstText(
-                    node.path("imgUrl"),
-                    node.path("profilePicUrl"),
-                    node.path("profilePictureUrl"),
-                    node.path("profilePicture"),
-                    node.path("profilePicture").path("url"),
-                    node.path("profilePicture").path("eurl"),
-                    node.path("profilePic"),
-                    node.path("profilePic").path("url"),
-                    node.path("profilePic").path("eurl"),
-                    node.path("picture"),
-                    node.path("picture").path("url"),
-                    node.path("pictureUrl"),
-                    node.path("avatarUrl"),
-                    node.path("avatar"),
-                    node.path("avatar").path("url"),
-                    node.path("photo"),
-                    node.path("photo").path("url"),
-                    node.path("photoUrl"),
-                    node.path("image"));
+            avatarUrl = avatarUrlFrom(node);
             if (hasText(avatarUrl)) {
                 break;
             }
@@ -895,6 +895,94 @@ public class WasenderApiService {
             conversation.setAvatarUrl(avatarUrl.trim());
             conversations.save(conversation);
         }
+    }
+
+    private String fetchProfilePictureUrl(String apiKey, WhatsappConversation conversation) {
+        String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
+        try {
+            JsonNode response;
+            if (isGroupAddress(remoteJid)) {
+                response = restClient.get()
+                        .uri("/api/groups/{groupJid}/picture", remoteJid)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                        .retrieve()
+                        .body(JsonNode.class);
+            } else {
+                String contact = profilePictureContactAddress(apiKey, conversation);
+                if (!hasText(contact)) {
+                    return "";
+                }
+                response = restClient.get()
+                        .uri("/api/contacts/{contactPhoneNumber}/picture", contact)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                        .retrieve()
+                        .body(JsonNode.class);
+            }
+            JsonNode payload = response == null ? objectMapper.createObjectNode() : response;
+            String avatarUrl = avatarUrlFrom(payload.path("data"));
+            return hasText(avatarUrl) ? avatarUrl : avatarUrlFrom(payload);
+        } catch (RestClientException ex) {
+            return "";
+        }
+    }
+
+    private String profilePictureContactAddress(String apiKey, WhatsappConversation conversation) {
+        String phone = cleanWhatsappPhone(firstTextValue(conversation.getPhone(), conversation.getRemoteJid()));
+        if (hasText(phone)) {
+            return phone.replace("+", "");
+        }
+        String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
+        if (remoteJid.toLowerCase().contains("@lid")) {
+            String resolvedPhone = phoneNumberFromLid(apiKey, remoteJid);
+            if (hasText(resolvedPhone)) {
+                conversation.setPhone(resolvedPhone);
+                conversations.save(conversation);
+                return resolvedPhone.replace("+", "");
+            }
+        }
+        return "";
+    }
+
+    private String phoneNumberFromLid(String apiKey, String lid) {
+        try {
+            JsonNode response = restClient.get()
+                    .uri("/api/pn-from-lid/{lid}", lid)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                    .retrieve()
+                    .body(JsonNode.class);
+            return cleanWhatsappPhone(firstText(
+                    response == null ? null : response.path("data").path("phone"),
+                    response == null ? null : response.path("data").path("pn"),
+                    response == null ? null : response.path("data").path("jid"),
+                    response == null ? null : response.path("phone"),
+                    response == null ? null : response.path("pn"),
+                    response == null ? null : response.path("jid")));
+        } catch (RestClientException ex) {
+            return "";
+        }
+    }
+
+    private static String avatarUrlFrom(JsonNode node) {
+        return firstText(
+                node.path("imgUrl"),
+                node.path("profilePicUrl"),
+                node.path("profilePictureUrl"),
+                node.path("profilePicture"),
+                node.path("profilePicture").path("url"),
+                node.path("profilePicture").path("eurl"),
+                node.path("profilePic"),
+                node.path("profilePic").path("url"),
+                node.path("profilePic").path("eurl"),
+                node.path("picture"),
+                node.path("picture").path("url"),
+                node.path("pictureUrl"),
+                node.path("avatarUrl"),
+                node.path("avatar"),
+                node.path("avatar").path("url"),
+                node.path("photo"),
+                node.path("photo").path("url"),
+                node.path("photoUrl"),
+                node.path("image"));
     }
 
     private void runBotIfNeeded(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
@@ -1481,6 +1569,15 @@ public class WasenderApiService {
         return "";
     }
 
+    private static String firstTextValue(String... values) {
+        for (String value : values) {
+            if (hasText(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private static String require(String value, String message) {
         if (!hasText(value)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
@@ -1526,6 +1623,10 @@ public class WasenderApiService {
 
     private static boolean isPhoneAddress(String value) {
         return hasText(value) && !value.contains("@") && value.replaceAll("\\D", "").length() >= 10;
+    }
+
+    private static boolean isGroupAddress(String value) {
+        return Optional.ofNullable(value).orElse("").toLowerCase().contains("@g.us");
     }
 
     private static boolean looksLikePhone(String value) {

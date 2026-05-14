@@ -7,6 +7,7 @@ import {
   getWhatsappStatus,
   markWhatsappConversationRead,
   patchWhatsappConversation,
+  refreshWhatsappConversationAvatar,
   sendWhatsappMessage,
   syncWhatsappConversations,
 } from '../backend/backendApi'
@@ -151,9 +152,19 @@ function botState(conversation) {
 }
 
 function avatarFor(conversation, title, large = false) {
+  const initials = getInitials(title)
   return (
     <span className={`wa-avatar ${large ? 'wa-avatar--large' : ''}`.trim()}>
-      {conversation?.avatarUrl ? <img alt="" src={conversation.avatarUrl} /> : <span>{getInitials(title)}</span>}
+      <span className="wa-avatar__fallback">{initials}</span>
+      {conversation?.avatarUrl ? (
+        <img
+          alt=""
+          src={conversation.avatarUrl}
+          onError={(event) => {
+            event.currentTarget.hidden = true
+          }}
+        />
+      ) : null}
     </span>
   )
 }
@@ -183,6 +194,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
   const [status, setStatus] = useState({ type: 'idle', message: '' })
   const feedRef = useRef(null)
   const manualConversationRef = useRef(null)
+  const avatarRequestsRef = useRef(new Set())
 
   const selectedConversation = useMemo(() => {
     const saved = conversations.find((conversation) => conversation.remoteJid === selectedJid)
@@ -237,6 +249,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
       ])
       setConfig(loadedConfig)
       setConversations((current) => (samePayload(current, loadedConversations) ? current : loadedConversations))
+      refreshMissingAvatars(loadedConversations)
       setSelectedJid((current) => {
         if (loadedConversations.some((conversation) => conversation.remoteJid === current)) return current
         if (manualConversationRef.current?.remoteJid === current) return current
@@ -248,6 +261,24 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
     } catch (err) {
       setStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar WhatsApp.' })
     }
+  }
+
+  function refreshMissingAvatars(loadedConversations = conversations) {
+    if (!storeId) return
+    loadedConversations
+      .filter((conversation) => conversation?.remoteJid && !conversation.avatarUrl && !avatarRequestsRef.current.has(conversation.remoteJid))
+      .slice(0, 12)
+      .forEach((conversation) => {
+        avatarRequestsRef.current.add(conversation.remoteJid)
+        refreshWhatsappConversationAvatar(storeId, conversation.remoteJid)
+          .then((updated) => {
+            if (!updated?.avatarUrl) return
+            setConversations((current) => current.map((item) => (
+              item.remoteJid === updated.remoteJid ? updated : item
+            )))
+          })
+          .catch(() => {})
+      })
   }
 
   async function loadMessages(silent = true) {
@@ -323,6 +354,7 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
       const syncResult = await syncWhatsappConversations(storeId)
       const loadedConversations = Array.isArray(syncResult) ? syncResult : syncResult.conversations || []
       setConversations(loadedConversations)
+      refreshMissingAvatars(loadedConversations)
       setManualConversation(null)
       setSelectedJid((current) => (
         loadedConversations.some((conversation) => conversation.remoteJid === current) ? current : loadedConversations[0]?.remoteJid || ''

@@ -1,5 +1,7 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'
-const REQUEST_TIMEOUT_MS = 30000
+const REQUEST_TIMEOUT_MS = 45000
+const EMAIL_REQUEST_TIMEOUT_MS = 60000
+const LONG_REQUEST_TIMEOUT_MS = 120000
 const HEALTH_CACHE_MS = 5 * 60 * 1000
 
 let healthCache = null
@@ -19,18 +21,19 @@ function getApiConfigurationHint() {
 
 export async function request(path, options = {}) {
   const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
   let response
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...fetchOptions,
+      headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
       signal: controller.signal,
-      ...options,
     })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('A API demorou demais para responder. Confira se o Render esta online e se o SMTP do email esta configurado corretamente.')
+      throw new Error(`A API nao respondeu em ${Math.round(timeoutMs / 1000)}s. Tente novamente; se continuar, confira se o Render esta online.`)
     }
 
     throw err
@@ -300,6 +303,7 @@ export async function loginBackendUser(email, password) {
 export async function requestSignupCode(email) {
   return requestFirstAvailable(['/auth/signup/request-code', '/auth/request-signup-code', '/auth/codes'], {
     method: 'POST',
+    timeoutMs: EMAIL_REQUEST_TIMEOUT_MS,
     body: JSON.stringify({ email, purpose: 'SIGNUP' }),
   })
 }
@@ -314,6 +318,7 @@ export async function signupBackendAccount(account) {
 export async function requestEmailLoginCode(email) {
   return requestFirstAvailable(['/auth/login/request-code', '/auth/request-code', '/auth/codes'], {
     method: 'POST',
+    timeoutMs: EMAIL_REQUEST_TIMEOUT_MS,
     body: JSON.stringify({ email, purpose: 'LOGIN' }),
   })
 }
@@ -328,6 +333,7 @@ export async function verifyEmailLoginCode(email, code) {
 export async function requestPasswordResetCode(email) {
   return requestFirstAvailable(['/auth/password/request-reset', '/auth/request-password-reset', '/auth/codes'], {
     method: 'POST',
+    timeoutMs: EMAIL_REQUEST_TIMEOUT_MS,
     body: JSON.stringify({ email, purpose: 'PASSWORD_RESET' }),
   })
 }
@@ -374,13 +380,20 @@ export async function getWhatsappConversations(storeId) {
 }
 
 export async function syncWhatsappConversations(storeId) {
-  return request(`/stores/${storeId}/whatsapp/conversations/sync`, { method: 'POST' })
+  return request(`/stores/${storeId}/whatsapp/conversations/sync`, { method: 'POST', timeoutMs: LONG_REQUEST_TIMEOUT_MS })
 }
 
 export async function patchWhatsappConversation(storeId, remoteJid, patch) {
   return request(`/stores/${storeId}/whatsapp/conversations?remoteJid=${encodeURIComponent(remoteJid)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
+  })
+}
+
+export async function refreshWhatsappConversationAvatar(storeId, remoteJid) {
+  return request(`/stores/${storeId}/whatsapp/conversations/avatar?remoteJid=${encodeURIComponent(remoteJid)}`, {
+    method: 'POST',
+    timeoutMs: LONG_REQUEST_TIMEOUT_MS,
   })
 }
 
