@@ -152,13 +152,6 @@ function botState(conversation) {
   return { paused: false, label: 'Robo ativo' }
 }
 
-function attendanceState(conversation) {
-  if (!conversation) return { tone: 'muted', label: 'Sem conversa' }
-  if (conversation.assignedAgent) return { tone: 'human', label: `Humano: ${conversation.assignedAgent}` }
-  if (conversation.unreadCount > 0) return { tone: 'waiting', label: 'Aguardando atendimento' }
-  return { tone: 'open', label: 'Em monitoramento' }
-}
-
 function botTone(conversation) {
   const state = botState(conversation)
   if (conversation?.botStatus === 'human') return 'human'
@@ -519,16 +512,13 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   const phone = cleanWhatsappAddress(selectedConversation?.phone || selectedConversation?.remoteJid || '')
   const displayPhone = formatPhone(phone)
   const selectedBotTone = botTone(selectedConversation)
-  const selectedAttendance = attendanceState(selectedConversation)
   const emptyList = filteredConversations.length === 0
   const emptyMessages = renderedMessages.length === 0
   const inboxFilters = [
     ['all', 'Todas'],
     ['unread', 'Nao lidas'],
-    ['favorites', 'Favoritas'],
-    ['groups', 'Grupos'],
     ['bot_paused', 'Bot pausado'],
-    ['waiting', 'Aguardando atendimento'],
+    ['waiting', 'Aguardando'],
   ]
   const navItems = [
     ['dashboard', 'Dashboard', 'bolt'],
@@ -590,7 +580,6 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
               const active = effectiveSelectedJid === conversation.remoteJid
               const itemState = botState(conversation)
               const itemTone = botTone(conversation)
-              const itemAttendance = attendanceState(conversation)
               return (
                 <button
                   className={active ? 'is-active' : ''}
@@ -612,7 +601,7 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
                     <small>{getConversationPreview(conversation)}</small>
                     <span className="wa-conversations__badges">
                       <em className={`wa-chip wa-chip--${itemTone}`}>{itemState.label}</em>
-                      <em className={`wa-chip wa-chip--${itemAttendance.tone}`}>{itemAttendance.label}</em>
+                      {conversation.unreadCount > 0 ? <em className="wa-chip wa-chip--waiting">Aguardando</em> : null}
                     </span>
                   </span>
                   <span className="wa-conversations__meta">
@@ -647,23 +636,20 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
             </div>
             <div className="wa-chat__state">
               <span className={`wa-chip wa-chip--${selectedBotTone}`}>{state.label}</span>
-              <span className={`wa-chip wa-chip--${selectedAttendance.tone}`}>{selectedAttendance.label}</span>
+              {selectedConversation?.assignedAgent ? <span className="wa-chip wa-chip--human">{selectedConversation.assignedAgent}</span> : null}
             </div>
             <div className="wa-chat__actions">
               <button className="wa-action wa-action--primary" type="button" disabled={!selectedConversation} onClick={assignConversation}>
                 <WaIcon name="users" size={16} />
-                <span>{selectedConversation?.assignedAgent ? 'Transferir' : 'Assumir'}</span>
+                <span>Assumir</span>
               </button>
               {state.paused ? (
-                <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('resume')}>Retomar bot</button>
+                <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('resume')}>Retomar</button>
               ) : (
-                <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_today')}>Pausar bot</button>
+                <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_today')}>Pausar</button>
               )}
-              <button className="wa-action wa-action--danger" type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_forever')}>Parar bot</button>
-              <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>Enviar catalogo</button>
-              <button className="wa-action" type="button" disabled={!selectedConversation} onClick={labelConversation}>
-                <WaIcon name="tag" size={16} />
-                <span>Etiquetar</span>
+              <button className="wa-action" type="button" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>
+                Catalogo
               </button>
             </div>
           </header>
@@ -673,7 +659,9 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
             {selectedConversation?.botPausedIndefinitely ? <span className="wa-chip wa-chip--paused">Sem prazo</span> : null}
             {selectedConversation?.assignedAgent ? <span className="wa-chip wa-chip--human">Atendimento humano</span> : null}
             {selectedConversation?.label ? <span className="wa-chip wa-chip--open">{selectedConversation.label}</span> : null}
-            <span className="wa-chip wa-chip--muted">Pedido vinculado: nao encontrado</span>
+            <button type="button" disabled={!selectedConversation} onClick={labelConversation}>Etiqueta</button>
+            <button type="button" disabled={!selectedConversation} onClick={pinNote}>Nota</button>
+            <button className="is-danger" type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_forever')}>Parar</button>
           </div>
 
           {selectedConversation?.pinnedNote ? (
@@ -721,7 +709,6 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
             <div className="wa-composer__tools">
               <button type="button" title="Anexar" disabled={!selectedConversation}><WaIcon name="paperclip" size={20} /></button>
               <button type="button" title="Emoji" disabled={!selectedConversation}><WaIcon name="smile" size={20} /></button>
-              <button type="button" title="Respostas prontas" disabled={!selectedConversation}><WaIcon name="bolt" size={20} /></button>
               <button type="button" title="Enviar catalogo" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}><WaIcon name="menu" size={20} /></button>
             </div>
             <input
@@ -739,60 +726,6 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
           </form>
         </section>
 
-        <aside className="wa-details" aria-label="Detalhes do cliente">
-          <section className="wa-details__card">
-            <div className="wa-details__profile">
-              {avatarFor(selectedConversation, title, true, storeId)}
-              <div>
-                <strong>{title}</strong>
-                <small>{displayPhone}</small>
-              </div>
-            </div>
-            <div className="wa-details__rows">
-              <span><small>Canal</small><strong>WhatsApp</strong></span>
-              <span><small>Status do bot</small><strong>{state.label}</strong></span>
-              <span><small>Atendimento</small><strong>{selectedAttendance.label}</strong></span>
-              <span><small>Ultima interacao</small><strong>{formatTime(selectedConversation?.lastMessageAt) || 'Sem registro'}</strong></span>
-            </div>
-          </section>
-
-          <section className="wa-details__card">
-            <header>
-              <strong>Etiquetas e notas</strong>
-              <button type="button" disabled={!selectedConversation} onClick={labelConversation}>Editar</button>
-            </header>
-            <div className="wa-tag-list">
-              {selectedConversation?.label ? <span>{selectedConversation.label}</span> : <small>Nenhuma etiqueta aplicada</small>}
-            </div>
-            <button className="wa-note-preview" type="button" disabled={!selectedConversation} onClick={pinNote}>
-              {selectedConversation?.pinnedNote || 'Adicionar observacao interna'}
-            </button>
-          </section>
-
-          <section className="wa-details__card">
-            <header>
-              <strong>Pedidos vinculados</strong>
-              <small>Em breve</small>
-            </header>
-            <p className="wa-details__muted">Nenhum pedido vinculado automaticamente a esta conversa.</p>
-          </section>
-
-          <section className="wa-details__card">
-            <header><strong>Acoes rapidas</strong></header>
-            <div className="wa-quick-actions">
-              <button type="button" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>Enviar catalogo</button>
-              <button type="button" disabled={!selectedConversation}>Criar pedido</button>
-              <button type="button" disabled={!selectedConversation}>Vincular pedido</button>
-              {state.paused ? (
-                <button type="button" disabled={!selectedConversation} onClick={() => runBotAction('resume')}>Retomar bot</button>
-              ) : (
-                <button type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_today')}>Pausar bot</button>
-              )}
-              <button type="button" disabled={!selectedConversation} onClick={assignConversation}>Transferir atendimento</button>
-              <button type="button" disabled={!selectedConversation} onClick={() => runBotAction('pause_forever')}>Encerrar com humano</button>
-            </div>
-          </section>
-        </aside>
       </div>
     </article>
   )

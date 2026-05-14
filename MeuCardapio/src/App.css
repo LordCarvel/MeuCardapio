@@ -4084,6 +4084,186 @@
   }
 }
 
+.wa-desk__body,
+.wa-desk--standalone .wa-desk__body {
+  grid-template-columns: 54px minmax(280px, 330px) minmax(0, 1fr);
+}
+
+.wa-desk--standalone .wa-desk__body {
+  grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+}
+
+.wa-list__header {
+  min-height: 82px;
+  padding: 14px 14px 10px;
+}
+
+.wa-list__header span {
+  font-size: 10px;
+}
+
+.wa-list__header h2 {
+  font-size: 20px;
+}
+
+.wa-search input::placeholder {
+  color: #7d8985;
+}
+
+.wa-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wa-tabs button {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-conversations {
+  padding: 0 8px 10px;
+}
+
+.wa-conversations > button {
+  min-height: 92px;
+  padding: 10px;
+}
+
+.wa-conversations__badges .wa-chip {
+  max-width: 116px;
+}
+
+.wa-chat__header {
+  grid-template-columns: minmax(190px, 1fr) auto auto;
+  gap: 10px;
+  min-height: 78px;
+  padding: 12px 14px;
+}
+
+.wa-chat__identity {
+  gap: 10px;
+}
+
+.wa-chat__identity .wa-avatar {
+  width: 42px;
+  height: 42px;
+}
+
+.wa-chat__state {
+  max-width: 220px;
+}
+
+.wa-chat__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, auto));
+  gap: 6px;
+  max-width: 270px;
+}
+
+.wa-action {
+  justify-content: center;
+  width: 100% !important;
+  min-width: 0;
+  max-width: 96px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wa-action span,
+.wa-action {
+  text-overflow: ellipsis;
+}
+
+.wa-action svg {
+  flex: 0 0 auto;
+}
+
+.wa-botbar {
+  gap: 6px;
+  min-height: 40px;
+  padding: 7px 14px;
+}
+
+.wa-botbar button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #d7e0dc;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #33413e;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.wa-botbar button.is-danger {
+  border-color: #f1c6bd;
+  background: #fff1ee;
+  color: #a33d2c;
+}
+
+.wa-feed {
+  padding: 16px 18px;
+}
+
+.wa-system-event {
+  max-width: 72%;
+}
+
+.wa-composer {
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  min-height: 68px;
+  padding: 10px 14px;
+}
+
+.wa-composer__tools {
+  max-width: 112px;
+  overflow: hidden;
+}
+
+.wa-composer button {
+  flex: 0 0 auto;
+}
+
+.wa-composer__bot,
+.wa-composer .is-send {
+  min-width: 64px;
+  max-width: 76px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-details {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .wa-chat__header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wa-chat__state,
+  .wa-chat__actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .wa-chat__actions {
+    grid-template-columns: repeat(3, minmax(82px, 1fr));
+  }
+
+  .wa-action {
+    max-width: none;
+  }
+}
+
 .kds-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(220px, 1fr));
