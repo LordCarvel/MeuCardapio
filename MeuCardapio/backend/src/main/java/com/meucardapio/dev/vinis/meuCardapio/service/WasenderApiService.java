@@ -1190,16 +1190,7 @@ public class WasenderApiService {
     }
 
     private BotIntentMatch bestFixedIntentMatch(JsonNode training, String normalized) {
-        String numberIntent = switch (normalized) {
-            case "1" -> "MAKE_ORDER";
-            case "2" -> "VIEW_CATALOG";
-            case "3" -> "OPENING_HOURS";
-            case "4" -> "DELIVERY_INFO";
-            case "5" -> "PAYMENT_METHODS";
-            case "6" -> "ORDER_STATUS";
-            case "7" -> "HUMAN_SUPPORT";
-            default -> "";
-        };
+        String numberIntent = menuChoiceIntent(normalized);
         if (hasText(numberIntent)) {
             return new BotIntentMatch(numberIntent, 100, "", "HUMAN_SUPPORT".equals(numberIntent));
         }
@@ -1215,6 +1206,35 @@ public class WasenderApiService {
             }
         }
         return best;
+    }
+
+    private static String menuChoiceIntent(String normalized) {
+        String compact = Optional.ofNullable(normalized).orElse("").trim();
+        if (!hasText(compact)) {
+            return "";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*1$")) {
+            return "VIEW_CATALOG";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*2$")) {
+            return "MAKE_ORDER";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*3$")) {
+            return "ORDER_STATUS";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*4$")) {
+            return "DELIVERY_INFO";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*5$")) {
+            return "PAYMENT_METHODS";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*6$")) {
+            return "OPENING_HOURS";
+        }
+        if (compact.matches("^(opcao|opcao numero|numero|n|item|quero|quero a opcao|quero o item)?\\s*7$")) {
+            return "HUMAN_SUPPORT";
+        }
+        return "";
     }
 
     private BotIntentMatch bestFaqMatch(JsonNode training, String normalized) {
@@ -1288,13 +1308,13 @@ public class WasenderApiService {
         String menuUrl = resolveMenuUrl(storeId, integration);
         if ("catalog_only".equals(orderMode) || "catalogo".equals(orderMode)) {
             return hasText(menuUrl)
-                    ? "Para evitar erros, os pedidos sao feitos pelo catalogo online:\n" + menuUrl
+                    ? "Para evitar erros, os pedidos sao feitos pelo catalogo online:\n" + menuUrl + "\n\nDepois de enviar o pedido por la, voce pode responder 3 para acompanhar."
                     : "Os pedidos devem ser feitos pelo catalogo online, mas o link ainda nao esta configurado. Vou chamar um atendente.";
         }
         if ("whatsapp".equals(orderMode)) {
             return hasText(menuUrl)
-                    ? "Pode me enviar seu pedido por aqui. Se quiser ver os produtos antes, acesse:\n" + menuUrl
-                    : "Pode me enviar seu pedido por aqui.";
+                    ? "Pode me enviar seu pedido por aqui.\n\nSe quiser ver os produtos antes, responda 1 ou acesse:\n" + menuUrl
+                    : "Pode me enviar seu pedido por aqui. Se preferir atendimento humano, responda 7.";
         }
         return buildMenuMessage(storeId, integration);
     }
@@ -1441,14 +1461,14 @@ public class WasenderApiService {
 
     private static List<String> defaultIntentKeywords(String intent) {
         return switch (intent) {
-            case "WELCOME" -> List.of("oi", "ola", "bom dia", "boa tarde", "boa noite", "iniciar", "menu");
-            case "MAKE_ORDER" -> List.of("quero pedir", "fazer pedido", "como faco pedido", "comprar", "encomendar", "pedido");
-            case "VIEW_CATALOG" -> List.of("cardapio", "catalogo", "produtos", "menu", "lista de precos", "link");
+            case "WELCOME" -> List.of("oi", "ola", "oie", "bom dia", "boa tarde", "boa noite", "iniciar", "comecar", "menu", "opcoes", "ajuda");
+            case "MAKE_ORDER" -> List.of("quero pedir", "fazer pedido", "como faco pedido", "comprar", "encomendar", "pedido novo", "fechar pedido", "finalizar pedido", "montar pedido", "quero comprar");
+            case "VIEW_CATALOG" -> List.of("cardapio", "catalogo", "produtos", "menu", "lista de precos", "link", "ver produtos", "ver catalogo", "ver cardapio", "manda catalogo", "manda cardapio", "opcoes de produto");
             case "OPENING_HOURS" -> List.of("horario", "abre", "fecha", "funciona", "aberto", "abre hoje", "fecha que horas");
-            case "DELIVERY_INFO" -> List.of("entrega", "delivery", "retirada", "bairro", "taxa", "frete", "tempo", "demora");
-            case "PAYMENT_METHODS" -> List.of("pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha");
-            case "ORDER_STATUS" -> List.of("acompanhar", "andamento", "status", "meu pedido", "pedido atrasou", "cade meu pedido", "saiu", "pronto");
-            case "STORE_ADDRESS" -> List.of("endereco", "onde fica", "localizacao", "como chegar", "retirar ai");
+            case "DELIVERY_INFO" -> List.of("entrega", "entregam", "delivery", "retirada", "retirar", "bairro", "taxa", "frete", "tempo de entrega", "demora pra entregar", "entrega aqui", "qual taxa");
+            case "PAYMENT_METHODS" -> List.of("pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha", "aceita pix", "aceita cartao");
+            case "ORDER_STATUS" -> List.of("acompanhar", "andamento", "status", "meu pedido", "pedido atrasou", "cade meu pedido", "saiu", "pronto", "numero do pedido", "pedido chegou", "consultar pedido");
+            case "STORE_ADDRESS" -> List.of("endereco", "onde fica", "localizacao", "como chegar", "retirar ai", "qual endereco", "endereco da loja");
             case "PROMOTIONS" -> List.of("promocao", "promocoes", "cupom", "desconto", "oferta", "combo");
             case "HUMAN_SUPPORT" -> List.of("atendente", "humano", "falar com alguem", "suporte", "cancelar", "reembolso", "pedido errado", "veio errado", "nao chegou", "atrasou", "reclamacao");
             default -> List.of();
@@ -1497,6 +1517,17 @@ public class WasenderApiService {
         return lead + "\nO robo fica pausado nesta conversa hoje para a equipe assumir.";
     }
 
+    private static String botMainMenu() {
+        return "Responda com uma opcao:\n" +
+                "1 - Ver produtos / catalogo\n" +
+                "2 - Fazer pedido\n" +
+                "3 - Acompanhar pedido\n" +
+                "4 - Entrega ou retirada\n" +
+                "5 - Formas de pagamento\n" +
+                "6 - Horario e endereco\n" +
+                "7 - Falar com atendente";
+    }
+
     private boolean isGreeting(String normalized) {
         return normalized.equals("oi")
                 || normalized.equals("ola")
@@ -1512,17 +1543,14 @@ public class WasenderApiService {
         String fallback = "{saudacao}! Sou o atendimento automatico" + (store != null && hasText(store.getTradeName()) ? " da " + store.getTradeName() : "") + ".";
         String welcome = renderBotTemplate(defaultText(integration.getBotWelcome(), fallback), storeId, integration, conversation);
         return welcome + "\n\n" +
-                buildMenuMessage(storeId, integration) + "\n\n" +
-                "Tambem posso consultar seu pedido. Para falar com a equipe, escreva atendente.";
+                botMainMenu() + "\n\n" +
+                "Voce tambem pode escrever com suas palavras, por exemplo: cardapio, pedido, entrega, pix ou atendente.";
     }
 
     private String buildFallbackMessage(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation) {
-        String fallback = "Posso te ajudar com:\n" +
-                "1. Cardapio digital\n" +
-                "2. Acompanhar pedido\n" +
-                "3. Pagamento, entrega ou horario\n" +
-                "4. Chamar atendente\n\n" +
-                "Escreva cardapio, pedido ou atendente.";
+        String fallback = "Nao consegui identificar com seguranca o que voce precisa.\n\n" +
+                botMainMenu() + "\n\n" +
+                "Pode responder so com o numero da opcao.";
         return renderBotTemplate(defaultText(integration.getBotFallback(), fallback), storeId, integration, conversation);
     }
 
@@ -1575,8 +1603,9 @@ public class WasenderApiService {
     private String buildMenuMessage(UUID storeId, WhatsappIntegration integration) {
         String menuUrl = resolveMenuUrl(storeId, integration);
         return hasText(menuUrl)
-                ? "Segue o cardapio digital para fazer seu pedido:\n" + menuUrl + "\n\nPor ele voce escolhe os itens, informa entrega ou retirada e confirma o pagamento."
-                : "O link do cardapio digital ainda nao esta configurado. Um atendente pode enviar para voce por aqui.";
+                ? "Aqui esta o catalogo digital:\n" + menuUrl + "\n\nPor ele voce ve os produtos e pode finalizar o pedido com menos chance de erro.\n\n" +
+                    "Se precisar de outra coisa, responda:\n2 - Fazer pedido\n4 - Entrega ou retirada\n7 - Atendente"
+                : "O link do catalogo ainda nao esta configurado. Vou chamar um atendente para enviar as opcoes por aqui.";
     }
 
     private String buildLatestOrderMessage(UUID storeId, WhatsappConversation conversation, String inboundText) {
@@ -1648,8 +1677,8 @@ public class WasenderApiService {
     private String buildScheduleMessage(UUID storeId) {
         return stores.findById(storeId)
                 .map(store -> hasText(store.getSchedule())
-                        ? "Nosso horario de atendimento: " + store.getSchedule()
-                        : "O horario da loja ainda nao esta configurado no sistema. Posso chamar um atendente se voce precisar confirmar.")
+                        ? "Horario de atendimento:\n" + store.getSchedule() + "\n\nEndereco:\n" + storeAddress(storeId)
+                        : "O horario da loja ainda nao esta configurado no sistema.\n\nEndereco:\n" + storeAddress(storeId) + "\n\nPosso chamar um atendente se voce precisar confirmar.")
                 .orElse("Nao consegui consultar o horario da loja agora.");
     }
 

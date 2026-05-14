@@ -76,8 +76,8 @@ O campo `JSON de treino` no painel do WhatsApp permite configurar respostas, pal
   "averagePrepTime": "30 a 45 minutos",
   "promotions": "Confira as ofertas no catalogo online.",
   "responses": {
-    "WELCOME": "Ola, {nome_cliente}! Seja bem-vindo a {nome_da_loja}.",
-    "MAKE_ORDER": "Para fazer seu pedido, acesse:\n{link_catalogo}",
+    "WELCOME": "Ola, {nome_cliente}! Seja bem-vindo a {nome_da_loja}.\n\nResponda com uma opcao:\n1 - Ver produtos / catalogo\n2 - Fazer pedido\n3 - Acompanhar pedido\n4 - Entrega ou retirada\n5 - Formas de pagamento\n6 - Horario e endereco\n7 - Falar com atendente",
+    "MAKE_ORDER": "Para fazer seu pedido, acesse:\n{link_catalogo}\n\nDepois responda 3 para acompanhar.",
     "UNKNOWN": "Nao entendi muito bem. Digite pedido, catalogo, horario, entrega, pagamento ou atendente."
   },
   "intentKeywords": {
