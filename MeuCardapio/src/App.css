@@ -6927,7 +6927,7 @@
 }
 
 @media (max-height: 820px) and (min-width: 761px) {
-  .app-frame {
+  .app-main {
     grid-template-rows: 42px minmax(0, 1fr);
   }
 
