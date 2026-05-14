@@ -6730,15 +6730,12 @@ function WhatsappInbox({ storeId, onOpenModal }) {
     return []
   }, [selectedConversation, whatsappMessages])
   const renderedConversationMessages = useMemo(() => {
-    let lastDay = ''
-
-    return conversationMessages.map((message) => {
+    return conversationMessages.reduce((items, message) => {
       const day = formatWhatsappDay(message.createdAt)
-      const showDay = day !== lastDay
-      lastDay = day
-
-      return { message, day, showDay }
-    })
+      const previousDay = items[items.length - 1]?.day || ''
+      items.push({ message, day, showDay: day !== previousDay })
+      return items
+    }, [])
   }, [conversationMessages])
   const lastConversationMessageId = conversationMessages[conversationMessages.length - 1]?.id || ''
 

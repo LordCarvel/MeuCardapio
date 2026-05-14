@@ -165,8 +165,12 @@ function avatarFor(conversation, title, large = false, storeId = '') {
       <span className="wa-avatar__fallback">{initials}</span>
       {imageUrl ? (
         <img
+          key={imageUrl}
           alt=""
           src={imageUrl}
+          onLoad={(event) => {
+            event.currentTarget.hidden = false
+          }}
           onError={(event) => {
             event.currentTarget.hidden = true
           }}
@@ -232,15 +236,14 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   }, [conversations, filter, search])
 
   const renderedMessages = useMemo(() => {
-    const source = messages.filter((message) => messageText(message))
-    let lastDay = ''
-    return source.map((message) => {
+    const source = effectiveSelectedJid ? messages.filter((message) => messageText(message)) : []
+    return source.reduce((items, message) => {
       const day = formatDay(message.createdAt)
-      const showDay = day !== lastDay
-      lastDay = day
-      return { message, day, showDay }
-    })
-  }, [messages])
+      const previousDay = items[items.length - 1]?.day || ''
+      items.push({ message, day, showDay: day !== previousDay })
+      return items
+    }, [])
+  }, [effectiveSelectedJid, messages])
   const lastMessageId = renderedMessages[renderedMessages.length - 1]?.message?.id || ''
 
   useEffect(() => {
@@ -339,7 +342,6 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
 
   useEffect(() => {
     if (!storeId || !effectiveSelectedJid) {
-      setMessages([])
       return undefined
     }
     let cancelled = false
@@ -618,7 +620,6 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
               <WaIcon name="clock" size={15} />
               Sem prazo
             </button>
-            <button type="button" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>Cardapio</button>
           </div>
 
           {selectedConversation?.pinnedNote ? (
@@ -659,6 +660,9 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Digite uma mensagem"
             />
+            <button className="wa-menu-send" type="button" title="Enviar cardapio" disabled={!selectedConversation} onClick={() => runBotAction('send_menu')}>
+              Cardapio
+            </button>
             {draft.trim() ? (
               <button className="is-send" type="submit" title="Enviar"><WaIcon name="send" size={20} /></button>
             ) : (

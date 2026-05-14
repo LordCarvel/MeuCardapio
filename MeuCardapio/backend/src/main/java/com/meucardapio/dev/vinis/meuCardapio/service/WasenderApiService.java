@@ -949,48 +949,90 @@ public class WasenderApiService {
 
     private String fetchProfilePictureUrl(String apiKey, WhatsappConversation conversation) {
         String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
-        try {
-            JsonNode response;
-            if (isGroupAddress(remoteJid)) {
-                response = restClient.get()
+        if (isGroupAddress(remoteJid)) {
+            try {
+                JsonNode response = restClient.get()
                         .uri("/api/groups/{groupJid}/picture", remoteJid)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                         .retrieve()
                         .body(JsonNode.class);
-            } else {
-                String contact = profilePictureContactAddress(apiKey, conversation);
-                if (!hasText(contact)) {
-                    return "";
-                }
-                response = restClient.get()
+                JsonNode payload = response == null ? objectMapper.createObjectNode() : response;
+                String avatarUrl = avatarUrlFrom(payload.path("data"));
+                return hasText(avatarUrl) ? avatarUrl : avatarUrlFrom(payload);
+            } catch (RestClientException ex) {
+                return "";
+            }
+        }
+
+        for (String contact : profilePictureContactAddresses(apiKey, conversation)) {
+            try {
+                JsonNode response = restClient.get()
                         .uri("/api/contacts/{contactPhoneNumber}/picture", contact)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                         .retrieve()
                         .body(JsonNode.class);
+                JsonNode payload = response == null ? objectMapper.createObjectNode() : response;
+                String avatarUrl = avatarUrlFrom(payload.path("data"));
+                if (hasText(avatarUrl)) {
+                    return avatarUrl;
+                }
+                avatarUrl = avatarUrlFrom(payload);
+                if (hasText(avatarUrl)) {
+                    return avatarUrl;
+                }
+            } catch (RestClientException ex) {
+                // Try the next address shape; WaSenderAPI may require phone, +phone, or JID.
             }
-            JsonNode payload = response == null ? objectMapper.createObjectNode() : response;
-            String avatarUrl = avatarUrlFrom(payload.path("data"));
-            return hasText(avatarUrl) ? avatarUrl : avatarUrlFrom(payload);
-        } catch (RestClientException ex) {
-            return "";
         }
+        return "";
     }
 
-    private String profilePictureContactAddress(String apiKey, WhatsappConversation conversation) {
-        String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("");
+    private List<String> profilePictureContactAddresses(String apiKey, WhatsappConversation conversation) {
+        List<String> candidates = new ArrayList<>();
+        String remoteJid = Optional.ofNullable(conversation.getRemoteJid()).orElse("").trim();
         if (remoteJid.toLowerCase().contains("@lid")) {
             String resolvedPhone = phoneNumberFromLid(apiKey, remoteJid);
             if (hasText(resolvedPhone)) {
                 conversation.setPhone(resolvedPhone);
                 conversations.save(conversation);
-                return resolvedPhone.replace("+", "");
+                addProfilePictureCandidate(candidates, resolvedPhone);
             }
         }
-        String phone = cleanWhatsappPhone(firstTextValue(conversation.getPhone(), conversation.getRemoteJid()));
-        if (hasText(phone)) {
-            return phone.replace("+", "");
+        addProfilePictureCandidate(candidates, conversation.getPhone());
+        addProfilePictureCandidate(candidates, remoteJid);
+        String cleanRemote = cleanWhatsappAddress(remoteJid);
+        addProfilePictureCandidate(candidates, cleanRemote);
+        if (hasText(cleanRemote) && cleanRemote.replaceAll("\\D", "").length() >= 10) {
+            addProfilePictureCandidate(candidates, cleanRemote + "@s.whatsapp.net");
         }
-        return "";
+        return candidates;
+    }
+
+    private static void addProfilePictureCandidate(List<String> candidates, String value) {
+        String candidate = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(candidate)) {
+            return;
+        }
+        if (candidate.contains("@")) {
+            if (!candidates.contains(candidate)) {
+                candidates.add(candidate);
+            }
+            String phone = cleanWhatsappPhone(candidate);
+            if (hasText(phone)) {
+                addProfilePictureCandidate(candidates, phone);
+            }
+            return;
+        }
+        String phone = cleanWhatsappPhone(candidate);
+        if (!hasText(phone)) {
+            return;
+        }
+        String digits = phone.replace("+", "");
+        for (String option : List.of(digits, "+" + digits, digits + "@s.whatsapp.net")) {
+            if (hasText(option) && !candidates.contains(option)) {
+                candidates.add(option);
+            }
+        }
     }
 
     private String phoneNumberFromLid(String apiKey, String lid) {

@@ -2687,7 +2687,7 @@
 
 .wa-desk__body {
   display: grid;
-  grid-template-columns: 58px minmax(320px, 382px) minmax(0, 1fr);
+  grid-template-columns: 58px minmax(300px, 382px) minmax(0, 1fr);
   min-height: min(760px, calc(100vh - 178px));
   background: #f6f7f2;
   color: #172427;
@@ -3010,20 +3010,20 @@
 
 .wa-chat {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(260px, 1fr) auto;
   min-width: 0;
   background:
-    radial-gradient(circle at 20px 20px, rgba(190, 175, 150, 0.16) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.45) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.48) 1px, transparent 1px),
-    #efe7da;
+    radial-gradient(circle at 22px 22px, rgba(145, 130, 108, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.52) 1px, transparent 1px),
+    #eee6d8;
   background-size: 42px 42px, 42px 42px, 42px 42px, auto;
   overflow: hidden;
 }
 
 .wa-chat__header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(150px, 1fr) minmax(260px, auto);
   align-items: center;
   gap: 10px;
   min-height: 66px;
@@ -3040,8 +3040,10 @@
 .wa-chat__actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   min-width: 0;
+  max-width: min(500px, 44vw);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -3065,12 +3067,15 @@
 .wa-pill {
   width: auto !important;
   min-width: 0;
-  max-width: 180px;
-  padding: 0 12px;
-  gap: 7px;
+  max-width: 112px;
+  height: 34px !important;
+  padding: 0 10px;
+  gap: 6px;
   border: 1px solid #d5ded5 !important;
   background: #ffffff !important;
+  font-size: 12px;
   font-weight: 850;
+  flex: 0 1 auto;
 }
 
 .wa-pill span {
@@ -3159,7 +3164,7 @@
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 14px 18px 18px;
+  padding: 18px 22px;
   overflow-y: auto;
 }
 
@@ -3225,11 +3230,11 @@
 
 .wa-composer {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 66px;
-  padding: 10px 14px;
+  padding: 10px 16px;
   border-top: 1px solid #d7ded7;
   background: #f7f8f5;
 }
@@ -3254,6 +3259,23 @@
 .wa-composer .is-send {
   background: #0f9d58;
   color: #ffffff;
+}
+
+.wa-composer .wa-menu-send {
+  width: auto;
+  min-width: 86px;
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid #bdd9c7;
+  border-radius: 999px;
+  background: #e7f7ec;
+  color: #087941;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wa-composer .wa-menu-send:hover {
+  background: #d9f0e1;
 }
 
 .wa-empty {
@@ -3288,19 +3310,29 @@
   align-self: center;
   justify-self: center;
   width: min(320px, 92%);
-  min-height: 160px;
+  min-height: 150px;
   margin: auto;
+  border: 1px solid rgba(215, 222, 215, 0.86);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(32, 43, 45, 0.08);
 }
 
 @media (max-width: 1180px) {
   .wa-desk__body {
-    grid-template-columns: 54px minmax(300px, 350px) minmax(0, 1fr);
+    grid-template-columns: 54px minmax(280px, 340px) minmax(0, 1fr);
   }
 
   .wa-pill {
-    max-width: 132px;
+    max-width: 98px;
+  }
+
+  .wa-chat__header {
+    grid-template-columns: auto minmax(120px, 1fr) minmax(210px, auto);
+  }
+
+  .wa-chat__actions {
+    max-width: min(420px, 40vw);
   }
 }
 
@@ -3353,6 +3385,8 @@
 
   .wa-chat__actions {
     grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
   }
 
   .wa-pill {
@@ -3368,7 +3402,7 @@
   }
 
   .wa-composer {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     padding: 8px 10px;
   }
 
