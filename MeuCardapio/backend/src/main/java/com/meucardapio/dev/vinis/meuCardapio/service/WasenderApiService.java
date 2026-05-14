@@ -114,7 +114,8 @@ public class WasenderApiService {
             String botWelcome,
             String botFallback,
             String botMenuUrl,
-            String botHandoffKeywords) {
+            String botHandoffKeywords,
+            String botTrainingJson) {
         WhatsappIntegration integration = getOrCreate(storeId);
         if (hasText(personalToken)) integration.setPersonalAccessToken(personalToken.trim());
         if (hasText(apiKey)) integration.setApiKey(apiKey.trim());
@@ -128,6 +129,7 @@ public class WasenderApiService {
         if (botFallback != null) integration.setBotFallback(botFallback.trim());
         if (botMenuUrl != null) integration.setBotMenuUrl(botMenuUrl.trim());
         if (botHandoffKeywords != null) integration.setBotHandoffKeywords(botHandoffKeywords.trim());
+        if (botTrainingJson != null) integration.setBotTrainingJson(normalizeBotTrainingJson(botTrainingJson));
         integration.touch();
         WhatsappIntegration saved = integrations.save(integration);
         if (hasText(saved.getPersonalAccessToken()) && hasText(saved.getSessionId())) {
@@ -1082,6 +1084,7 @@ public class WasenderApiService {
             return;
         }
         BotDecision decision = decideBotReply(storeId, integration, conversation, inboundText);
+        decision = applyUnknownFallbackPolicy(conversation, decision);
         if (!hasText(decision.text())) {
             return;
         }
@@ -1091,52 +1094,387 @@ public class WasenderApiService {
         }
     }
 
+    private BotDecision applyUnknownFallbackPolicy(WhatsappConversation conversation, BotDecision decision) {
+        if (!"UNKNOWN".equals(decision.intent())) {
+            if (Optional.ofNullable(conversation.getBotStatus()).orElse("").startsWith("unknown_")) {
+                conversation.setBotStatus("active");
+                conversations.save(conversation);
+            }
+            return decision;
+        }
+        int attempts = unknownAttemptCount(conversation) + 1;
+        if (attempts >= 3) {
+            conversation.setBotStatus("human");
+            conversations.save(conversation);
+            return new BotDecision("HUMAN_SUPPORT", 100, buildHandoffMessage("Ainda nao consegui entender sua solicitacao. Vou chamar um atendente."), true);
+        }
+        conversation.setBotStatus("unknown_" + attempts);
+        conversations.save(conversation);
+        return decision;
+    }
+
+    private static int unknownAttemptCount(WhatsappConversation conversation) {
+        String status = Optional.ofNullable(conversation.getBotStatus()).orElse("");
+        if (!status.startsWith("unknown_")) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(status.substring("unknown_".length()));
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    public WhatsappBotTestResult testBot(UUID storeId, String inboundText, String remoteJid) {
+        WhatsappIntegration integration = getOrCreate(storeId);
+        WhatsappConversation conversation = null;
+        if (hasText(remoteJid)) {
+            conversation = resolveDisplayConversation(storeId, remoteJid).orElse(null);
+        }
+        if (conversation == null) {
+            conversation = new WhatsappConversation(UUID.randomUUID(), storeId, hasText(remoteJid) ? remoteJid : "5511999999999@s.whatsapp.net");
+            conversation.setContactName("Cliente teste");
+            conversation.setPhone(cleanWhatsappPhone(conversation.getRemoteJid()));
+        }
+        BotDecision decision = decideBotReply(storeId, integration, conversation, inboundText);
+        return new WhatsappBotTestResult(decision.intent(), decision.confidence(), decision.pauseAfterReply(), decision.text());
+    }
+
     private BotDecision decideBotReply(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
         String normalized = normalizeText(inboundText);
         if (!hasText(normalized)) {
-            return new BotDecision("", false);
+            return new BotDecision("UNKNOWN", 0, "", false);
         }
 
         if (isMediaMessage(inboundText, normalized)) {
-            return new BotDecision(buildMediaReply(normalized), false);
+            return new BotDecision("UNKNOWN", 62, buildMediaReply(normalized), false);
         }
-        if (containsAny(normalized, handoffKeywords(integration))) {
-            return new BotDecision(buildHandoffMessage("Vou chamar um atendente para continuar por aqui."), true);
+
+        JsonNode training = botTraining(integration);
+        BotIntentMatch customMatch = bestCustomIntentMatch(training, normalized);
+        BotIntentMatch faqMatch = bestFaqMatch(training, normalized);
+        BotIntentMatch fixedMatch = bestFixedIntentMatch(training, normalized);
+
+        if (containsAny(normalized, handoffKeywords(integration, training))) {
+            return new BotDecision("HUMAN_SUPPORT", 100, buildIntentResponse(storeId, integration, conversation, "HUMAN_SUPPORT", inboundText, training), true);
         }
-        if (containsAny(normalized, "cancelar", "cancelamento", "alterar pedido", "mudar pedido", "trocar pedido", "pedido errado", "erro no pedido", "problema", "reclamar", "reclamacao", "nao chegou", "atrasou")) {
-            return new BotDecision(buildHandoffMessage("Para evitar erro no pedido, vou chamar um atendente."), true);
+        if (containsAny(normalized, humanEscalationKeywords(training))) {
+            return new BotDecision("HUMAN_SUPPORT", 100, buildHandoffMessage("Vou chamar um atendente para verificar isso com cuidado."), true);
         }
-        if (isGreeting(normalized)) {
-            return new BotDecision(buildWelcomeMessage(storeId, integration, conversation), false);
+
+        if (customMatch.score() >= 55 && customMatch.score() >= faqMatch.score() && customMatch.score() >= fixedMatch.score()) {
+            String response = renderBotTemplate(customMatch.response(), storeId, integration, conversation);
+            return new BotDecision(customMatch.intent(), customMatch.score(), response, customMatch.humanEscalation());
         }
-        if (containsAny(normalized, "obrigado", "obrigada", "valeu", "agradecido", "agradecida")) {
-            return new BotDecision("Eu que agradeco. Se precisar, escreva cardapio, pedido ou atendente.", false);
+
+        if (faqMatch.score() >= 60 && faqMatch.score() >= fixedMatch.score()) {
+            String response = renderBotTemplate(faqMatch.response(), storeId, integration, conversation);
+            return new BotDecision("FAQ", faqMatch.score(), response, faqMatch.humanEscalation());
         }
-        if (containsAny(normalized, "cardapio", "menu", "link", "fazer pedido", "pedir", "comprar")) {
-            return new BotDecision(buildMenuMessage(storeId, integration), false);
-        }
-        if (containsAny(normalized, "acompanhar", "andamento", "status", "meu pedido", "pedido", "saiu", "entrega", "pronto", "cozinha", "preparo", "demora", "tempo", "cade")) {
-            return new BotDecision(buildLatestOrderMessage(storeId, conversation, inboundText), false);
-        }
-        if (containsAny(normalized, "pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha")) {
-            return new BotDecision("As formas de pagamento aparecem no fechamento do cardapio digital. Se escolher dinheiro, informe se precisa de troco. Para alguma combinacao diferente, escreva atendente.", false);
-        }
-        if (containsAny(normalized, "horario", "abre", "fecha", "funciona", "aberto")) {
-            return new BotDecision(buildScheduleMessage(storeId), false);
-        }
-        if (containsAny(normalized, "entrega", "delivery", "retirada", "balcao", "endereco", "taxa", "bairro", "localizacao")) {
-            return new BotDecision(buildDeliveryMessage(storeId), false);
-        }
-        if (containsAny(normalized, "promocao", "promocoes", "cupom", "desconto", "oferta")) {
-            return new BotDecision("As promocoes e cupons disponiveis ficam no cardapio digital. Posso te mandar o link agora:\n" + buildMenuMessage(storeId, integration), false);
+
+        if (fixedMatch.score() >= 45) {
+            boolean human = "HUMAN_SUPPORT".equals(fixedMatch.intent());
+            return new BotDecision(
+                    fixedMatch.intent(),
+                    fixedMatch.score(),
+                    buildIntentResponse(storeId, integration, conversation, fixedMatch.intent(), inboundText, training),
+                    human);
         }
 
         String productReply = buildProductReply(storeId, normalized);
         if (hasText(productReply)) {
-            return new BotDecision(productReply, false);
+            return new BotDecision("VIEW_CATALOG", 48, productReply, false);
         }
 
-        return new BotDecision(buildFallbackMessage(storeId, integration, conversation), false);
+        return new BotDecision("UNKNOWN", 25, buildIntentResponse(storeId, integration, conversation, "UNKNOWN", inboundText, training), false);
+    }
+
+    private BotIntentMatch bestFixedIntentMatch(JsonNode training, String normalized) {
+        String numberIntent = switch (normalized) {
+            case "1" -> "MAKE_ORDER";
+            case "2" -> "VIEW_CATALOG";
+            case "3" -> "OPENING_HOURS";
+            case "4" -> "DELIVERY_INFO";
+            case "5" -> "PAYMENT_METHODS";
+            case "6" -> "ORDER_STATUS";
+            case "7" -> "HUMAN_SUPPORT";
+            default -> "";
+        };
+        if (hasText(numberIntent)) {
+            return new BotIntentMatch(numberIntent, 100, "", "HUMAN_SUPPORT".equals(numberIntent));
+        }
+
+        BotIntentMatch best = new BotIntentMatch("UNKNOWN", 0, "", false);
+        for (String intent : fixedBotIntents()) {
+            int score = keywordScore(normalized, keywordsForIntent(training, intent));
+            if ("WELCOME".equals(intent) && isGreeting(normalized)) {
+                score = Math.max(score, 88);
+            }
+            if (score > best.score()) {
+                best = new BotIntentMatch(intent, Math.min(100, score), "", "HUMAN_SUPPORT".equals(intent));
+            }
+        }
+        return best;
+    }
+
+    private BotIntentMatch bestFaqMatch(JsonNode training, String normalized) {
+        BotIntentMatch best = new BotIntentMatch("FAQ", 0, "", false);
+        JsonNode faq = training.path("faq");
+        if (faq == null || !faq.isArray()) {
+            return best;
+        }
+        List<JsonNode> items = new ArrayList<>();
+        faq.forEach(items::add);
+        for (JsonNode item : items) {
+            if (item.path("enabled").isBoolean() && !item.path("enabled").asBoolean(true)) {
+                continue;
+            }
+            List<String> keywords = keywordsFromNode(item.path("keywords"));
+            String question = item.path("question").asText("");
+            if (hasText(question)) {
+                keywords.add(question);
+            }
+            int score = keywordScore(normalized, keywords);
+            if (score > best.score()) {
+                best = new BotIntentMatch("FAQ", Math.min(100, score), item.path("answer").asText(""), item.path("callHumanAfterAnswer").asBoolean(false));
+            }
+        }
+        return best;
+    }
+
+    private BotIntentMatch bestCustomIntentMatch(JsonNode training, String normalized) {
+        BotIntentMatch best = new BotIntentMatch("UNKNOWN", 0, "", false);
+        JsonNode intents = training.path("customIntents");
+        if (intents == null || !intents.isArray()) {
+            return best;
+        }
+        List<JsonNode> items = new ArrayList<>();
+        intents.forEach(items::add);
+        for (JsonNode item : items) {
+            if (item.path("enabled").isBoolean() && !item.path("enabled").asBoolean(true)) {
+                continue;
+            }
+            int score = keywordScore(normalized, keywordsFromNode(item.path("keywords")));
+            if (score > best.score()) {
+                String intent = defaultText(item.path("id").asText(""), defaultText(item.path("name").asText(""), "CUSTOM"));
+                best = new BotIntentMatch(intent, Math.min(100, score), item.path("response").asText(""), item.path("humanEscalation").asBoolean(false));
+            }
+        }
+        return best;
+    }
+
+    private String buildIntentResponse(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String intent, String inboundText, JsonNode training) {
+        String configured = configuredResponse(training, intent);
+        if (hasText(configured)) {
+            return renderBotTemplate(configured, storeId, integration, conversation);
+        }
+        return switch (intent) {
+            case "WELCOME" -> buildWelcomeMessage(storeId, integration, conversation);
+            case "MAKE_ORDER" -> buildMakeOrderMessage(storeId, integration, training);
+            case "VIEW_CATALOG" -> buildMenuMessage(storeId, integration);
+            case "OPENING_HOURS" -> buildScheduleMessage(storeId);
+            case "DELIVERY_INFO" -> buildDeliveryMessage(storeId, training);
+            case "PAYMENT_METHODS" -> buildPaymentMessage(training);
+            case "ORDER_STATUS" -> buildLatestOrderMessage(storeId, conversation, inboundText);
+            case "STORE_ADDRESS" -> buildAddressMessage(storeId);
+            case "PROMOTIONS" -> buildPromotionsMessage(storeId, integration, training);
+            case "HUMAN_SUPPORT" -> buildHandoffMessage("Certo. Vou chamar um atendente para te ajudar.");
+            default -> buildFallbackMessage(storeId, integration, conversation);
+        };
+    }
+
+    private String buildMakeOrderMessage(UUID storeId, WhatsappIntegration integration, JsonNode training) {
+        String orderMode = normalizeText(training.path("orderMode").asText(""));
+        String menuUrl = resolveMenuUrl(storeId, integration);
+        if ("catalog_only".equals(orderMode) || "catalogo".equals(orderMode)) {
+            return hasText(menuUrl)
+                    ? "Para evitar erros, os pedidos sao feitos pelo catalogo online:\n" + menuUrl
+                    : "Os pedidos devem ser feitos pelo catalogo online, mas o link ainda nao esta configurado. Vou chamar um atendente.";
+        }
+        if ("whatsapp".equals(orderMode)) {
+            return hasText(menuUrl)
+                    ? "Pode me enviar seu pedido por aqui. Se quiser ver os produtos antes, acesse:\n" + menuUrl
+                    : "Pode me enviar seu pedido por aqui.";
+        }
+        return buildMenuMessage(storeId, integration);
+    }
+
+    private String buildPaymentMessage(JsonNode training) {
+        String payment = firstText(training.path("paymentMethods"), training.path("formasPagamento"));
+        return hasText(payment)
+                ? "Aceitamos as seguintes formas de pagamento:\n" + payment
+                : "As formas de pagamento aparecem no fechamento do catalogo digital. Se precisar de uma condicao diferente, escreva atendente.";
+    }
+
+    private String buildDeliveryMessage(UUID storeId, JsonNode training) {
+        boolean deliveryEnabled = !training.path("deliveryEnabled").isBoolean() || training.path("deliveryEnabled").asBoolean(true);
+        boolean pickupEnabled = !training.path("pickupEnabled").isBoolean() || training.path("pickupEnabled").asBoolean(true);
+        String regions = firstText(training.path("deliveryRegions"), training.path("listaBairrosEntrega"));
+        String fees = firstText(training.path("deliveryFees"), training.path("taxasEntrega"));
+        String prep = firstText(training.path("averagePrepTime"), training.path("tempoMedioPreparo"));
+
+        if (!deliveryEnabled && pickupEnabled) {
+            return "No momento nao trabalhamos com entrega.\n\nVoce pode retirar no endereco:\n" + storeAddress(storeId);
+        }
+        if (deliveryEnabled && !pickupEnabled) {
+            return "Trabalhamos apenas com entrega no momento."
+                    + (hasText(regions) ? "\n\nRegioes atendidas:\n" + regions : "")
+                    + (hasText(fees) ? "\n\nTaxas:\n" + fees : "")
+                    + (hasText(prep) ? "\n\nTempo medio:\n" + prep : "");
+        }
+        String configured = (hasText(regions) ? "Regioes atendidas:\n" + regions + "\n\n" : "")
+                + (hasText(fees) ? "Taxas:\n" + fees + "\n\n" : "")
+                + (hasText(prep) ? "Tempo medio de preparo:\n" + prep : "");
+        if (hasText(configured)) {
+            return "Trabalhamos com entrega e retirada.\n\n" + configured.trim();
+        }
+        return buildDeliveryMessage(storeId);
+    }
+
+    private String buildAddressMessage(UUID storeId) {
+        return "Nosso endereco e:\n" + storeAddress(storeId);
+    }
+
+    private String buildPromotionsMessage(UUID storeId, WhatsappIntegration integration, JsonNode training) {
+        String promotions = firstText(training.path("promotions"), training.path("promocoes"));
+        if (hasText(promotions)) {
+            return "Promocoes disponiveis:\n" + promotions;
+        }
+        return "No momento nao temos promocoes cadastradas.\n\nVoce pode ver nossos produtos aqui:\n" + resolveMenuUrl(storeId, integration);
+    }
+
+    private String configuredResponse(JsonNode training, String intent) {
+        return firstText(
+                training.path("responses").path(intent),
+                training.path("intentResponses").path(intent),
+                training.path("respostas").path(intent));
+    }
+
+    private JsonNode botTraining(WhatsappIntegration integration) {
+        if (integration == null || !hasText(integration.getBotTrainingJson())) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(integration.getBotTrainingJson());
+        } catch (Exception ex) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private String normalizeBotTrainingJson(String value) {
+        String text = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(text)) {
+            return "";
+        }
+        try {
+            return objectMapper.writeValueAsString(objectMapper.readTree(text));
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "JSON de treinamento do robo invalido.");
+        }
+    }
+
+    private List<String> keywordsForIntent(JsonNode training, String intent) {
+        List<String> keywords = new ArrayList<>(defaultIntentKeywords(intent));
+        keywords.addAll(keywordsFromNode(training.path("intentKeywords").path(intent)));
+        keywords.addAll(keywordsFromNode(training.path("keywords").path(intent)));
+        return keywords;
+    }
+
+    private static int keywordScore(String normalized, List<String> keywords) {
+        int score = 0;
+        for (String keyword : keywords) {
+            String term = normalizeText(keyword);
+            if (!hasText(term)) {
+                continue;
+            }
+            if (normalized.equals(term)) {
+                score += 35;
+            } else if (normalized.contains(term)) {
+                score += term.contains(" ") ? 25 : 16;
+            } else {
+                String[] parts = term.split("\\s+");
+                int hits = 0;
+                for (String part : parts) {
+                    if (part.length() >= 3 && normalized.contains(part)) {
+                        hits += 1;
+                    }
+                }
+                if (hits > 0 && hits == parts.length) {
+                    score += 12;
+                }
+            }
+        }
+        if (normalized.length() <= 3 && score < 35) {
+            score = Math.max(0, score - 8);
+        }
+        return Math.min(100, score);
+    }
+
+    private static List<String> keywordsFromNode(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return values;
+        }
+        if (node.isArray()) {
+            node.forEach(item -> {
+                String value = item.asText("");
+                if (hasText(value)) {
+                    values.add(value);
+                }
+            });
+            return values;
+        }
+        String raw = node.asText("");
+        if (hasText(raw)) {
+            for (String item : raw.split(",")) {
+                if (hasText(item)) {
+                    values.add(item.trim());
+                }
+            }
+        }
+        return values;
+    }
+
+    private static List<String> fixedBotIntents() {
+        return List.of("WELCOME", "MAKE_ORDER", "VIEW_CATALOG", "OPENING_HOURS", "DELIVERY_INFO", "PAYMENT_METHODS", "ORDER_STATUS", "STORE_ADDRESS", "PROMOTIONS", "HUMAN_SUPPORT");
+    }
+
+    private static List<String> defaultIntentKeywords(String intent) {
+        return switch (intent) {
+            case "WELCOME" -> List.of("oi", "ola", "bom dia", "boa tarde", "boa noite", "iniciar", "menu");
+            case "MAKE_ORDER" -> List.of("quero pedir", "fazer pedido", "como faco pedido", "comprar", "encomendar", "pedido");
+            case "VIEW_CATALOG" -> List.of("cardapio", "catalogo", "produtos", "menu", "lista de precos", "link");
+            case "OPENING_HOURS" -> List.of("horario", "abre", "fecha", "funciona", "aberto", "abre hoje", "fecha que horas");
+            case "DELIVERY_INFO" -> List.of("entrega", "delivery", "retirada", "bairro", "taxa", "frete", "tempo", "demora");
+            case "PAYMENT_METHODS" -> List.of("pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha");
+            case "ORDER_STATUS" -> List.of("acompanhar", "andamento", "status", "meu pedido", "pedido atrasou", "cade meu pedido", "saiu", "pronto");
+            case "STORE_ADDRESS" -> List.of("endereco", "onde fica", "localizacao", "como chegar", "retirar ai");
+            case "PROMOTIONS" -> List.of("promocao", "promocoes", "cupom", "desconto", "oferta", "combo");
+            case "HUMAN_SUPPORT" -> List.of("atendente", "humano", "falar com alguem", "suporte", "cancelar", "reembolso", "pedido errado", "veio errado", "nao chegou", "atrasou", "reclamacao");
+            default -> List.of();
+        };
+    }
+
+    private static List<String> humanEscalationKeywords(JsonNode training) {
+        List<String> keywords = new ArrayList<>(defaultIntentKeywords("HUMAN_SUPPORT"));
+        keywords.addAll(keywordsFromNode(training.path("humanRules").path("keywords")));
+        keywords.addAll(keywordsFromNode(training.path("humanEscalationKeywords")));
+        return keywords;
+    }
+
+    private String storeAddress(UUID storeId) {
+        return stores.findById(storeId)
+                .map(store -> {
+                    List<String> parts = new ArrayList<>();
+                    if (hasText(store.getStreet())) parts.add(store.getStreet());
+                    if (hasText(store.getNumber())) parts.add(store.getNumber());
+                    if (hasText(store.getDistrict())) parts.add(store.getDistrict());
+                    if (hasText(store.getCityName())) parts.add(store.getCityName());
+                    if (hasText(store.getState())) parts.add(store.getState());
+                    String address = String.join(", ", parts);
+                    return hasText(address) ? address : "Endereco ainda nao configurado.";
+                })
+                .orElse("Endereco ainda nao configurado.");
     }
 
     private boolean isMediaMessage(String inboundText, String normalized) {
@@ -1195,13 +1533,32 @@ public class WasenderApiService {
 
     private String renderBotTemplate(String text, UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation) {
         String menuUrl = resolveMenuUrl(storeId, integration);
+        JsonNode training = botTraining(integration);
+        Store store = stores.findById(storeId).orElse(null);
         String username = Optional.ofNullable(conversation)
                 .map(WhatsappConversation::getContactName)
                 .filter(name -> hasText(name) && !looksLikePhone(name))
                 .orElse("cliente");
+        String storeName = store != null && hasText(store.getTradeName()) ? store.getTradeName() : "loja";
+        String schedule = store != null && hasText(store.getSchedule()) ? store.getSchedule() : firstText(training.path("openingHours"), training.path("horarioFuncionamento"));
+        String address = storeAddress(storeId);
+        String payment = firstText(training.path("paymentMethods"), training.path("formasPagamento"));
+        String regions = firstText(training.path("deliveryRegions"), training.path("listaBairrosEntrega"));
+        String prepTime = firstText(training.path("averagePrepTime"), training.path("tempoMedioPreparo"));
         return Optional.ofNullable(text).orElse("")
                 .replace("{username}", username)
+                .replace("{nome_cliente}", username)
+                .replace("{nome_da_loja}", storeName)
+                .replace("{tipo_negocio}", store != null ? defaultText(store.getCategory(), "") : "")
                 .replace("{link}", menuUrl)
+                .replace("{link_catalogo}", menuUrl)
+                .replace("{horario_funcionamento}", defaultText(schedule, "Horario ainda nao configurado."))
+                .replace("{endereco_loja}", address)
+                .replace("{formas_pagamento}", defaultText(payment, "Formas de pagamento ainda nao configuradas."))
+                .replace("{lista_bairros_entrega}", defaultText(regions, "Regioes de entrega ainda nao configuradas."))
+                .replace("{tempo_medio_preparo}", defaultText(prepTime, "Tempo medio ainda nao configurado."))
+                .replace("{link_acompanhamento}", menuUrl)
+                .replace("{numero_pedido}", "")
                 .replace("{divide}", "\n")
                 .replace("{saudacao}", greeting());
     }
@@ -1379,9 +1736,11 @@ public class WasenderApiService {
         conversations.save(conversation);
     }
 
-    private static List<String> handoffKeywords(WhatsappIntegration integration) {
+    private static List<String> handoffKeywords(WhatsappIntegration integration, JsonNode training) {
         String value = defaultText(integration.getBotHandoffKeywords(), "humano, atendente, ajuda, suporte, pessoa, falar com alguem");
-        return List.of(value.split(",")).stream().map(WasenderApiService::normalizeText).filter(WasenderApiService::hasText).toList();
+        List<String> keywords = new ArrayList<>(List.of(value.split(",")).stream().map(WasenderApiService::normalizeText).filter(WasenderApiService::hasText).toList());
+        keywords.addAll(humanEscalationKeywords(training));
+        return keywords;
     }
 
     private static boolean containsAny(String normalized, String... terms) {
@@ -1475,7 +1834,16 @@ public class WasenderApiService {
     public record WhatsappAvatarImage(byte[] content, String contentType) {
     }
 
-    private record BotDecision(String text, boolean pauseAfterReply) {
+    public record WhatsappBotTestResult(String intent, int confidence, boolean humanEscalation, String response) {
+    }
+
+    private record BotDecision(String intent, int confidence, String text, boolean pauseAfterReply) {
+        BotDecision(String text, boolean pauseAfterReply) {
+            this("UNKNOWN", 0, text, pauseAfterReply);
+        }
+    }
+
+    private record BotIntentMatch(String intent, int score, String response, boolean humanEscalation) {
     }
 
     private String requireSessionApiKey(WhatsappIntegration integration) {

@@ -26,7 +26,8 @@ public final class WhatsappDtos {
             String botWelcome,
             String botFallback,
             String botMenuUrl,
-            String botHandoffKeywords) {
+            String botHandoffKeywords,
+            String botTrainingJson) {
     }
 
     public record WhatsappConfigResponse(
@@ -44,6 +45,7 @@ public final class WhatsappDtos {
             String botFallback,
             String botMenuUrl,
             String botHandoffKeywords,
+            String botTrainingJson,
             LocalDateTime updatedAt) {
         public static WhatsappConfigResponse from(WhatsappIntegration integration) {
             return new WhatsappConfigResponse(
@@ -61,6 +63,7 @@ public final class WhatsappDtos {
                     integration.getBotFallback(),
                     integration.getBotMenuUrl(),
                     integration.getBotHandoffKeywords(),
+                    integration.getBotTrainingJson(),
                     integration.getUpdatedAt());
         }
     }
@@ -153,6 +156,12 @@ public final class WhatsappDtos {
     }
 
     public record WhatsappBotControlRequest(String action) {
+    }
+
+    public record WhatsappBotTestRequest(String text, String remoteJid) {
+    }
+
+    public record WhatsappBotTestResponse(String intent, int confidence, boolean humanEscalation, String response) {
     }
 
     private static boolean hasText(String value) {

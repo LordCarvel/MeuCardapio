@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConfigResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotControlRequest;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotTestRequest;
+import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappBotTestResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationResponse;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationPatchRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.WhatsappDtos.WhatsappConversationSyncResponse;
@@ -63,7 +65,8 @@ public class WhatsappController {
                 request.botWelcome(),
                 request.botFallback(),
                 request.botMenuUrl(),
-                request.botHandoffKeywords());
+                request.botHandoffKeywords(),
+                request.botTrainingJson());
         return WhatsappConfigResponse.from(integration);
     }
 
@@ -174,6 +177,12 @@ public class WhatsappController {
             @RequestParam String remoteJid,
             @RequestBody WhatsappBotControlRequest request) {
         return WhatsappConversationResponse.from(wasender.controlBot(storeId, remoteJid, request.action()));
+    }
+
+    @PostMapping("/stores/{storeId}/whatsapp/bot/test")
+    public WhatsappBotTestResponse testBot(@PathVariable UUID storeId, @RequestBody WhatsappBotTestRequest request) {
+        var result = wasender.testBot(storeId, request.text(), request.remoteJid());
+        return new WhatsappBotTestResponse(result.intent(), result.confidence(), result.humanEscalation(), result.response());
     }
 
     private static String firstText(JsonNode... nodes) {

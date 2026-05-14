@@ -47,7 +47,7 @@ Quando a sessao for criada, a API key da sessao fica salva no backend. Campos se
 ## 4. Robo de atendimento
 
 - O robo responde mensagens recebidas pelo webhook quando a integracao esta com `Robo ativo`.
-- Ele reconhece intencoes comuns: saudacao, pedir cardapio, consultar pedido, horario, pagamento, entrega, produtos do cardapio, promocao, audio/midia e chamar atendente.
+- Ele reconhece intencoes comuns por palavras-chave e pontuacao: `WELCOME`, `MAKE_ORDER`, `VIEW_CATALOG`, `OPENING_HOURS`, `DELIVERY_INFO`, `PAYMENT_METHODS`, `ORDER_STATUS`, `STORE_ADDRESS`, `PROMOTIONS`, `HUMAN_SUPPORT` e `UNKNOWN`.
 - Saudacoes como `oi`, `ola`, `bom dia`, `boa tarde` e `boa noite` recebem uma mensagem de boas-vindas com link do cardapio e instrucoes para pedido/atendente.
 - Mensagens de audio, imagem, video, documento, localizacao e contato sao registradas; o robo pede resposta em texto ou encaminha o cliente para o cardapio/atendente quando necessario.
 - Quando um pedido e criado com WhatsApp valido, o backend valida o numero na WaSenderAPI e envia a confirmacao do pedido pelo robo.
@@ -60,6 +60,60 @@ Quando a sessao for criada, a API key da sessao fica salva no backend. Campos se
   - `Pausar sem prazo` para atendimento humano sem retorno automatico.
   - `Retomar bot` para o robo voltar a responder.
   - `Cardapio` para enviar o link do cardapio digital sem criar conversa falsa.
+
+### Treinamento do robo
+
+O campo `JSON de treino` no painel do WhatsApp permite configurar respostas, palavras-chave, FAQ, intencoes personalizadas e regras de atendimento humano. Exemplo:
+
+```json
+{
+  "orderMode": "catalog_only",
+  "deliveryEnabled": true,
+  "pickupEnabled": true,
+  "paymentMethods": "Pix, cartao e dinheiro",
+  "deliveryRegions": "Centro, Vila Nova, Bairro Alto",
+  "deliveryFees": "Centro R$ 5,00; demais bairros R$ 8,00",
+  "averagePrepTime": "30 a 45 minutos",
+  "promotions": "Confira as ofertas no catalogo online.",
+  "responses": {
+    "WELCOME": "Ola, {nome_cliente}! Seja bem-vindo a {nome_da_loja}.",
+    "MAKE_ORDER": "Para fazer seu pedido, acesse:\n{link_catalogo}",
+    "UNKNOWN": "Nao entendi muito bem. Digite pedido, catalogo, horario, entrega, pagamento ou atendente."
+  },
+  "intentKeywords": {
+    "MAKE_ORDER": ["quero pedir", "fazer pedido", "comprar"],
+    "VIEW_CATALOG": ["catalogo", "cardapio", "produtos"],
+    "HUMAN_SUPPORT": ["atendente", "humano", "cancelar", "reembolso"]
+  },
+  "faq": [
+    {
+      "question": "Tem produto sem lactose?",
+      "keywords": ["sem lactose", "lactose"],
+      "answer": "Temos algumas opcoes. Consulte o catalogo: {link_catalogo}",
+      "enabled": true,
+      "callHumanAfterAnswer": false
+    }
+  ],
+  "customIntents": [
+    {
+      "id": "BULK_ORDER",
+      "name": "Pedido em grande quantidade",
+      "keywords": ["atacado", "grande quantidade", "evento"],
+      "response": "Vou chamar um atendente para montar uma condicao especial.",
+      "enabled": true,
+      "humanEscalation": true
+    }
+  ],
+  "humanRules": {
+    "keywords": ["pedido errado", "nao chegou", "atrasou", "quero reembolso"],
+    "pauseMode": "today"
+  }
+}
+```
+
+Variaveis aceitas nas respostas: `{nome_da_loja}`, `{tipo_negocio}`, `{nome_cliente}`, `{link_catalogo}`, `{horario_funcionamento}`, `{endereco_loja}`, `{formas_pagamento}`, `{lista_bairros_entrega}`, `{tempo_medio_preparo}`, `{link_acompanhamento}`, `{numero_pedido}`, `{saudacao}`, `{divide}`.
+
+O painel tambem tem um teste de mensagem. Ele salva temporariamente a configuracao atual, envia a mensagem para o endpoint de teste e mostra intencao detectada, confianca, acao de atendimento humano e resposta final.
 
 ## 5. Render
 

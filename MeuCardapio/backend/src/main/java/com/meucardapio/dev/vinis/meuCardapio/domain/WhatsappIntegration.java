@@ -39,6 +39,8 @@ public class WhatsappIntegration {
     private String botMenuUrl;
     @Column(length = 500)
     private String botHandoffKeywords;
+    @Column(columnDefinition = "text")
+    private String botTrainingJson;
     @Column(nullable = false)
     private LocalDateTime updatedAt;
 
@@ -78,6 +80,8 @@ public class WhatsappIntegration {
     public void setBotMenuUrl(String botMenuUrl) { this.botMenuUrl = botMenuUrl; }
     public String getBotHandoffKeywords() { return botHandoffKeywords; }
     public void setBotHandoffKeywords(String botHandoffKeywords) { this.botHandoffKeywords = botHandoffKeywords; }
+    public String getBotTrainingJson() { return botTrainingJson; }
+    public void setBotTrainingJson(String botTrainingJson) { this.botTrainingJson = botTrainingJson; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void touch() { this.updatedAt = LocalDateTime.now(); }
 }

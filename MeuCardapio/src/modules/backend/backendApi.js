@@ -415,6 +415,13 @@ export async function controlWhatsappBot(storeId, remoteJid, action) {
   })
 }
 
+export async function testWhatsappBot(storeId, text, remoteJid = '') {
+  return request(`/stores/${storeId}/whatsapp/bot/test`, {
+    method: 'POST',
+    body: JSON.stringify({ text, remoteJid }),
+  })
+}
+
 export async function markWhatsappConversationRead(storeId, remoteJid) {
   return request(`/stores/${storeId}/whatsapp/read?remoteJid=${encodeURIComponent(remoteJid)}`, {
     method: 'POST',

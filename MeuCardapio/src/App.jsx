@@ -31,6 +31,7 @@ import {
   sendWhatsappMessage,
   signupBackendAccount,
   syncWhatsappConversations,
+  testWhatsappBot,
   patchBackendStore,
   updateBackendStore,
   updateBackendMenuSnapshot,
@@ -7052,6 +7053,35 @@ function WhatsappInbox({ storeId, onOpenModal }) {
   )
 }
 
+const DEFAULT_WHATSAPP_BOT_TRAINING = JSON.stringify({
+  orderMode: 'catalog_only',
+  deliveryEnabled: true,
+  pickupEnabled: true,
+  paymentMethods: 'Pix, cartao e dinheiro',
+  deliveryRegions: '',
+  deliveryFees: '',
+  averagePrepTime: '',
+  promotions: '',
+  responses: {
+    WELCOME: 'Ola, {nome_cliente}! Seja bem-vindo a {nome_da_loja}.\\n\\nComo posso ajudar?\\n\\n1 - Fazer pedido\\n2 - Ver produtos / catalogo\\n3 - Horario de atendimento\\n4 - Entrega ou retirada\\n5 - Formas de pagamento\\n6 - Acompanhar pedido\\n7 - Falar com atendente',
+    MAKE_ORDER: 'Para fazer seu pedido, acesse:\\n{link_catalogo}',
+    VIEW_CATALOG: 'Claro! Voce pode ver nossos produtos aqui:\\n{link_catalogo}',
+    HUMAN_SUPPORT: 'Certo. Vou chamar um atendente para te ajudar. O atendimento automatico ficara pausado nesta conversa.',
+    UNKNOWN: 'Desculpe, nao entendi muito bem. Digite pedido, catalogo, horario, entrega, pagamento ou atendente.',
+  },
+  intentKeywords: {
+    MAKE_ORDER: ['quero pedir', 'fazer pedido', 'comprar'],
+    VIEW_CATALOG: ['catalogo', 'cardapio', 'produtos'],
+    HUMAN_SUPPORT: ['atendente', 'humano', 'cancelar', 'reembolso', 'pedido errado', 'nao chegou', 'atrasou'],
+  },
+  faq: [],
+  customIntents: [],
+  humanRules: {
+    keywords: ['cancelar', 'pedido errado', 'nao chegou', 'atrasou', 'quero reembolso', 'veio errado', 'falar com humano'],
+    pauseMode: 'today',
+  },
+}, null, 2)
+
 function WhatsappSetupPanel({ storeId }) {
   const [whatsappConfig, setWhatsappConfig] = useState(null)
   const defaultBotMenuUrl = storeId ? buildPublicAppUrl(`/loja/${encodeURIComponent(storeId)}`) : ''
@@ -7067,7 +7097,10 @@ function WhatsappSetupPanel({ storeId }) {
     botFallback: 'Posso te mandar o cardapio, consultar seu pedido ou chamar um atendente. Escreva cardapio, pedido ou atendente.',
     botMenuUrl: defaultBotMenuUrl,
     botHandoffKeywords: 'humano, atendente, ajuda, suporte',
+    botTrainingJson: DEFAULT_WHATSAPP_BOT_TRAINING,
   })
+  const [botTestText, setBotTestText] = useState('quero fazer um pedido')
+  const [botTestResult, setBotTestResult] = useState(null)
   const [whatsappStatus, setWhatsappStatus] = useState({ type: 'idle', message: '' })
   const [whatsappQr, setWhatsappQr] = useState('')
   const webhookUrl = storeId ? `${API_BASE_URL}/stores/${storeId}/whatsapp/webhook` : ''
@@ -7100,6 +7133,7 @@ function WhatsappSetupPanel({ storeId }) {
           botFallback: config.botFallback || current.botFallback,
           botMenuUrl: config.botMenuUrl || current.botMenuUrl || defaultBotMenuUrl,
           botHandoffKeywords: config.botHandoffKeywords || current.botHandoffKeywords,
+          botTrainingJson: config.botTrainingJson || current.botTrainingJson || DEFAULT_WHATSAPP_BOT_TRAINING,
           apiKey: '',
           personalAccessToken: '',
         }))
@@ -7160,6 +7194,18 @@ function WhatsappSetupPanel({ storeId }) {
     }
   }
 
+  async function runBotTest() {
+    if (!storeId || !botTestText.trim()) return
+    try {
+      await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
+      const result = await testWhatsappBot(storeId, botTestText.trim())
+      setBotTestResult(result)
+      setWhatsappStatus({ type: 'success', message: `Teste detectou ${result.intent} com ${result.confidence}% de confianca.` })
+    } catch (err) {
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao testar o robo.' })
+    }
+  }
+
   return (
     <div className="whatsapp-setup">
       {!storeId ? <div className="whatsapp-status whatsapp-status--warning">Abra uma loja conectada ao servidor antes de configurar o WhatsApp.</div> : null}
@@ -7187,6 +7233,23 @@ function WhatsappSetupPanel({ storeId }) {
         <input value={whatsappForm.botHandoffKeywords} onChange={(event) => setWhatsappForm({ ...whatsappForm, botHandoffKeywords: event.target.value })} placeholder="Palavras para chamar atendente" />
         <textarea value={whatsappForm.botWelcome} onChange={(event) => setWhatsappForm({ ...whatsappForm, botWelcome: event.target.value })} placeholder="Mensagem inicial do robo" />
         <textarea value={whatsappForm.botFallback} onChange={(event) => setWhatsappForm({ ...whatsappForm, botFallback: event.target.value })} placeholder="Resposta quando o robo nao entende" />
+        <textarea
+          className="whatsapp-bot-training-json"
+          value={whatsappForm.botTrainingJson}
+          onChange={(event) => setWhatsappForm({ ...whatsappForm, botTrainingJson: event.target.value })}
+          placeholder="JSON de treino: respostas, palavras-chave, FAQ, intencoes personalizadas e regras de humano"
+        />
+      </div>
+      <div className="whatsapp-bot-test">
+        <input value={botTestText} onChange={(event) => setBotTestText(event.target.value)} placeholder="Teste uma mensagem do cliente" />
+        <Button onClick={runBotTest}>Testar robo</Button>
+        {botTestResult ? (
+          <div className="whatsapp-bot-test__result">
+            <strong>{botTestResult.intent} - {botTestResult.confidence}%</strong>
+            <small>{botTestResult.humanEscalation ? 'Chama atendente e pausa o robo' : 'Resposta automatica'}</small>
+            <p>{botTestResult.response}</p>
+          </div>
+        ) : null}
       </div>
       {whatsappStatus.message ? <div className={`whatsapp-status whatsapp-status--${whatsappStatus.type}`}>{whatsappStatus.message}</div> : null}
       {whatsappQr ? (

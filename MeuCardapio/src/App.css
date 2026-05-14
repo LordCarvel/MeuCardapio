@@ -2086,6 +2086,48 @@
   resize: vertical;
 }
 
+.whatsapp-config .whatsapp-bot-training-json {
+  min-height: 260px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.whatsapp-bot-test {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 0 12px 10px;
+}
+
+.whatsapp-bot-test input {
+  min-height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid #dbe1d7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+}
+
+.whatsapp-bot-test__result {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #dbe1d7;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.whatsapp-bot-test__result small,
+.whatsapp-bot-test__result p {
+  margin: 0;
+  color: #52616b;
+  white-space: pre-wrap;
+}
+
 .whatsapp-saved-config {
   display: flex;
   flex-wrap: wrap;
