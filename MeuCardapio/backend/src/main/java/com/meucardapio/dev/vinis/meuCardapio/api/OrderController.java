@@ -88,6 +88,11 @@ public class OrderController {
         order.setStatus(request.status());
         CustomerOrder saved = orders.save(order);
         logService.record(storeId, "INFO", "orders", "Status do pedido atualizado para " + saved.getStatus());
+        try {
+            wasender.notifyOrderStatusChanged(saved);
+        } catch (Exception ex) {
+            logService.record(storeId, "WARN", "whatsapp", "Nao foi possivel notificar status no WhatsApp: " + ex.getMessage());
+        }
         return OrderResponse.from(saved);
     }
 

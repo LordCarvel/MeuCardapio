@@ -614,11 +614,26 @@ public class WasenderApiService {
 
     @Transactional
     public Optional<WhatsappMessage> notifyOrderCreated(CustomerOrder order) {
+        if (order == null) {
+            return Optional.empty();
+        }
+        return notifyOrderByWhatsapp(order, buildOrderCreatedMessage(order));
+    }
+
+    @Transactional
+    public Optional<WhatsappMessage> notifyOrderStatusChanged(CustomerOrder order) {
+        if (order == null) {
+            return Optional.empty();
+        }
+        return notifyOrderByWhatsapp(order, buildOrderStatusChangedMessage(order));
+    }
+
+    private Optional<WhatsappMessage> notifyOrderByWhatsapp(CustomerOrder order, String text) {
         if (order == null || !hasText(order.getCustomerPhone())) {
             return Optional.empty();
         }
         WhatsappIntegration integration = integrations.findById(order.getStore().getId()).orElse(null);
-        if (integration == null || !integration.isBotEnabled()) {
+        if (integration == null || !integration.isBotEnabled() || !hasText(text)) {
             return Optional.empty();
         }
         String apiKey = requireSessionApiKey(integration);
@@ -627,7 +642,10 @@ public class WasenderApiService {
         if (knownConversation.isEmpty() && !isPhoneRegisteredOnWhatsapp(apiKey, recipient)) {
             return Optional.empty();
         }
-        return Optional.of(sendOutboundMessage(order.getStore().getId(), recipient, buildOrderCreatedMessage(order), false, false, true));
+        WhatsappMessage sent = sendOutboundMessage(order.getStore().getId(), recipient, text, false, false, true);
+        applyConversationName(sent.getConversation(), order.getCustomerName(), true);
+        conversations.save(sent.getConversation());
+        return Optional.of(sent);
     }
 
     @Transactional
@@ -1033,24 +1051,42 @@ public class WasenderApiService {
 
     private BotDecision decideBotReply(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation, String inboundText) {
         String normalized = normalizeText(inboundText);
+        if (!hasText(normalized)) {
+            return new BotDecision("", false);
+        }
 
+        if (isMediaMessage(inboundText, normalized)) {
+            return new BotDecision(buildMediaReply(normalized), false);
+        }
         if (containsAny(normalized, handoffKeywords(integration))) {
-            return new BotDecision("Certo, vou chamar um atendente para continuar por aqui. O robo fica pausado nesta conversa hoje.", true);
+            return new BotDecision(buildHandoffMessage("Vou chamar um atendente para continuar por aqui."), true);
+        }
+        if (containsAny(normalized, "cancelar", "cancelamento", "alterar pedido", "mudar pedido", "trocar pedido", "pedido errado", "erro no pedido", "problema", "reclamar", "reclamacao", "nao chegou", "atrasou")) {
+            return new BotDecision(buildHandoffMessage("Para evitar erro no pedido, vou chamar um atendente."), true);
+        }
+        if (isGreeting(normalized)) {
+            return new BotDecision(buildWelcomeMessage(storeId, integration, conversation), false);
+        }
+        if (containsAny(normalized, "obrigado", "obrigada", "valeu", "agradecido", "agradecida")) {
+            return new BotDecision("Eu que agradeco. Se precisar, escreva cardapio, pedido ou atendente.", false);
         }
         if (containsAny(normalized, "cardapio", "menu", "link", "fazer pedido", "pedir", "comprar")) {
             return new BotDecision(buildMenuMessage(storeId, integration), false);
         }
-        if (containsAny(normalized, "acompanhar", "andamento", "status", "meu pedido", "pedido", "saiu", "entrega", "pronto")) {
-            return new BotDecision(buildLatestOrderMessage(storeId, conversation), false);
+        if (containsAny(normalized, "acompanhar", "andamento", "status", "meu pedido", "pedido", "saiu", "entrega", "pronto", "cozinha", "preparo", "demora", "tempo", "cade")) {
+            return new BotDecision(buildLatestOrderMessage(storeId, conversation, inboundText), false);
         }
-        if (containsAny(normalized, "pagamento", "pagar", "pix", "cartao", "cartao", "dinheiro", "troco")) {
-            return new BotDecision("Aceitamos cartao, dinheiro e combinacao pelo atendimento. Se for dinheiro, informe se precisa de troco no fechamento do pedido.", false);
+        if (containsAny(normalized, "pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha")) {
+            return new BotDecision("As formas de pagamento aparecem no fechamento do cardapio digital. Se escolher dinheiro, informe se precisa de troco. Para alguma combinacao diferente, escreva atendente.", false);
         }
         if (containsAny(normalized, "horario", "abre", "fecha", "funciona", "aberto")) {
             return new BotDecision(buildScheduleMessage(storeId), false);
         }
-        if (containsAny(normalized, "entrega", "delivery", "retirada", "balcao", "endereco")) {
-            return new BotDecision("Fazemos retirada no balcao e delivery nas areas atendidas. No cardapio digital voce informa o endereco e ve a taxa antes de finalizar.", false);
+        if (containsAny(normalized, "entrega", "delivery", "retirada", "balcao", "endereco", "taxa", "bairro", "localizacao")) {
+            return new BotDecision(buildDeliveryMessage(storeId), false);
+        }
+        if (containsAny(normalized, "promocao", "promocoes", "cupom", "desconto", "oferta")) {
+            return new BotDecision("As promocoes e cupons disponiveis ficam no cardapio digital. Posso te mandar o link agora:\n" + buildMenuMessage(storeId, integration), false);
         }
 
         String productReply = buildProductReply(storeId, normalized);
@@ -1058,7 +1094,56 @@ public class WasenderApiService {
             return new BotDecision(productReply, false);
         }
 
-        return new BotDecision(defaultText(integration.getBotFallback(), "Posso te mandar o cardapio, consultar seu pedido ou chamar um atendente. Escreva cardapio, pedido ou atendente."), false);
+        return new BotDecision(buildFallbackMessage(storeId, integration, conversation), false);
+    }
+
+    private boolean isMediaMessage(String inboundText, String normalized) {
+        String raw = Optional.ofNullable(inboundText).orElse("").trim();
+        return raw.startsWith("[") && raw.endsWith("]")
+                && containsAny(normalized, "audio", "imagem", "video", "documento", "figurinha", "localizacao", "contato");
+    }
+
+    private String buildMediaReply(String normalized) {
+        if (containsAny(normalized, "audio")) {
+            return "Recebi seu audio. Para agilizar e evitar erro no pedido, me envie por texto se voce quer cardapio, acompanhar pedido ou falar com atendente.";
+        }
+        if (containsAny(normalized, "localizacao")) {
+            return "Recebi a localizacao. Para calcular entrega corretamente, finalize pelo cardapio digital ou escreva atendente.";
+        }
+        return "Recebi seu arquivo. Por enquanto consigo responder melhor por texto. Escreva cardapio, pedido ou atendente.";
+    }
+
+    private String buildHandoffMessage(String lead) {
+        return lead + "\nO robo fica pausado nesta conversa hoje para a equipe assumir.";
+    }
+
+    private boolean isGreeting(String normalized) {
+        return normalized.equals("oi")
+                || normalized.equals("ola")
+                || normalized.equals("oie")
+                || normalized.equals("bom dia")
+                || normalized.equals("boa tarde")
+                || normalized.equals("boa noite")
+                || containsAny(normalized, "quero pedir", "fazer pedido", "iniciar atendimento", "inicio");
+    }
+
+    private String buildWelcomeMessage(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation) {
+        Store store = stores.findById(storeId).orElse(null);
+        String fallback = "{saudacao}! Sou o atendimento automatico" + (store != null && hasText(store.getTradeName()) ? " da " + store.getTradeName() : "") + ".";
+        String welcome = renderBotTemplate(defaultText(integration.getBotWelcome(), fallback), storeId, integration, conversation);
+        return welcome + "\n\n" +
+                buildMenuMessage(storeId, integration) + "\n\n" +
+                "Tambem posso consultar seu pedido. Para falar com a equipe, escreva atendente.";
+    }
+
+    private String buildFallbackMessage(UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation) {
+        String fallback = "Posso te ajudar com:\n" +
+                "1. Cardapio digital\n" +
+                "2. Acompanhar pedido\n" +
+                "3. Pagamento, entrega ou horario\n" +
+                "4. Chamar atendente\n\n" +
+                "Escreva cardapio, pedido ou atendente.";
+        return renderBotTemplate(defaultText(integration.getBotFallback(), fallback), storeId, integration, conversation);
     }
 
     private void sendMenuToConversation(UUID storeId, WhatsappConversation conversation) {
@@ -1066,42 +1151,99 @@ public class WasenderApiService {
         sendBotMessage(storeId, conversation.getRemoteJid(), buildMenuMessage(storeId, integration));
     }
 
-    private String buildMenuMessage(UUID storeId, WhatsappIntegration integration) {
-        String menuUrl = integration.getBotMenuUrl();
-        if (!hasText(menuUrl)) {
-            menuUrl = stores.findById(storeId)
-                    .map(store -> "/loja/" + store.getId())
-                    .orElse("");
+    private String renderBotTemplate(String text, UUID storeId, WhatsappIntegration integration, WhatsappConversation conversation) {
+        String menuUrl = resolveMenuUrl(storeId, integration);
+        String username = Optional.ofNullable(conversation)
+                .map(WhatsappConversation::getContactName)
+                .filter(name -> hasText(name) && !looksLikePhone(name))
+                .orElse("cliente");
+        return Optional.ofNullable(text).orElse("")
+                .replace("{username}", username)
+                .replace("{link}", menuUrl)
+                .replace("{divide}", "\n")
+                .replace("{saudacao}", greeting());
+    }
+
+    private String resolveMenuUrl(UUID storeId, WhatsappIntegration integration) {
+        if (integration != null && hasText(integration.getBotMenuUrl())) {
+            return integration.getBotMenuUrl().trim();
         }
+        return stores.findById(storeId)
+                .map(store -> "/loja/" + store.getId())
+                .orElse("");
+    }
+
+    private String buildMenuMessage(UUID storeId, WhatsappIntegration integration) {
+        String menuUrl = resolveMenuUrl(storeId, integration);
         return hasText(menuUrl)
-                ? "Segue o cardapio digital para fazer seu pedido: " + menuUrl
+                ? "Segue o cardapio digital para fazer seu pedido:\n" + menuUrl + "\n\nPor ele voce escolhe os itens, informa entrega ou retirada e confirma o pagamento."
                 : "O link do cardapio digital ainda nao esta configurado. Um atendente pode enviar para voce por aqui.";
     }
 
-    private String buildLatestOrderMessage(UUID storeId, WhatsappConversation conversation) {
-        String phone = cleanWhatsappPhone(hasText(conversation.getPhone()) ? conversation.getPhone() : conversation.getRemoteJid());
-        Optional<CustomerOrder> latestOrder = customerOrders.findByStoreIdOrderByCreatedAtDesc(storeId).stream()
-                .filter(order -> phoneMatches(phone, order.getCustomerPhone()))
-                .findFirst();
+    private String buildLatestOrderMessage(UUID storeId, WhatsappConversation conversation, String inboundText) {
+        Optional<CustomerOrder> latestOrder = findLatestOrderForConversation(storeId, conversation, inboundText);
         if (latestOrder.isEmpty()) {
             return "Nao encontrei um pedido recente vinculado a este WhatsApp. Se voce acabou de pedir pelo cardapio, me envie o numero do pedido ou chame um atendente.";
         }
         return buildOrderStatusMessage(latestOrder.get());
     }
 
+    private Optional<CustomerOrder> findLatestOrderForConversation(UUID storeId, WhatsappConversation conversation, String inboundText) {
+        if (conversation == null) {
+            return Optional.empty();
+        }
+        String phone = cleanWhatsappPhone(hasText(conversation.getPhone()) ? conversation.getPhone() : conversation.getRemoteJid());
+        List<CustomerOrder> phoneOrders = customerOrders.findByStoreIdOrderByCreatedAtDesc(storeId).stream()
+                .filter(order -> phoneMatches(phone, order.getCustomerPhone()))
+                .toList();
+        Optional<CustomerOrder> requestedOrder = phoneOrders.stream()
+                .filter(order -> referencesOrder(order, inboundText))
+                .findFirst();
+        return requestedOrder.or(() -> phoneOrders.stream().findFirst());
+    }
+
     private String buildOrderCreatedMessage(CustomerOrder order) {
-        return "Pedido recebido: " + orderReference(order) + "\n" +
+        return "Pedido recebido " + orderReference(order) + "\n" +
+                buildOrderSummary(order) + "\n\n" +
                 "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
-                "Total: " + formatMoney(order.getTotal()) + "\n" +
-                "Vamos avisar por aqui quando ele avancar.";
+                "Agora a loja vai conferir e enviar para preparo. Se precisar alterar algo, responda atendente.";
+    }
+
+    private String buildOrderSummary(CustomerOrder order) {
+        String items = order.getItems().stream()
+                .limit(4)
+                .map(item -> item.getQuantity() + "x " + item.getProductName())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("Itens registrados no pedido.");
+        long remaining = Math.max(0, order.getItems().size() - 4);
+        String suffix = remaining > 0 ? "\n+" + remaining + " item(ns)" : "";
+        return items + suffix + "\nTotal: " + formatMoney(order.getTotal());
+    }
+
+    private String buildOrderStatusChangedMessage(CustomerOrder order) {
+        return orderReference(order) + "\n" +
+                "Atualizacao: " + orderStatusLabel(order.getStatus()) + "\n" +
+                orderStatusDetail(order);
     }
 
     private String buildOrderStatusMessage(CustomerOrder order) {
         return orderReference(order) + "\n" +
                 "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
+                orderStatusDetail(order) + "\n" +
                 "Entrega: " + fulfillmentLabel(order.getFulfillment()) + "\n" +
                 "Total: " + formatMoney(order.getTotal()) + "\n" +
                 "Se precisar alterar algo, escreva atendente.";
+    }
+
+    private String orderStatusDetail(CustomerOrder order) {
+        return switch (Optional.ofNullable(order.getStatus()).orElse("")) {
+            case "analysis" -> "Recebemos seu pedido e a loja esta conferindo os itens.";
+            case "production" -> "Seu pedido esta em preparo na cozinha.";
+            case "ready" -> "Seu pedido esta pronto" + ("delivery".equals(order.getFulfillment()) ? " para sair para entrega." : " para retirada.");
+            case "completed" -> "Pedido finalizado. Obrigado pela preferencia.";
+            case "cancelled" -> "Pedido cancelado. Se precisar de ajuda, escreva atendente.";
+            default -> "A loja atualizou o andamento do seu pedido.";
+        };
     }
 
     private String buildScheduleMessage(UUID storeId) {
@@ -1110,6 +1252,20 @@ public class WasenderApiService {
                         ? "Nosso horario de atendimento: " + store.getSchedule()
                         : "O horario da loja ainda nao esta configurado no sistema. Posso chamar um atendente se voce precisar confirmar.")
                 .orElse("Nao consegui consultar o horario da loja agora.");
+    }
+
+    private String buildDeliveryMessage(UUID storeId) {
+        return stores.findById(storeId)
+                .map(store -> {
+                    String minimum = store.getMinimumOrder() != null && store.getMinimumOrder().compareTo(BigDecimal.ZERO) > 0
+                            ? "\nPedido minimo: " + formatMoney(store.getMinimumOrder()) + "."
+                            : "";
+                    String radius = store.getDeliveryRadiusKm() != null && store.getDeliveryRadiusKm().compareTo(BigDecimal.ZERO) > 0
+                            ? "\nRaio de entrega: ate " + store.getDeliveryRadiusKm().setScale(1, RoundingMode.HALF_UP).toPlainString().replace(".", ",") + " km."
+                            : "";
+                    return "Fazemos retirada e delivery nas areas atendidas. No cardapio digital voce informa o endereco e confere a taxa antes de finalizar." + minimum + radius;
+                })
+                .orElse("No cardapio digital voce informa o endereco e confere a taxa de entrega antes de finalizar.");
     }
 
     private String buildProductReply(UUID storeId, String normalizedText) {
@@ -1137,7 +1293,12 @@ public class WasenderApiService {
                 .map(product -> product.getName() + " - " + formatMoney(product.getPrice()))
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
-        return "Encontrei no cardapio:\n" + items + "\n\nPara finalizar, peca pelo cardapio digital ou escreva atendente.";
+        WhatsappIntegration integration = getOrCreate(storeId);
+        String menuUrl = resolveMenuUrl(storeId, integration);
+        String finish = hasText(menuUrl)
+                ? "Para finalizar sem erro, use o cardapio digital:\n" + menuUrl
+                : "Para finalizar sem erro, peca pelo cardapio digital ou escreva atendente.";
+        return "Encontrei no cardapio:\n" + items + "\n\n" + finish + "\n\nSe quiser ajuda humana, escreva atendente.";
     }
 
     private boolean isBotPaused(WhatsappConversation conversation) {
@@ -1201,6 +1362,17 @@ public class WasenderApiService {
         return text.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ").trim();
     }
 
+    private static String greeting() {
+        int hour = LocalDateTime.now().getHour();
+        if (hour < 12) {
+            return "Bom dia";
+        }
+        if (hour < 18) {
+            return "Boa tarde";
+        }
+        return "Boa noite";
+    }
+
     private static String defaultText(String value, String fallback) {
         return hasText(value) ? value.trim() : fallback;
     }
@@ -1215,6 +1387,16 @@ public class WasenderApiService {
 
     private static String orderReference(CustomerOrder order) {
         return "Pedido #" + order.getId().toString().substring(0, 8);
+    }
+
+    private static boolean referencesOrder(CustomerOrder order, String text) {
+        if (order == null || !hasText(text)) {
+            return false;
+        }
+        String compactOrderId = order.getId().toString().replace("-", "").toLowerCase();
+        String compactText = normalizeText(text).replaceAll("\\s+", "");
+        return hasText(compactText)
+                && (compactText.contains(compactOrderId) || compactText.contains(compactOrderId.substring(0, 8)));
     }
 
     private static String orderStatusLabel(String status) {

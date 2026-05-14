@@ -47,8 +47,13 @@ Quando a sessao for criada, a API key da sessao fica salva no backend. Campos se
 ## 4. Robo de atendimento
 
 - O robo responde mensagens recebidas pelo webhook quando a integracao esta com `Robo ativo`.
-- Ele reconhece intencoes comuns: pedir cardapio, consultar pedido, horario, pagamento, entrega, produtos do cardapio e chamar atendente.
-- Quando um pedido e criado com WhatsApp valido, o backend envia a confirmacao do pedido pelo robo.
+- Ele reconhece intencoes comuns: saudacao, pedir cardapio, consultar pedido, horario, pagamento, entrega, produtos do cardapio, promocao, audio/midia e chamar atendente.
+- Saudacoes como `oi`, `ola`, `bom dia`, `boa tarde` e `boa noite` recebem uma mensagem de boas-vindas com link do cardapio e instrucoes para pedido/atendente.
+- Mensagens de audio, imagem, video, documento, localizacao e contato sao registradas; o robo pede resposta em texto ou encaminha o cliente para o cardapio/atendente quando necessario.
+- Quando um pedido e criado com WhatsApp valido, o backend valida o numero na WaSenderAPI e envia a confirmacao do pedido pelo robo.
+- Quando o status do pedido muda, o backend tambem envia uma atualizacao para o mesmo WhatsApp, se o robo estiver ativo.
+- Ao consultar `pedido`, `status`, `andamento`, `cade` ou termos parecidos, o robo busca o pedido mais recente vinculado ao telefone do cliente e retorna status, total e entrega/retirada.
+- As mensagens configuraveis de boas-vindas e fallback aceitam placeholders: `{username}`, `{link}`, `{saudacao}` e `{divide}`.
 - Ao enviar mensagem manual pela inbox, o robo pausa automaticamente naquela conversa ate o fim do dia.
 - Na conversa selecionada, use:
   - `Pausar hoje` para silenciar o robo ate 23:59.
