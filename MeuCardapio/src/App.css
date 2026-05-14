@@ -4244,6 +4244,65 @@
   display: none;
 }
 
+.wa-desk {
+  height: min(820px, calc(100vh - 150px));
+  min-height: 0;
+}
+
+.wa-desk--standalone {
+  height: 100%;
+  min-height: 0;
+}
+
+.wa-desk__body,
+.wa-desk--standalone .wa-desk__body {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wa-list,
+.wa-chat {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wa-chat {
+  grid-template-areas:
+    "header"
+    "botbar"
+    "note"
+    "feed"
+    "composer";
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+.wa-chat__header {
+  grid-area: header;
+}
+
+.wa-botbar {
+  grid-area: botbar;
+}
+
+.wa-note {
+  grid-area: note;
+}
+
+.wa-feed {
+  grid-area: feed;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wa-composer {
+  grid-area: composer;
+  align-self: end;
+  width: 100%;
+  min-width: 0;
+}
+
 @media (max-width: 1180px) {
   .wa-chat__header {
     grid-template-columns: minmax(0, 1fr);

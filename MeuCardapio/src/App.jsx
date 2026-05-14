@@ -3138,10 +3138,25 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
   const normalizedConfig = normalizePrinterConfig(config)
   const normalizedOrder = normalizeOrderRecord(order)
   const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
-  const showFinancials = normalizedConfig.showFinancials && variant !== 'kitchen'
+  const showFinancials = variant !== 'kitchen' && (
+    normalizedConfig.showFinancials
+    || variant === 'order'
+    || variant === 'dispatch'
+    || variant === 'fiscal'
+  )
   const storeName = storeProfile.name || storeProfile.tradeName || 'MeuCardapio'
   const customerAddress = getReceiptCustomerAddress(normalizedOrder)
   const printableNote = getPrintableOrderNote(normalizedOrder)
+  const fulfillment = inferOrderFulfillment(normalizedOrder)
+  const receiptPayment = getBackendNoteValue(normalizedOrder.note, 'Forma de Pagamento')
+    || getBackendNoteValue(normalizedOrder.note, 'Pagamento')
+    || normalizedOrder.payment
+    || 'Nao informado'
+  const deliveryFeeLabel = fulfillment === 'delivery'
+    ? formatReceiptCurrency(financialBreakdown.deliveryFee)
+    : fulfillment === 'dinein'
+      ? 'Consumo no local'
+      : 'Retirada no balcao'
   const note = printableNote && normalizedConfig.showNotes
     ? `
       ${buildReceiptDivider()}
@@ -3183,13 +3198,13 @@ function buildOrderPrintBody(order, storeProfile, config = {}, variant = 'order'
       ${showFinancials ? `
         <section class="receipt-section">
           <h3>Pagamento</h3>
-          <p><span>Forma de Pagamento:</span> ${escapeHtml(normalizedOrder.payment)}</p>
+          <p><span>Forma de Pagamento:</span> ${escapeHtml(receiptPayment)}</p>
           ${normalizedOrder.document ? `<p><span>CPF/CNPJ:</span> ${escapeHtml(normalizedOrder.document)}</p>` : ''}
         </section>
         ${buildReceiptDivider()}
         <section class="receipt-section receipt-totals">
           ${buildReceiptRow('Subtotal:', formatReceiptCurrency(financialBreakdown.subtotal))}
-          ${financialBreakdown.deliveryFee > 0 ? buildReceiptRow('Taxa de entrega:', formatReceiptCurrency(financialBreakdown.deliveryFee)) : ''}
+          ${buildReceiptRow('Taxa de entrega:', deliveryFeeLabel)}
           ${financialBreakdown.discountAmount > 0 ? buildReceiptRow('Desconto:', formatReceiptCurrency(financialBreakdown.discountAmount)) : ''}
           ${financialBreakdown.surchargeAmount > 0 ? buildReceiptRow('Acrescimo:', formatReceiptCurrency(financialBreakdown.surchargeAmount)) : ''}
           ${buildReceiptRow('Total:', formatReceiptCurrency(financialBreakdown.total), 'receipt-row--total')}
