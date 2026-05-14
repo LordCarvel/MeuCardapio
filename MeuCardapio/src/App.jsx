@@ -299,6 +299,11 @@ const shortcutItems = [
   { id: 'help', icon: 'bell', label: 'Central' },
 ]
 
+const appModeItems = [
+  { id: 'pdv', icon: 'cash', label: 'PDV' },
+  { id: 'whatsapp', icon: 'message', label: 'WhatsApp' },
+]
+
 const blankOrder = {
   customer: '',
   phone: '',
@@ -4637,6 +4642,37 @@ function StoreBadge({ label = 'MC' }) {
   )
 }
 
+function AppModeRail({ activeMode, storeProfile, onOpenModal, onSetMode }) {
+  return (
+    <aside className="app-mode-rail" aria-label="Modulos principais">
+      <button className="app-mode-rail__brand" type="button" title="Loja" onClick={() => onOpenModal('store')}>
+        <span>{getStoreInitials(storeProfile)}</span>
+      </button>
+
+      <nav>
+        {appModeItems.map((item) => (
+          <button
+            aria-pressed={activeMode === item.id}
+            className={activeMode === item.id ? 'is-active' : ''}
+            key={item.id}
+            type="button"
+            title={item.label}
+            onClick={() => onSetMode(item.id)}
+          >
+            <Icon name={item.icon} size={21} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <button type="button" title="Configurar WhatsApp" onClick={() => onOpenModal('whatsappSetup')}>
+        <Icon name="settings" size={20} />
+        <span>Config</span>
+      </button>
+    </aside>
+  )
+}
+
 function Sidebar({
   activeNav,
   storeOpen,
@@ -4677,7 +4713,7 @@ function Sidebar({
       </button>
 
       <nav className="sidebar-nav">
-        {navItems.map((item) => (
+        {navItems.filter((item) => item.id !== 'service').map((item) => (
           <button
             className={`sidebar-nav__item ${activeNav === item.id ? 'sidebar-nav__item--active' : ''}`.trim()}
             data-testid={`nav-${item.id}`}
@@ -7562,6 +7598,7 @@ function App() {
   const [orderSequence, setOrderSequence] = useState(initialData.orderSequence)
   const orderSequenceRef = useRef(initialData.orderSequence)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
+  const [appMode, setAppMode] = useState(initialData.activeNav === 'service' ? 'whatsapp' : 'pdv')
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [storeOpen, setStoreOpen] = useState(initialData.storeOpen)
@@ -7724,6 +7761,7 @@ function App() {
 
   useEffect(() => {
     if (currentTutorialStep?.nav && currentTutorialStep.nav !== activeNav) {
+      setAppMode(currentTutorialStep.nav === 'service' ? 'whatsapp' : 'pdv')
       setActiveNav(currentTutorialStep.nav)
     }
   }, [activeNav, currentTutorialStep])
@@ -8037,24 +8075,42 @@ function App() {
 
   function handleShortcut(shortcut) {
     if (shortcut.id === 'home') {
+      setAppMode('pdv')
       setActiveNav('orders')
       notify('Atalho abriu a fila de pedidos.')
       return
     }
 
     if (shortcut.id === 'whatsapp') {
+      setAppMode('whatsapp')
       setActiveNav('service')
-      setModal({ type: 'whatsappSetup', payload: null })
       return
     }
 
     if (shortcut.id === 'boost') {
+      setAppMode('pdv')
       setActiveNav('marketing')
       openModal('newCoupon')
       return
     }
 
     setModal({ type: 'helpCenter', payload: shortcut })
+  }
+
+  function switchAppMode(mode) {
+    setAppMode(mode)
+    if (mode === 'whatsapp') {
+      setActiveNav('service')
+      return
+    }
+    if (activeNav === 'service') {
+      setActiveNav('orders')
+    }
+  }
+
+  function setPdvNav(nav) {
+    setAppMode('pdv')
+    setActiveNav(nav)
   }
 
   function openModal(type, payload = null) {
@@ -15538,57 +15594,74 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     )
   }
 
+  const whatsappStoreId = pilotSync.storeId || (/^[0-9a-f-]{36}$/i.test(String(activeStoreId || '')) ? activeStoreId : '')
+
   return (
-    <main className="app-frame">
-      <TopBar
-        currentStoreUser={currentStoreUser}
-        notificationCount={notificationCount}
-        onLogout={logoutStoreUser}
+    <main className={`app-frame app-frame--${appMode}`.trim()}>
+      <AppModeRail
+        activeMode={appMode}
+        storeProfile={storeProfile}
         onOpenModal={openModal}
-        pilotSync={pilotSync}
+        onSetMode={switchAppMode}
       />
 
-      <div className="workspace">
-        <Sidebar
-          activeNav={activeNav}
-          storeOpen={storeOpen}
-          cashOpen={cashOpen}
-          storeProfile={storeProfile}
-          onOpenModal={openModal}
-          onSetActiveNav={setActiveNav}
-        />
-
-        <section className="content">
-          <div className="content__top">
-            <div>
-              <h1>{activeTitle}</h1>
-              <p>{toast}</p>
-            </div>
-            <div className="content__top-actions">
-              <Button onClick={() => openModal('publicProfile')}>
-                <Icon name="store" size={18} />
-                Perfil publico
-              </Button>
-              <Button variant="primary" onClick={() => openModal('newOrder')}>
-                <Icon name="plus" size={18} />
-                Novo pedido
-              </Button>
-            </div>
-          </div>
-
-          <Notice
-            visible={noticeVisible}
-            onClose={() => setNoticeVisible(false)}
-            onOpenPassword={() => openModal('password')}
+      {appMode === 'whatsapp' ? (
+        <section className="whatsapp-workspace">
+          <WhatsappDesk storeId={whatsappStoreId} onOpenModal={openModal} standalone />
+        </section>
+      ) : (
+        <div className="app-main">
+          <TopBar
+            currentStoreUser={currentStoreUser}
+            notificationCount={notificationCount}
+            onLogout={logoutStoreUser}
+            onOpenModal={openModal}
+            pilotSync={pilotSync}
           />
 
-          {activeNav === 'reports' ? <BackendDiagnostics /> : null}
+          <div className="workspace">
+            <Sidebar
+              activeNav={activeNav}
+              storeOpen={storeOpen}
+              cashOpen={cashOpen}
+              storeProfile={storeProfile}
+              onOpenModal={openModal}
+              onSetActiveNav={setPdvNav}
+            />
 
-          {activeNav === 'menu' ? null : <Metrics orders={orders} storeOpen={storeOpen} />}
+            <section className="content">
+              <div className="content__top">
+                <div>
+                  <h1>{activeTitle}</h1>
+                  <p>{toast}</p>
+                </div>
+                <div className="content__top-actions">
+                  <Button onClick={() => openModal('publicProfile')}>
+                    <Icon name="store" size={18} />
+                    Perfil publico
+                  </Button>
+                  <Button variant="primary" onClick={() => openModal('newOrder')}>
+                    <Icon name="plus" size={18} />
+                    Novo pedido
+                  </Button>
+                </div>
+              </div>
 
-          {renderWorkArea()}
-        </section>
-      </div>
+              <Notice
+                visible={noticeVisible}
+                onClose={() => setNoticeVisible(false)}
+                onOpenPassword={() => openModal('password')}
+              />
+
+              {activeNav === 'reports' ? <BackendDiagnostics /> : null}
+
+              {activeNav === 'menu' ? null : <Metrics orders={orders} storeOpen={storeOpen} />}
+
+              {renderWorkArea()}
+            </section>
+          </div>
+        </div>
+      )}
 
       <input ref={importInputRef} type="file" accept="application/json" className="sr-only-input" onChange={handleImportData} />
       <input ref={menuImportInputRef} type="file" accept="application/json,.json,.har" className="sr-only-input" onChange={handleMenuImportData} />

@@ -189,7 +189,7 @@ function setStoredAgentName(value) {
   }
 }
 
-export function WhatsappDesk({ storeId, onOpenModal }) {
+export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   const [config, setConfig] = useState(null)
   const [conversations, setConversations] = useState([])
   const [selectedJid, setSelectedJid] = useState('')
@@ -490,17 +490,19 @@ export function WhatsappDesk({ storeId, onOpenModal }) {
   const emptyMessages = renderedMessages.length === 0
 
   return (
-    <article className="module-card module-card--full wa-desk">
+    <article className={`module-card module-card--full wa-desk ${standalone ? 'wa-desk--standalone' : ''}`.trim()}>
       <div className="wa-desk__body">
-        <aside className="wa-rail" aria-label="Atalhos do WhatsApp">
-          <button className="is-active" type="button" title="WhatsApp">
-            <WaIcon name="whatsapp" size={21} />
-            {unreadTotal > 0 ? <span>{unreadTotal}</span> : null}
-          </button>
-          <button type="button" title="Configurar WhatsApp" onClick={() => onOpenModal('whatsappSetup')}>
-            <WaIcon name="settings" size={20} />
-          </button>
-        </aside>
+        {standalone ? null : (
+          <aside className="wa-rail" aria-label="Atalhos do WhatsApp">
+            <button className="is-active" type="button" title="WhatsApp">
+              <WaIcon name="whatsapp" size={21} />
+              {unreadTotal > 0 ? <span>{unreadTotal}</span> : null}
+            </button>
+            <button type="button" title="Configurar WhatsApp" onClick={() => onOpenModal('whatsappSetup')}>
+              <WaIcon name="settings" size={20} />
+            </button>
+          </aside>
+        )}
 
         <section className="wa-list" aria-label="Conversas do WhatsApp">
           <header className="wa-list__header">
