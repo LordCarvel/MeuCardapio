@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   API_BASE_URL,
   controlWhatsappBot,
@@ -13,8 +13,11 @@ import {
   syncWhatsappConversations,
 } from '../backend/backendApi'
 
-const CONVERSATION_REFRESH_MS = 60 * 1000
-const MESSAGE_REFRESH_MS = 20 * 1000
+const CONVERSATION_REFRESH_MS = 30 * 1000
+const MESSAGE_REFRESH_MS = 6 * 1000
+const HIDDEN_CONVERSATION_REFRESH_MS = 2 * 60 * 1000
+const HIDDEN_MESSAGE_REFRESH_MS = 45 * 1000
+const SEND_CONFIRM_REFRESH_MS = 1500
 const AGENT_STORAGE_KEY = 'meucardapio:whatsapp-agent'
 
 function WaIcon({ name, size = 20 }) {
@@ -220,8 +223,13 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   const [filter, setFilter] = useState('all')
   const [status, setStatus] = useState({ type: 'idle', message: '' })
   const feedRef = useRef(null)
+  const conversationsRef = useRef([])
+  const selectedConversationRef = useRef(null)
   const manualConversationRef = useRef(null)
   const avatarRequestsRef = useRef(new Set())
+  const conversationLoadingRef = useRef(false)
+  const messageLoadingRef = useRef(false)
+  const sendConfirmRefreshRef = useRef(null)
 
   const selectedConversation = useMemo(() => {
     const saved = conversations.find((conversation) => conversation.remoteJid === selectedJid)
@@ -265,11 +273,36 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   const lastMessageId = renderedMessages[renderedMessages.length - 1]?.message?.id || ''
 
   useEffect(() => {
+    conversationsRef.current = conversations
+    selectedConversationRef.current = selectedConversation
+  }, [conversations, selectedConversation])
+
+  useEffect(() => {
     manualConversationRef.current = manualConversation
   }, [manualConversation])
 
-  async function loadConversations(silent = true) {
+  const refreshMissingAvatars = useCallback((loadedConversations = []) => {
     if (!storeId) return
+    loadedConversations
+      .filter((conversation) => conversation?.remoteJid && !conversation.avatarUrl && !avatarRequestsRef.current.has(conversation.remoteJid))
+      .slice(0, 12)
+      .forEach((conversation) => {
+        avatarRequestsRef.current.add(conversation.remoteJid)
+        refreshWhatsappConversationAvatar(storeId, conversation.remoteJid)
+          .then((updated) => {
+            if (!updated?.remoteJid) return
+            setConversations((current) => current.map((item) => (
+              item.remoteJid === updated.remoteJid ? updated : item
+            )))
+          })
+          .catch(() => {})
+      })
+  }, [storeId])
+
+  const loadConversations = useCallback(async (silent = true) => {
+    if (!storeId) return
+    if (conversationLoadingRef.current) return
+    conversationLoadingRef.current = true
     try {
       const [loadedConfig, loadedConversations] = await Promise.all([
         getWhatsappConfig(storeId),
@@ -288,51 +321,39 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
       }
     } catch (err) {
       setStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar WhatsApp.' })
+    } finally {
+      conversationLoadingRef.current = false
     }
-  }
-
-  function refreshMissingAvatars(loadedConversations = conversations) {
-    if (!storeId) return
-    loadedConversations
-      .filter((conversation) => conversation?.remoteJid && !conversation.avatarUrl && !avatarRequestsRef.current.has(conversation.remoteJid))
-      .slice(0, 12)
-      .forEach((conversation) => {
-        avatarRequestsRef.current.add(conversation.remoteJid)
-        refreshWhatsappConversationAvatar(storeId, conversation.remoteJid)
-          .then((updated) => {
-            if (!updated?.remoteJid) return
-            setConversations((current) => current.map((item) => (
-              item.remoteJid === updated.remoteJid ? updated : item
-            )))
-          })
-          .catch(() => {})
-      })
-  }
+  }, [refreshMissingAvatars, storeId])
 
   useEffect(() => {
     if (selectedConversation?.remoteJid && !selectedConversation.avatarUrl) {
       refreshMissingAvatars([selectedConversation])
     }
-  }, [selectedConversation?.remoteJid, selectedConversation?.avatarUrl, storeId])
+  }, [refreshMissingAvatars, selectedConversation, selectedConversation?.remoteJid, selectedConversation?.avatarUrl, storeId])
 
-  async function loadMessages(silent = true) {
-    if (!storeId || !effectiveSelectedJid) {
+  const loadMessages = useCallback(async (silent = true, targetJid = effectiveSelectedJid) => {
+    if (!storeId || !targetJid) {
       setMessages([])
       return
     }
-    const isUnsavedManualConversation = manualConversationRef.current?.remoteJid === effectiveSelectedJid
-      && !conversations.some((conversation) => conversation.remoteJid === effectiveSelectedJid)
+    if (messageLoadingRef.current) return
+    const currentConversations = conversationsRef.current
+    const selected = currentConversations.find((conversation) => conversation.remoteJid === targetJid) || selectedConversationRef.current
+    const isUnsavedManualConversation = manualConversationRef.current?.remoteJid === targetJid
+      && !currentConversations.some((conversation) => conversation.remoteJid === targetJid)
     if (isUnsavedManualConversation) {
       setMessages([])
       return
     }
+    messageLoadingRef.current = true
     try {
-      const loaded = await getWhatsappMessages(storeId, effectiveSelectedJid)
+      const loaded = await getWhatsappMessages(storeId, targetJid)
       setMessages((current) => (samePayload(current, loaded) ? current : loaded))
-      if (selectedConversation?.unreadCount) {
-        await markWhatsappConversationRead(storeId, effectiveSelectedJid)
+      if (selected?.unreadCount) {
+        await markWhatsappConversationRead(storeId, targetJid)
         setConversations((current) => current.map((conversation) => (
-          conversation.remoteJid === effectiveSelectedJid ? { ...conversation, unreadCount: 0 } : conversation
+          conversation.remoteJid === targetJid ? { ...conversation, unreadCount: 0 } : conversation
         )))
       }
       if (!silent) {
@@ -341,38 +362,52 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
     } catch (err) {
       setMessages([])
       setStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Nao foi possivel carregar mensagens.' })
+    } finally {
+      messageLoadingRef.current = false
     }
-  }
+  }, [effectiveSelectedJid, storeId])
 
   useEffect(() => {
     if (!storeId) return undefined
     let cancelled = false
+    let timeoutId = 0
     async function run() {
       if (!cancelled) await loadConversations(true)
+      if (!cancelled) {
+        timeoutId = window.setTimeout(run, document.hidden ? HIDDEN_CONVERSATION_REFRESH_MS : CONVERSATION_REFRESH_MS)
+      }
     }
     void run()
-    const interval = window.setInterval(run, CONVERSATION_REFRESH_MS)
     return () => {
       cancelled = true
-      window.clearInterval(interval)
+      window.clearTimeout(timeoutId)
     }
-  }, [storeId])
+  }, [loadConversations, storeId])
 
   useEffect(() => {
     if (!storeId || !effectiveSelectedJid) {
       return undefined
     }
     let cancelled = false
+    let timeoutId = 0
     async function run() {
       if (!cancelled) await loadMessages(true)
+      if (!cancelled) {
+        timeoutId = window.setTimeout(run, document.hidden ? HIDDEN_MESSAGE_REFRESH_MS : MESSAGE_REFRESH_MS)
+      }
     }
     void run()
-    const interval = window.setInterval(run, MESSAGE_REFRESH_MS)
     return () => {
       cancelled = true
-      window.clearInterval(interval)
+      window.clearTimeout(timeoutId)
     }
-  }, [effectiveSelectedJid, storeId])
+  }, [effectiveSelectedJid, loadMessages, storeId])
+
+  useEffect(() => () => {
+    if (sendConfirmRefreshRef.current) {
+      window.clearTimeout(sendConfirmRefreshRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const feed = feedRef.current
@@ -433,15 +468,47 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
   async function sendText(event) {
     event.preventDefault()
     const text = draft.trim()
-    if (!storeId || !effectiveSelectedJid || !text) return
+    const targetJid = effectiveSelectedJid
+    if (!storeId || !targetJid || !text) return
+    const now = new Date().toISOString()
+    const optimisticMessage = {
+      id: `local-${targetJid}-${Date.now()}`,
+      remoteJid: targetJid,
+      body: text,
+      text,
+      fromMe: true,
+      createdAt: now,
+    }
+    setDraft('')
+    setMessages((current) => [...current, optimisticMessage])
+    setConversations((current) => current.map((conversation) => (
+      conversation.remoteJid === targetJid
+        ? { ...conversation, lastMessage: text, lastMessageAt: now, unreadCount: 0 }
+        : conversation
+    )))
     try {
-      await sendWhatsappMessage(storeId, effectiveSelectedJid, text)
-      setDraft('')
-      await loadMessages(true)
-      await loadConversations(true)
+      await sendWhatsappMessage(storeId, targetJid, text)
+    } catch (err) {
+      setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id))
+      setDraft(text)
+      setStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
+      return
+    }
+
+    try {
+      await Promise.all([
+        loadMessages(true, targetJid),
+        loadConversations(true),
+      ])
+      if (sendConfirmRefreshRef.current) {
+        window.clearTimeout(sendConfirmRefreshRef.current)
+      }
+      sendConfirmRefreshRef.current = window.setTimeout(() => {
+        void loadMessages(true, targetJid)
+      }, SEND_CONFIRM_REFRESH_MS)
       setManualConversation(null)
     } catch (err) {
-      setStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Nao foi possivel enviar.' })
+      setStatus({ type: 'warning', message: err instanceof Error ? err.message : 'Mensagem enviada, mas a atualizacao da tela falhou.' })
     }
   }
 
@@ -457,7 +524,7 @@ export function WhatsappDesk({ storeId, onOpenModal, standalone = false }) {
         conversation.remoteJid === updated.remoteJid ? updated : conversation
       )))
       if (action === 'send_menu') {
-        await loadMessages(true)
+        await loadMessages(true, effectiveSelectedJid)
       }
       const labels = {
         pause_today: 'Robo pausado nesta conversa hoje.',
