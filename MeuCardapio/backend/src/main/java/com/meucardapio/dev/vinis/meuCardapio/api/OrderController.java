@@ -56,7 +56,7 @@ public class OrderController {
         Store store = stores.findById(storeId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Loja nao encontrada"));
         CustomerOrder order = new CustomerOrder(UUID.randomUUID(), store, request.customerName(), request.customerPhone(), request.fulfillment(), request.payment(), request.note());
         List<OrderItem> items = request.items().stream()
-                .map(item -> new OrderItem(UUID.randomUUID(), item.productName(), item.quantity(), item.unitPrice()))
+                .map(item -> new OrderItem(UUID.randomUUID(), truncate(item.productName(), 120), item.quantity(), item.unitPrice()))
                 .toList();
         order.replaceItems(items, request.deliveryFee() == null ? BigDecimal.ZERO : request.deliveryFee());
         CustomerOrder saved = orders.save(order);
@@ -74,7 +74,7 @@ public class OrderController {
         CustomerOrder order = findOrderForStore(storeId, orderId);
         order.updateDetails(request.customerName(), request.customerPhone(), request.fulfillment(), request.payment(), request.note());
         List<OrderItem> items = request.items().stream()
-                .map(item -> new OrderItem(UUID.randomUUID(), item.productName(), item.quantity(), item.unitPrice()))
+                .map(item -> new OrderItem(UUID.randomUUID(), truncate(item.productName(), 120), item.quantity(), item.unitPrice()))
                 .toList();
         order.replaceItems(items, request.deliveryFee() == null ? BigDecimal.ZERO : request.deliveryFee());
         CustomerOrder saved = orders.save(order);
@@ -110,5 +110,13 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pedido nao pertence a loja");
         }
         return order;
+    }
+
+    private String truncate(String value, int maxLength) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, Math.max(0, maxLength - 3)) + "...";
     }
 }

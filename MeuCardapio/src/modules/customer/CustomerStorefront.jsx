@@ -494,9 +494,15 @@ function getCartLineDetails(item) {
   ].filter(Boolean)
 }
 
+function truncateText(value, maxLength = 120) {
+  const text = String(value ?? '').trim()
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text
+}
+
 function cartToOrderItems(cart) {
   return cart.map((item) => ({
-    productName: [item.name, ...getCartLineDetails(item)].join(' - '),
+    productName: truncateText([item.name, ...getCartLineDetails(item)].join(' - '), 120),
     quantity: item.quantity,
     unitPrice: item.unitPrice,
     note: item.note?.trim() || '',

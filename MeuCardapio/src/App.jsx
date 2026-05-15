@@ -3815,7 +3815,7 @@ function frontOrderToBackendRequest(order = {}) {
         const details = Array.isArray(item.details) && item.details.length > 0 ? ` - ${item.details.join(', ')}` : ''
 
         return {
-          productName: truncateText(`${item.name || 'Item do pedido'}${details}`, 220),
+          productName: truncateText(`${item.name || 'Item do pedido'}${details}`, 120),
           quantity,
           unitPrice: toBackendMoney(totalPrice / quantity),
         }
@@ -7702,6 +7702,7 @@ function App() {
   const nominatimLastRequestRef = useRef(0)
   const refreshPilotFromBackendRef = useRef(null)
   const refreshPilotOrdersFromBackendRef = useRef(null)
+  const deletedBackendOrderIdsRef = useRef(new Set())
   const [stores, setStores] = useState(initialWorkspace.stores)
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
 
@@ -8133,7 +8134,10 @@ function App() {
 
     try {
       const backendOrders = await getBackendOrders(pilotSync.storeId)
-      const nextOrders = Array.isArray(backendOrders) ? backendOrders.map(backendOrderToFrontOrder) : []
+      const visibleBackendOrders = Array.isArray(backendOrders)
+        ? backendOrders.filter((order) => !deletedBackendOrderIdsRef.current.has(order.id))
+        : []
+      const nextOrders = visibleBackendOrders.map(backendOrderToFrontOrder)
 
       setOrders((current) => mergeBackendOrders(current, nextOrders))
       updatePilotSync({
@@ -8582,7 +8586,9 @@ function App() {
         throw new Error('Backend respondeu, mas nao encontrou loja cadastrada.')
       }
 
-      setOrders((current) => mergeBackendOrders(current, workspace.orders))
+      const visibleBackendOrders = workspace.orders.filter((order) => !deletedBackendOrderIdsRef.current.has(order.id))
+
+      setOrders((current) => mergeBackendOrders(current, visibleBackendOrders))
       const snapshot = getWorkspaceMenuSnapshot(workspace)
       const remoteMenuSerialized = serializeMenuSnapshot({
         categories: snapshot.categories || categories,
@@ -8614,7 +8620,7 @@ function App() {
         storeName: workspace.store.tradeName,
         lastCheckedAt: nowDateTime(),
         lastSyncedAt: nowDateTime(),
-        message: `${workspace.orders.length} pedido(s) lido(s) da API.`,
+        message: `${visibleBackendOrders.length} pedido(s) lido(s) da API.`,
       })
 
       if (!silent) {
@@ -10765,6 +10771,10 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
   function deleteOrder(orderId) {
     const deletedOrder = orders.find((order) => order.id === orderId)
+
+    if (isBackendUuid(deletedOrder?.backendId)) {
+      deletedBackendOrderIdsRef.current.add(deletedOrder.backendId)
+    }
 
     setOrders((current) => current.filter((order) => order.id !== orderId))
     removeOrderFinanceEntry(orderId)
