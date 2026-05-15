@@ -4043,27 +4043,34 @@ function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
 
 function mergeBackendOrderIntoLocal(localOrder, backendOrder) {
   const mapped = backendOrderToFrontOrder(backendOrder)
+  const hasLocalPendingChange = localOrder.syncStatus === 'pending' || localOrder.syncStatus === 'failed'
 
   return normalizeOrderRecord({
     ...localOrder,
     backendId: mapped.backendId,
     backendCreatedAt: mapped.backendCreatedAt,
     backendUpdatedAt: mapped.backendUpdatedAt,
-    status: mapped.status || localOrder.status,
-    syncStatus: 'synced',
-    syncMessage: 'Sincronizado com API',
-    syncedAt: nowDateTime(),
+    status: hasLocalPendingChange ? localOrder.status : mapped.status || localOrder.status,
+    syncStatus: hasLocalPendingChange ? localOrder.syncStatus : 'synced',
+    syncMessage: hasLocalPendingChange ? localOrder.syncMessage : 'Sincronizado com API',
+    syncedAt: hasLocalPendingChange ? localOrder.syncedAt : nowDateTime(),
   })
 }
 
 function mergeBackendOrders(localOrders = [], backendOrders = []) {
   const backendById = new Map(backendOrders.map((order) => [order.id, order]))
-  const backendByLocalReference = new Map(
-    backendOrders
-      .map((order) => [getBackendLocalReference(order), order])
-      .filter(([localReference]) => Boolean(localReference)),
-  )
+  const backendByLocalReference = new Map()
+
+  backendOrders.forEach((order) => {
+    const localReference = getBackendLocalReference(order)
+
+    if (localReference && !backendByLocalReference.has(localReference)) {
+      backendByLocalReference.set(localReference, order)
+    }
+  })
+
   const usedBackendIds = new Set()
+  const usedLocalReferences = new Set()
   const mergedLocalOrders = localOrders.map((localOrder) => {
     const backendOrder = (localOrder.backendId && backendById.get(localOrder.backendId))
       || backendByLocalReference.get(String(localOrder.id))
@@ -4073,10 +4080,31 @@ function mergeBackendOrders(localOrders = [], backendOrders = []) {
     }
 
     usedBackendIds.add(backendOrder.id)
+    const localReference = getBackendLocalReference(backendOrder)
+    if (localReference) {
+      usedLocalReferences.add(localReference)
+    }
     return mergeBackendOrderIntoLocal(localOrder, backendOrder)
   })
+  const addedLocalReferences = new Set(usedLocalReferences)
   const addedBackendOrders = backendOrders
-    .filter((order) => !usedBackendIds.has(order.id))
+    .filter((order) => {
+      if (usedBackendIds.has(order.id)) {
+        return false
+      }
+
+      const localReference = getBackendLocalReference(order)
+
+      if (localReference && addedLocalReferences.has(localReference)) {
+        return false
+      }
+
+      if (localReference) {
+        addedLocalReferences.add(localReference)
+      }
+
+      return true
+    })
     .map(backendOrderToFrontOrder)
 
   return [...mergedLocalOrders, ...addedBackendOrders]
@@ -7703,10 +7731,13 @@ function App() {
   const refreshPilotFromBackendRef = useRef(null)
   const refreshPilotOrdersFromBackendRef = useRef(null)
   const deletedBackendOrderIdsRef = useRef(new Set())
+  const orderSyncInFlightRef = useRef(new Set())
+  const orderDesiredStatusRef = useRef(new Map())
   const [stores, setStores] = useState(initialWorkspace.stores)
   const [activeStoreId, setActiveStoreId] = useState(initialWorkspace.activeStoreId)
 
   const [orders, setOrders] = useState(initialData.orders)
+  const ordersRef = useRef(initialData.orders)
   const [orderSequence, setOrderSequence] = useState(initialData.orderSequence)
   const orderSequenceRef = useRef(initialData.orderSequence)
   const [activeNav, setActiveNav] = useState(initialData.activeNav)
@@ -7851,6 +7882,10 @@ function App() {
   function backTutorial() {
     setTutorialStepIndex((current) => Math.max(0, current - 1))
   }
+
+  useEffect(() => {
+    ordersRef.current = orders
+  }, [orders])
 
   useEffect(() => {
     const nextCoordinates = formatDeliveryZoneCoordinates(deliveryZonePoints)
@@ -8137,22 +8172,21 @@ function App() {
       const visibleBackendOrders = Array.isArray(backendOrders)
         ? backendOrders.filter((order) => !deletedBackendOrderIdsRef.current.has(order.id))
         : []
-      const nextOrders = visibleBackendOrders.map(backendOrderToFrontOrder)
 
-      setOrders((current) => mergeBackendOrders(current, nextOrders))
+      setOrders((current) => mergeBackendOrders(current, visibleBackendOrders))
       updatePilotSync({
         enabled: pilotSync.enabled,
         status: 'online',
         lastCheckedAt: nowDateTime(),
         lastSyncedAt: nowDateTime(),
-        message: `${nextOrders.length} pedido(s) lido(s) da API.`,
+        message: `${visibleBackendOrders.length} pedido(s) lido(s) da API.`,
       })
 
       if (!silent) {
-        notify(`${nextOrders.length} pedido(s) atualizado(s) da API.`)
+        notify(`${visibleBackendOrders.length} pedido(s) atualizado(s) da API.`)
       }
 
-      return nextOrders
+      return visibleBackendOrders
     } catch (err) {
       updatePilotSync({
         enabled: pilotSync.enabled,
@@ -8671,6 +8705,15 @@ function App() {
       return false
     }
 
+    if (orderSyncInFlightRef.current.has(localOrderId)) {
+      markOrderSyncState(localOrderId, {
+        syncStatus: 'pending',
+        syncMessage: 'Sincronizacao em andamento...',
+      })
+      return false
+    }
+
+    orderSyncInFlightRef.current.add(localOrderId)
     markOrderSyncState(localOrderId, {
       syncStatus: 'pending',
       syncMessage: 'Sincronizando com API...',
@@ -8691,8 +8734,11 @@ function App() {
         savedOrder = await createBackendOrder(targetStoreId, requestBody)
       }
 
-      if (savedOrder?.id && savedOrder.status !== normalizedOrder.status) {
-        savedOrder = await updateBackendOrderStatus(targetStoreId, savedOrder.id, normalizedOrder.status)
+      const latestLocalOrder = ordersRef.current.find((currentOrder) => currentOrder.id === localOrderId)
+      const latestStatus = orderDesiredStatusRef.current.get(localOrderId) || latestLocalOrder?.status || normalizedOrder.status
+
+      if (savedOrder?.id && savedOrder.status !== latestStatus) {
+        savedOrder = await updateBackendOrderStatus(targetStoreId, savedOrder.id, latestStatus)
       }
 
       markOrderSyncState(localOrderId, {
@@ -8732,16 +8778,28 @@ function App() {
       }
 
       return false
+    } finally {
+      orderDesiredStatusRef.current.delete(localOrderId)
+      orderSyncInFlightRef.current.delete(localOrderId)
     }
   }
 
   async function syncOrderStatusToBackend(order, nextStatus) {
     const normalizedOrder = normalizeOrderRecord({ ...order, status: nextStatus })
+    orderDesiredStatusRef.current.set(normalizedOrder.id, nextStatus)
 
     if (!pilotSync.enabled || !pilotSync.syncOnStatusChange) {
       markOrderSyncState(normalizedOrder.id, {
         syncStatus: normalizedOrder.backendId ? normalizedOrder.syncStatus : 'pending',
         syncMessage: 'Status alterado apenas localmente.',
+      })
+      return false
+    }
+
+    if (orderSyncInFlightRef.current.has(normalizedOrder.id)) {
+      markOrderSyncState(normalizedOrder.id, {
+        syncStatus: 'pending',
+        syncMessage: 'Status aguardando sincronizacao do pedido...',
       })
       return false
     }
@@ -8765,6 +8823,7 @@ function App() {
         lastSyncedAt: nowDateTime(),
         message: `Status do pedido #${normalizedOrder.id} sincronizado.`,
       })
+      orderDesiredStatusRef.current.delete(normalizedOrder.id)
       return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Falha ao sincronizar status.'
