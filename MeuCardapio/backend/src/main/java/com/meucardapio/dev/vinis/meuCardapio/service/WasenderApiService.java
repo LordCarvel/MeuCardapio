@@ -1198,6 +1198,10 @@ public class WasenderApiService {
         if (hasText(numberIntent)) {
             return new BotIntentMatch(numberIntent, 100, "", "HUMAN_SUPPORT".equals(numberIntent));
         }
+        String aliasIntent = directMenuAliasIntent(normalized);
+        if (hasText(aliasIntent)) {
+            return new BotIntentMatch(aliasIntent, 92, "", "HUMAN_SUPPORT".equals(aliasIntent));
+        }
 
         BotIntentMatch best = new BotIntentMatch("UNKNOWN", 0, "", false);
         for (String intent : fixedBotIntents()) {
@@ -1210,6 +1214,39 @@ public class WasenderApiService {
             }
         }
         return best;
+    }
+
+    private static String directMenuAliasIntent(String normalized) {
+        String text = Optional.ofNullable(normalized).orElse("").trim();
+        if (!hasText(text)) {
+            return "";
+        }
+        if (containsAny(text, "fazer pedido", "quero pedir", "quero fazer pedido", "pedido novo", "novo pedido", "comprar", "quero comprar")) {
+            return "MAKE_ORDER";
+        }
+        if (List.of("pedido", "pedidos", "meu pedido", "meus pedidos", "ver pedido", "ver pedidos", "ver meu pedido", "ver meus pedidos", "consultar pedido", "consultar pedidos", "acompanhar pedido", "acompanhar pedidos").contains(text)
+                || containsAny(text, "meus pedidos", "ver meus pedidos", "consultar meus pedidos", "acompanhar meu pedido", "acompanhar meus pedidos", "status do pedido", "status pedido")) {
+            return "ORDER_STATUS";
+        }
+        if (List.of("cardapio", "catalogo", "produto", "produtos", "link", "ver produtos", "ver cardapio", "ver catalogo").contains(text)) {
+            return "VIEW_CATALOG";
+        }
+        if (List.of("entrega", "retirada", "delivery", "frete", "taxa", "taxa entrega", "taxa de entrega").contains(text)) {
+            return "DELIVERY_INFO";
+        }
+        if (List.of("pagamento", "pagar", "pix", "cartao", "cartao credito", "cartao debito", "credito", "debito", "dinheiro", "troco").contains(text)) {
+            return "PAYMENT_METHODS";
+        }
+        if (List.of("horario", "horarios", "abre", "fecha", "funcionamento", "que horas abre", "que horas fecha").contains(text)) {
+            return "OPENING_HOURS";
+        }
+        if (List.of("endereco", "localizacao", "onde fica", "como chegar").contains(text)) {
+            return "STORE_ADDRESS";
+        }
+        if (List.of("atendente", "humano", "pessoa", "falar com atendente", "falar com humano").contains(text)) {
+            return "HUMAN_SUPPORT";
+        }
+        return "";
     }
 
     private static String menuChoiceIntent(String normalized) {
@@ -1312,22 +1349,23 @@ public class WasenderApiService {
         String menuUrl = resolveMenuUrl(storeId, integration);
         if ("catalog_only".equals(orderMode) || "catalogo".equals(orderMode)) {
             return hasText(menuUrl)
-                    ? "Para evitar erros, os pedidos sao feitos pelo catalogo online:\n" + menuUrl + "\n\nDepois de enviar o pedido por la, voce pode responder 3 para acompanhar."
-                    : "Os pedidos devem ser feitos pelo catalogo online, mas o link ainda nao esta configurado. Vou chamar um atendente.";
+                    ? appendQuickOptions("Para evitar erros, os pedidos sao feitos pelo catalogo online:\n" + menuUrl + "\n\nDepois de enviar o pedido por la, voce pode responder 3 para acompanhar.")
+                    : appendQuickOptions("Os pedidos devem ser feitos pelo catalogo online, mas o link ainda nao esta configurado. Vou chamar um atendente.");
         }
         if ("whatsapp".equals(orderMode)) {
             return hasText(menuUrl)
-                    ? "Pode me enviar seu pedido por aqui.\n\nSe quiser ver os produtos antes, responda 1 ou acesse:\n" + menuUrl
-                    : "Pode me enviar seu pedido por aqui. Se preferir atendimento humano, responda 7.";
+                    ? appendQuickOptions("Pode me enviar seu pedido por aqui.\n\nSe quiser ver os produtos antes, responda 1 ou acesse:\n" + menuUrl)
+                    : appendQuickOptions("Pode me enviar seu pedido por aqui. Se preferir atendimento humano, responda 7.");
         }
         return buildMenuMessage(storeId, integration);
     }
 
     private String buildPaymentMessage(JsonNode training) {
         String payment = firstText(training.path("paymentMethods"), training.path("formasPagamento"));
-        return hasText(payment)
+        String message = hasText(payment)
                 ? "Aceitamos as seguintes formas de pagamento:\n" + payment
                 : "As formas de pagamento aparecem no fechamento do catalogo digital. Se precisar de uma condicao diferente, escreva atendente.";
+        return appendQuickOptions(message);
     }
 
     private String buildDeliveryMessage(UUID storeId, JsonNode training) {
@@ -1338,33 +1376,33 @@ public class WasenderApiService {
         String prep = firstText(training.path("averagePrepTime"), training.path("tempoMedioPreparo"));
 
         if (!deliveryEnabled && pickupEnabled) {
-            return "No momento nao trabalhamos com entrega.\n\nVoce pode retirar no endereco:\n" + storeAddress(storeId);
+            return appendQuickOptions("No momento nao trabalhamos com entrega.\n\nVoce pode retirar no endereco:\n" + storeAddress(storeId));
         }
         if (deliveryEnabled && !pickupEnabled) {
-            return "Trabalhamos apenas com entrega no momento."
+            return appendQuickOptions("Trabalhamos apenas com entrega no momento."
                     + (hasText(regions) ? "\n\nRegioes atendidas:\n" + regions : "")
                     + (hasText(fees) ? "\n\nTaxas:\n" + fees : "")
-                    + (hasText(prep) ? "\n\nTempo medio:\n" + prep : "");
+                    + (hasText(prep) ? "\n\nTempo medio:\n" + prep : ""));
         }
         String configured = (hasText(regions) ? "Regioes atendidas:\n" + regions + "\n\n" : "")
                 + (hasText(fees) ? "Taxas:\n" + fees + "\n\n" : "")
                 + (hasText(prep) ? "Tempo medio de preparo:\n" + prep : "");
         if (hasText(configured)) {
-            return "Trabalhamos com entrega e retirada.\n\n" + configured.trim();
+            return appendQuickOptions("Trabalhamos com entrega e retirada.\n\n" + configured.trim());
         }
         return buildDeliveryMessage(storeId);
     }
 
     private String buildAddressMessage(UUID storeId) {
-        return "Nosso endereco e:\n" + storeAddress(storeId);
+        return appendQuickOptions("Nosso endereco e:\n" + storeAddress(storeId));
     }
 
     private String buildPromotionsMessage(UUID storeId, WhatsappIntegration integration, JsonNode training) {
         String promotions = firstText(training.path("promotions"), training.path("promocoes"));
         if (hasText(promotions)) {
-            return "Promocoes disponiveis:\n" + promotions;
+            return appendQuickOptions("Promocoes disponiveis:\n" + promotions);
         }
-        return "No momento nao temos promocoes cadastradas.\n\nVoce pode ver nossos produtos aqui:\n" + resolveMenuUrl(storeId, integration);
+        return appendQuickOptions("No momento nao temos promocoes cadastradas.\n\nVoce pode ver nossos produtos aqui:\n" + resolveMenuUrl(storeId, integration));
     }
 
     private String configuredResponse(JsonNode training, String intent) {
@@ -1412,7 +1450,7 @@ public class WasenderApiService {
                 continue;
             }
             if (normalized.equals(term)) {
-                score += 35;
+                score += 55;
             } else if (normalized.contains(term)) {
                 score += term.contains(" ") ? 25 : 16;
             } else {
@@ -1471,7 +1509,7 @@ public class WasenderApiService {
             case "OPENING_HOURS" -> List.of("horario", "abre", "fecha", "funciona", "aberto", "abre hoje", "fecha que horas");
             case "DELIVERY_INFO" -> List.of("entrega", "entregam", "delivery", "retirada", "retirar", "bairro", "taxa", "frete", "tempo de entrega", "demora pra entregar", "entrega aqui", "qual taxa");
             case "PAYMENT_METHODS" -> List.of("pagamento", "pagar", "pix", "cartao", "credito", "debito", "dinheiro", "troco", "maquininha", "aceita pix", "aceita cartao");
-            case "ORDER_STATUS" -> List.of("acompanhar", "andamento", "status", "meu pedido", "pedido atrasou", "cade meu pedido", "saiu", "pronto", "numero do pedido", "pedido chegou", "consultar pedido");
+            case "ORDER_STATUS" -> List.of("pedido", "pedidos", "meu pedido", "meus pedidos", "ver meu pedido", "ver meus pedidos", "acompanhar", "acompanhar pedido", "acompanhar pedidos", "andamento", "status", "status do pedido", "pedido atrasou", "cade meu pedido", "saiu", "pronto", "numero do pedido", "pedido chegou", "consultar pedido", "consultar pedidos");
             case "STORE_ADDRESS" -> List.of("endereco", "onde fica", "localizacao", "como chegar", "retirar ai", "qual endereco", "endereco da loja");
             case "PROMOTIONS" -> List.of("promocao", "promocoes", "cupom", "desconto", "oferta", "combo");
             case "HUMAN_SUPPORT" -> List.of("atendente", "humano", "falar com alguem", "suporte", "cancelar", "reembolso", "pedido errado", "veio errado", "nao chegou", "atrasou", "reclamacao");
@@ -1509,12 +1547,12 @@ public class WasenderApiService {
 
     private String buildMediaReply(String normalized) {
         if (containsAny(normalized, "audio")) {
-            return "Recebi seu audio. Para agilizar e evitar erro no pedido, me envie por texto se voce quer cardapio, acompanhar pedido ou falar com atendente.";
+            return appendQuickOptions("Recebi seu audio. Para agilizar e evitar erro no pedido, me envie por texto ou responda uma opcao.");
         }
         if (containsAny(normalized, "localizacao")) {
-            return "Recebi a localizacao. Para calcular entrega corretamente, finalize pelo cardapio digital ou escreva atendente.";
+            return appendQuickOptions("Recebi a localizacao. Para calcular entrega corretamente, finalize pelo cardapio digital ou chame um atendente.");
         }
-        return "Recebi seu arquivo. Por enquanto consigo responder melhor por texto. Escreva cardapio, pedido ou atendente.";
+        return appendQuickOptions("Recebi seu arquivo. Por enquanto consigo responder melhor por texto.");
     }
 
     private String buildHandoffMessage(String lead) {
@@ -1530,6 +1568,23 @@ public class WasenderApiService {
                 "5 - Formas de pagamento\n" +
                 "6 - Horario e endereco\n" +
                 "7 - Falar com atendente";
+    }
+
+    private static String botQuickMenu() {
+        return "Para continuar, responda:\n" +
+                "1 - Cardapio\n" +
+                "2 - Fazer pedido\n" +
+                "3 - Acompanhar pedido\n" +
+                "4 - Entrega ou retirada\n" +
+                "7 - Atendente";
+    }
+
+    private static String appendQuickOptions(String text) {
+        String normalized = Optional.ofNullable(text).orElse("").trim();
+        if (!hasText(normalized)) {
+            return botQuickMenu();
+        }
+        return normalized + "\n\n" + botQuickMenu();
     }
 
     private boolean isGreeting(String normalized) {
@@ -1607,15 +1662,14 @@ public class WasenderApiService {
     private String buildMenuMessage(UUID storeId, WhatsappIntegration integration) {
         String menuUrl = resolveMenuUrl(storeId, integration);
         return hasText(menuUrl)
-                ? "Aqui esta o catalogo digital:\n" + menuUrl + "\n\nPor ele voce ve os produtos e pode finalizar o pedido com menos chance de erro.\n\n" +
-                    "Se precisar de outra coisa, responda:\n2 - Fazer pedido\n4 - Entrega ou retirada\n7 - Atendente"
-                : "O link do catalogo ainda nao esta configurado. Vou chamar um atendente para enviar as opcoes por aqui.";
+                ? appendQuickOptions("Aqui esta o catalogo digital:\n" + menuUrl + "\n\nPor ele voce ve os produtos e pode finalizar o pedido com menos chance de erro.")
+                : appendQuickOptions("O link do catalogo ainda nao esta configurado. Vou chamar um atendente para enviar as opcoes por aqui.");
     }
 
     private String buildLatestOrderMessage(UUID storeId, WhatsappConversation conversation, String inboundText) {
         Optional<CustomerOrder> latestOrder = findLatestOrderForConversation(storeId, conversation, inboundText);
         if (latestOrder.isEmpty()) {
-            return "Nao encontrei um pedido recente vinculado a este WhatsApp. Se voce acabou de pedir pelo cardapio, me envie o numero do pedido ou chame um atendente.";
+            return appendQuickOptions("Nao encontrei um pedido recente vinculado a este WhatsApp. Se voce acabou de pedir pelo cardapio, me envie o numero do pedido ou chame um atendente.");
         }
         return buildOrderStatusMessage(latestOrder.get());
     }
@@ -1643,12 +1697,12 @@ public class WasenderApiService {
     }
 
     private String buildOrderStatusMessage(CustomerOrder order) {
-        return orderReference(order) + "\n" +
+        return appendQuickOptions(orderReference(order) + "\n" +
                 "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
                 orderStatusDetail(order) + "\n" +
                 "Entrega: " + fulfillmentLabel(order.getFulfillment()) + "\n" +
                 "Total: " + formatMoney(order.getTotal()) + "\n" +
-                "Se precisar alterar algo, escreva atendente.";
+                "Se precisar alterar algo, responda 7.");
     }
 
     private String buildOrderTimelineMessage(CustomerOrder order, WhatsappIntegration integration) {
@@ -1730,15 +1784,16 @@ public class WasenderApiService {
     }
 
     private String buildScheduleMessage(UUID storeId) {
-        return stores.findById(storeId)
+        String message = stores.findById(storeId)
                 .map(store -> hasText(store.getSchedule())
                         ? "Horario de atendimento:\n" + store.getSchedule() + "\n\nEndereco:\n" + storeAddress(storeId)
                         : "O horario da loja ainda nao esta configurado no sistema.\n\nEndereco:\n" + storeAddress(storeId) + "\n\nPosso chamar um atendente se voce precisar confirmar.")
                 .orElse("Nao consegui consultar o horario da loja agora.");
+        return appendQuickOptions(message);
     }
 
     private String buildDeliveryMessage(UUID storeId) {
-        return stores.findById(storeId)
+        String message = stores.findById(storeId)
                 .map(store -> {
                     String minimum = store.getMinimumOrder() != null && store.getMinimumOrder().compareTo(BigDecimal.ZERO) > 0
                             ? "\nPedido minimo: " + formatMoney(store.getMinimumOrder()) + "."
@@ -1749,6 +1804,7 @@ public class WasenderApiService {
                     return "Fazemos retirada e delivery nas areas atendidas. No cardapio digital voce informa o endereco e confere a taxa antes de finalizar." + minimum + radius;
                 })
                 .orElse("No cardapio digital voce informa o endereco e confere a taxa de entrega antes de finalizar.");
+        return appendQuickOptions(message);
     }
 
     private String buildProductReply(UUID storeId, String normalizedText) {
@@ -1781,7 +1837,7 @@ public class WasenderApiService {
         String finish = hasText(menuUrl)
                 ? "Para finalizar sem erro, use o cardapio digital:\n" + menuUrl
                 : "Para finalizar sem erro, peca pelo cardapio digital ou escreva atendente.";
-        return "Encontrei no cardapio:\n" + items + "\n\n" + finish + "\n\nSe quiser ajuda humana, escreva atendente.";
+        return appendQuickOptions("Encontrei no cardapio:\n" + items + "\n\n" + finish);
     }
 
     private boolean isBotPaused(WhatsappConversation conversation) {
