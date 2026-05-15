@@ -31,6 +31,7 @@ public final class OrderDtos {
             @NotBlank String fulfillment,
             @NotBlank String payment,
             String status,
+            String sourceOrderId,
             String source,
             String address,
             String deliveryZoneName,
@@ -52,6 +53,7 @@ public final class OrderDtos {
     public record OrderResponse(
             UUID id,
             Integer orderNumber,
+            String sourceOrderId,
             String customerName,
             String customerPhone,
             String fulfillment,
@@ -68,6 +70,7 @@ public final class OrderDtos {
             return new OrderResponse(
                     order.getId(),
                     order.getOrderNumber(),
+                    order.getSourceOrderId(),
                     order.getCustomerName(),
                     order.getCustomerPhone(),
                     order.getFulfillment(),

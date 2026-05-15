@@ -7,6 +7,20 @@ const HEALTH_CACHE_MS = 5 * 60 * 1000
 let healthCache = null
 let healthRequest = null
 
+function buildOrderListPath(storeId, options = {}) {
+  const params = new URLSearchParams()
+
+  if (options.scope) {
+    params.set('scope', options.scope)
+  }
+  if (options.days) {
+    params.set('days', String(options.days))
+  }
+
+  const query = params.toString()
+  return `/stores/${storeId}/orders${query ? `?${query}` : ''}`
+}
+
 function getApiConfigurationHint() {
   if (/github\.io/i.test(API_BASE_URL)) {
     return 'VITE_API_BASE_URL esta apontando para o GitHub Pages. Configure a variavel do GitHub Actions com a URL do Render terminando em /api.'
@@ -144,7 +158,7 @@ export async function loadBackendDiagnostics() {
   const [summary, products, orders, logs] = await Promise.all([
     request(`/reports/summary?storeId=${store.id}`),
     request(`/stores/${store.id}/products`),
-    request(`/stores/${store.id}/orders`),
+    request(buildOrderListPath(store.id, { scope: 'board' })),
     request(`/logs?storeId=${store.id}`),
   ])
 
@@ -166,7 +180,7 @@ export async function loadBackendWorkspace(storeId = '') {
     request(`/reports/summary?storeId=${store.id}`),
     request(`/stores/${store.id}/products`),
     request(`/stores/${store.id}/categories`),
-    request(`/stores/${store.id}/orders`),
+    request(buildOrderListPath(store.id, { scope: 'board' })),
     request(`/logs?storeId=${store.id}`),
   ])
 
@@ -185,7 +199,7 @@ export async function loadBackendWorkspaceByAccessKey(accessKey) {
     request(`/reports/summary?storeId=${store.id}`),
     request(`/stores/${store.id}/products`),
     request(`/stores/${store.id}/categories`),
-    request(`/stores/${store.id}/orders`),
+    request(buildOrderListPath(store.id, { scope: 'board' })),
     request(`/logs?storeId=${store.id}`),
   ])
 
@@ -209,8 +223,12 @@ export async function createBackendOrder(storeId, order) {
   })
 }
 
-export async function getBackendOrders(storeId) {
-  return request(`/stores/${storeId}/orders`)
+export async function getBackendOrders(storeId, options = {}) {
+  return request(buildOrderListPath(storeId, options))
+}
+
+export async function getBackendOrder(storeId, orderId) {
+  return request(`/stores/${storeId}/orders/${orderId}`)
 }
 
 export async function updateBackendOrder(storeId, orderId, order) {

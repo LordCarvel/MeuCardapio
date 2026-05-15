@@ -2284,6 +2284,16 @@ function getDayRange(date = new Date()) {
   return { start, end }
 }
 
+function isOrderInCurrentBoardWindow(order = {}) {
+  if (isWorkflowTerminalStatus(order.status)) {
+    return false
+  }
+
+  const orderDate = getRecordDate(order)
+  const { start, end } = getDayRange()
+  return orderDate >= start && orderDate < end
+}
+
 function isRecordInRange(record = {}, startDate = null, endDate = null) {
   const recordDate = getRecordDate(record)
   const start = parseRecordDate(startDate)
@@ -3692,6 +3702,69 @@ function isBackendUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
 }
 
+function normalizeWorkflowStatus(status = '') {
+  const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+
+  if (!normalized) {
+    return ''
+  }
+
+  if (['analysis', 'analise', 'em_analise', 'received', 'pending', 'created', 'new', 'novo', 'entrada', 'aceito', 'accepted'].includes(normalized)) {
+    return 'analysis'
+  }
+  if (['production', 'preparing', 'prepare', 'preparo', 'em_preparo', 'em_producao', 'in_production'].includes(normalized)) {
+    return 'production'
+  }
+  if (['ready', 'pronto', 'saida', 'out_for_delivery', 'out'].includes(normalized)) {
+    return 'ready'
+  }
+  if (['completed', 'complete', 'finalizado', 'finished', 'delivered', 'done', 'closed'].includes(normalized)) {
+    return 'completed'
+  }
+  if (['cancelled', 'canceled', 'cancelado', 'rejected', 'recusado'].includes(normalized)) {
+    return 'cancelled'
+  }
+
+  return normalized
+}
+
+function getWorkflowStatusRank(status = '') {
+  const normalized = normalizeWorkflowStatus(status)
+  const ranks = {
+    analysis: 10,
+    production: 20,
+    ready: 30,
+    completed: 40,
+    cancelled: 40,
+  }
+
+  return ranks[normalized] || 0
+}
+
+function isWorkflowTerminalStatus(status = '') {
+  return ['completed', 'cancelled'].includes(normalizeWorkflowStatus(status))
+}
+
+function getMostAdvancedOrderStatus(currentStatus = '', nextStatus = '') {
+  const current = normalizeWorkflowStatus(currentStatus)
+  const next = normalizeWorkflowStatus(nextStatus)
+
+  if (!next) {
+    return current || currentStatus
+  }
+  if (!current) {
+    return next
+  }
+  if (isWorkflowTerminalStatus(current) && current !== next) {
+    return current
+  }
+  if (getWorkflowStatusRank(next) < getWorkflowStatusRank(current)) {
+    return current
+  }
+
+  return next
+}
+
 function getReadableBackendOrderId(order = {}) {
   if (order.orderNumber) {
     return String(order.orderNumber)
@@ -3722,6 +3795,11 @@ function formatBackendOrderTime(value) {
 }
 
 function getBackendLocalReference(order = {}) {
+  const sourceOrderId = String(order.sourceOrderId || '').trim()
+  if (sourceOrderId && !sourceOrderId.toLowerCase().startsWith('customer-')) {
+    return sourceOrderId
+  }
+
   const note = String(order.note || '')
   const [, localId] = note.match(/Pedido local #([^|\n]+)/i) || []
 
@@ -3847,7 +3925,8 @@ function frontOrderToBackendRequest(order = {}) {
     customerPhone: truncateText(normalizedOrder.phone || '', 40),
     fulfillment: inferOrderFulfillment(normalizedOrder),
     payment: truncateText(String(normalizedOrder.payment || 'Cartao'), 40),
-    status: normalizedOrder.status || 'analysis',
+    status: normalizeWorkflowStatus(normalizedOrder.status || 'analysis'),
+    sourceOrderId: truncateText(String(normalizedOrder.sourceOrderId || normalizedOrder.id || ''), 80),
     source: getOrderSource(normalizedOrder),
     address: normalizedOrder.address || '',
     deliveryZoneName: normalizedOrder.deliveryZoneName || '',
@@ -3875,6 +3954,7 @@ function backendOrderToFrontOrder(order = {}) {
     id: localReference || getReadableBackendOrderId(order),
     backendId: order.id || '',
     backendOrderNumber: order.orderNumber || '',
+    sourceOrderId: order.sourceOrderId || localReference || '',
     backendCreatedAt: order.createdAt || '',
     backendUpdatedAt: order.updatedAt || '',
     customer: order.customerName || 'Cliente API',
@@ -3882,7 +3962,7 @@ function backendOrderToFrontOrder(order = {}) {
     channel: fulfillment === 'delivery' ? 'delivery' : 'pickup',
     fulfillment,
     source: noteSource || 'API',
-    status: order.status || 'analysis',
+    status: normalizeWorkflowStatus(order.status || 'analysis'),
     subtotal: Number(order.subtotal) || 0,
     deliveryFee: formatCurrencyInput(Number(order.deliveryFee) || 0),
     total: Number(order.total) || 0,
@@ -4066,13 +4146,17 @@ function backendWorkspaceToStoreRecord(workspace = {}, accessKey = '') {
 function mergeBackendOrderIntoLocal(localOrder, backendOrder) {
   const mapped = backendOrderToFrontOrder(backendOrder)
   const hasLocalPendingChange = localOrder.syncStatus === 'pending' || localOrder.syncStatus === 'failed'
+  const status = hasLocalPendingChange
+    ? localOrder.status
+    : getMostAdvancedOrderStatus(localOrder.status, mapped.status || localOrder.status)
 
   return normalizeOrderRecord({
     ...localOrder,
     backendId: mapped.backendId,
+    sourceOrderId: mapped.sourceOrderId || localOrder.sourceOrderId || '',
     backendCreatedAt: mapped.backendCreatedAt,
     backendUpdatedAt: mapped.backendUpdatedAt,
-    status: hasLocalPendingChange ? localOrder.status : mapped.status || localOrder.status,
+    status,
     syncStatus: hasLocalPendingChange ? localOrder.syncStatus : 'synced',
     syncMessage: hasLocalPendingChange ? localOrder.syncMessage : 'Sincronizado com API',
     syncedAt: hasLocalPendingChange ? localOrder.syncedAt : nowDateTime(),
@@ -8190,7 +8274,7 @@ function App() {
     }
 
     try {
-      const backendOrders = await getBackendOrders(pilotSync.storeId)
+      const backendOrders = await getBackendOrders(pilotSync.storeId, { scope: 'board' })
       const visibleBackendOrders = Array.isArray(backendOrders)
         ? backendOrders.filter((order) => !deletedBackendOrderIdsRef.current.has(order.id))
         : []
@@ -8279,7 +8363,7 @@ function App() {
     const normalizedSearch = search.trim().toLowerCase()
 
     return orders
-      .filter((order) => order.status !== 'completed')
+      .filter(isOrderInCurrentBoardWindow)
       .filter((order) => filter === 'all' || order.channel === filter)
       .filter((order) => {
         if (!normalizedSearch) {
@@ -8597,11 +8681,18 @@ function App() {
 
   function markOrderSyncState(orderId, partial) {
     setOrders((current) =>
-      current.map((order) => (
-        order.id === orderId
-          ? normalizeOrderRecord({ ...order, ...partial })
-          : order
-      )),
+      current.map((order) => {
+        if (order.id !== orderId) {
+          return order
+        }
+
+        const nextPartial = { ...partial }
+        if (Object.prototype.hasOwnProperty.call(nextPartial, 'status')) {
+          nextPartial.status = getMostAdvancedOrderStatus(order.status, nextPartial.status)
+        }
+
+        return normalizeOrderRecord({ ...order, ...nextPartial })
+      }),
     )
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createBackendOrder, getBackendOrders, loadPublicStorefront } from '../backend/backendApi'
+import { createBackendOrder, getBackendOrder, loadPublicStorefront } from '../backend/backendApi'
 import { STORAGE_KEY } from '../storage/browserStorage'
 import { normalizeStoreProfile } from '../store/storeProfile'
 import './CustomerStorefront.css'
@@ -875,6 +875,8 @@ function CustomerAddressMap({ center, zoom, selectedAddress, onPan, onZoom, onUs
 
 export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
   const storeId = getStorefrontIdFromPath()
+  const submitInFlightRef = useRef(false)
+  const orderSubmitKeyRef = useRef('')
   const [backendData, setBackendData] = useState(null)
   const [status, setStatus] = useState(() => (
     isBackendStoreId(storeId)
@@ -1011,8 +1013,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       }
 
       try {
-        const backendOrders = await getBackendOrders(trackingStoreId)
-        const nextOrder = backendOrders.find((order) => String(order.id) === String(trackingId))
+        const nextOrder = await getBackendOrder(trackingStoreId, trackingId)
 
         if (!cancelled && nextOrder) {
           applyTrackedOrderUpdate(nextOrder)
@@ -1580,9 +1581,19 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       return
     }
 
+    if (submitInFlightRef.current) {
+      return
+    }
+
+    submitInFlightRef.current = true
+    if (!orderSubmitKeyRef.current) {
+      orderSubmitKeyRef.current = `customer-${storeId || 'local'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    }
+
     const customerProfile = saveCustomerIdentity()
     const changeAmount = payment === 'Dinheiro' ? getCashChangeAmount(customer.changeFor, total) : 0
     const request = {
+      sourceOrderId: orderSubmitKeyRef.current,
       customerName: customer.name.trim(),
       customerPhone: customer.phone.trim(),
       fulfillment,
@@ -1644,11 +1655,14 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       })
       setScreen('tracking')
       setStatus({ type: 'success', message: getOrderStatusMessage(savedOrder?.status || 'analysis') })
+      orderSubmitKeyRef.current = ''
     } catch (err) {
       setStatus({
         type: 'error',
         message: err instanceof Error ? err.message : 'Nao foi possivel enviar o pedido.',
       })
+    } finally {
+      submitInFlightRef.current = false
     }
   }
 
