@@ -2284,14 +2284,38 @@ function getDayRange(date = new Date()) {
   return { start, end }
 }
 
+function isDateInRange(date, start, end) {
+  return date instanceof Date && !Number.isNaN(date.getTime()) && date >= start && date < end
+}
+
+function getBackendDateCandidates(value) {
+  const text = String(value || '').trim()
+  const candidates = [parseRecordDate(text)].filter(Boolean)
+  const looksLikeIsoWithoutZone = /^\d{4}-\d{2}-\d{2}T/.test(text) && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)
+
+  if (looksLikeIsoWithoutZone) {
+    const parsedAsUtc = new Date(`${text}Z`)
+    if (!Number.isNaN(parsedAsUtc.getTime())) {
+      candidates.push(parsedAsUtc)
+    }
+  }
+
+  return candidates
+}
+
 function isOrderInCurrentBoardWindow(order = {}) {
   if (isWorkflowTerminalStatus(order.status)) {
     return false
   }
 
-  const orderDate = getRecordDate(order)
   const { start, end } = getDayRange()
-  return orderDate >= start && orderDate < end
+  const candidates = [
+    parseRecordDate(order.createdAt),
+    ...getBackendDateCandidates(order.backendCreatedAt),
+    parseRecordDate(order.time),
+  ].filter(Boolean)
+
+  return candidates.length === 0 || candidates.some((date) => isDateInRange(date, start, end))
 }
 
 function isRecordInRange(record = {}, startDate = null, endDate = null) {
