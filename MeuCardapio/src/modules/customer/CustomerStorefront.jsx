@@ -1587,6 +1587,7 @@ export function CustomerStorefront({ localStore = null, onCreateLocalOrder }) {
       customerPhone: customer.phone.trim(),
       fulfillment,
       payment,
+      source: 'Cardapio Digital',
       customerOrderCount: customerProfile ? String(customerProfile.orderCount + 1).padStart(2, '0') : '',
       customerDiscount: customerDiscount > 0 ? customerDiscount : 0,
       address: fulfillment === 'delivery' ? formattedAddress : 'Retirada no balcao',

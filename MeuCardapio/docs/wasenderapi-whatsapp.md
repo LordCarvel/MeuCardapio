@@ -50,8 +50,9 @@ Quando a sessao for criada, a API key da sessao fica salva no backend. Campos se
 - Ele reconhece intencoes comuns por palavras-chave e pontuacao: `WELCOME`, `MAKE_ORDER`, `VIEW_CATALOG`, `OPENING_HOURS`, `DELIVERY_INFO`, `PAYMENT_METHODS`, `ORDER_STATUS`, `STORE_ADDRESS`, `PROMOTIONS`, `HUMAN_SUPPORT` e `UNKNOWN`.
 - Saudacoes como `oi`, `ola`, `bom dia`, `boa tarde` e `boa noite` recebem uma mensagem de boas-vindas com link do cardapio e instrucoes para pedido/atendente.
 - Mensagens de audio, imagem, video, documento, localizacao e contato sao registradas; o robo pede resposta em texto ou encaminha o cliente para o cardapio/atendente quando necessario.
-- Quando um pedido e criado com WhatsApp valido, o backend valida o numero na WaSenderAPI e envia a confirmacao do pedido pelo robo.
-- Quando o status do pedido muda, o backend tambem envia uma atualizacao para o mesmo WhatsApp, se o robo estiver ativo.
+- Quando um pedido e criado com WhatsApp valido, o backend cria um numero publico sequencial por loja, valida o numero na WaSenderAPI e envia a confirmacao do pedido pelo robo em uma fila assincrona.
+- A mensagem do cliente usa o formato resumido do Anota AI: nome, pedido `No. 0000`, itens, pagamento, entrega/retirada, taxa, endereco, estimativa e total. O cliente nao recebe mais chaves internas como `#api-2b0c9e4a`.
+- Quando o status do pedido muda, o backend tambem envia uma atualizacao para o mesmo WhatsApp, se o robo estiver ativo. Atualizacoes antigas sao ignoradas se o pedido ja estiver em outro status.
 - Ao consultar `pedido`, `status`, `andamento`, `cade` ou termos parecidos, o robo busca o pedido mais recente vinculado ao telefone do cliente e retorna status, total e entrega/retirada.
 - As mensagens configuraveis de boas-vindas e fallback aceitam placeholders: `{username}`, `{link}`, `{saudacao}` e `{divide}`.
 - Ao enviar mensagem manual pela inbox, o robo pausa automaticamente naquela conversa ate o fim do dia.

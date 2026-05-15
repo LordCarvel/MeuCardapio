@@ -3692,6 +3692,22 @@ function isBackendUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
 }
 
+function getReadableBackendOrderId(order = {}) {
+  if (order.orderNumber) {
+    return String(order.orderNumber)
+  }
+
+  const rawId = String(order.id || '')
+  const digits = rawId.replace(/\D/g, '')
+
+  if (digits.length >= 4) {
+    return digits.slice(-4)
+  }
+
+  const hash = Array.from(rawId).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return String(1000 + (hash % 9000))
+}
+
 function formatBackendOrderTime(value) {
   const parsed = value ? new Date(value) : null
 
@@ -3830,7 +3846,12 @@ function frontOrderToBackendRequest(order = {}) {
     customerName: truncateText(normalizedOrder.customer || 'Cliente balcao', 120),
     customerPhone: truncateText(normalizedOrder.phone || '', 40),
     fulfillment: inferOrderFulfillment(normalizedOrder),
-    payment: truncateText(String(normalizedOrder.payment || 'Cartao'), 80),
+    payment: truncateText(String(normalizedOrder.payment || 'Cartao'), 40),
+    status: normalizedOrder.status || 'analysis',
+    source: getOrderSource(normalizedOrder),
+    address: normalizedOrder.address || '',
+    deliveryZoneName: normalizedOrder.deliveryZoneName || '',
+    document: normalizedOrder.document || '',
     note: buildBackendOrderNote(normalizedOrder),
     deliveryFee: toBackendMoney(financialBreakdown.deliveryFee),
     items,
@@ -3851,8 +3872,9 @@ function backendOrderToFrontOrder(order = {}) {
   const fulfillment = order.fulfillment || 'pickup'
 
   return normalizeOrderRecord({
-    id: localReference || `api-${String(order.id || Date.now()).slice(0, 8)}`,
+    id: localReference || getReadableBackendOrderId(order),
     backendId: order.id || '',
+    backendOrderNumber: order.orderNumber || '',
     backendCreatedAt: order.createdAt || '',
     backendUpdatedAt: order.updatedAt || '',
     customer: order.customerName || 'Cliente API',

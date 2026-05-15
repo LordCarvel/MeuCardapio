@@ -28,6 +28,8 @@ public class CustomerOrder {
     private String customerName;
     @Column(length = 40)
     private String customerPhone;
+    @Column(name = "order_number")
+    private Integer orderNumber;
     @Column(nullable = false, length = 30)
     private String fulfillment;
     @Column(nullable = false, length = 30)
@@ -96,10 +98,15 @@ public class CustomerOrder {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void setOrderNumber(Integer orderNumber) {
+        this.orderNumber = orderNumber;
+    }
+
     public UUID getId() { return id; }
     public Store getStore() { return store; }
     public String getCustomerName() { return customerName; }
     public String getCustomerPhone() { return customerPhone; }
+    public Integer getOrderNumber() { return orderNumber; }
     public String getFulfillment() { return fulfillment; }
     public String getStatus() { return status; }
     public BigDecimal getSubtotal() { return subtotal; }

@@ -619,7 +619,7 @@ public class WasenderApiService {
         if (order == null) {
             return Optional.empty();
         }
-        return notifyOrderByWhatsapp(order, buildOrderCreatedMessage(order));
+        return notifyOrderByWhatsapp(order, true);
     }
 
     @Transactional
@@ -627,15 +627,19 @@ public class WasenderApiService {
         if (order == null) {
             return Optional.empty();
         }
-        return notifyOrderByWhatsapp(order, buildOrderStatusChangedMessage(order));
+        return notifyOrderByWhatsapp(order, false);
     }
 
-    private Optional<WhatsappMessage> notifyOrderByWhatsapp(CustomerOrder order, String text) {
+    private Optional<WhatsappMessage> notifyOrderByWhatsapp(CustomerOrder order, boolean created) {
         if (order == null || !hasText(order.getCustomerPhone())) {
             return Optional.empty();
         }
         WhatsappIntegration integration = integrations.findById(order.getStore().getId()).orElse(null);
-        if (integration == null || !integration.isBotEnabled() || !hasText(text)) {
+        if (integration == null || !integration.isBotEnabled()) {
+            return Optional.empty();
+        }
+        String text = created ? buildOrderCreatedMessage(order, integration) : buildOrderStatusChangedMessage(order, integration);
+        if (!hasText(text)) {
             return Optional.empty();
         }
         String apiKey = requireSessionApiKey(integration);
@@ -1630,28 +1634,12 @@ public class WasenderApiService {
         return requestedOrder.or(() -> phoneOrders.stream().findFirst());
     }
 
-    private String buildOrderCreatedMessage(CustomerOrder order) {
-        return "Pedido recebido " + orderReference(order) + "\n" +
-                buildOrderSummary(order) + "\n\n" +
-                "Status: " + orderStatusLabel(order.getStatus()) + "\n" +
-                "Agora a loja vai conferir e enviar para preparo. Se precisar alterar algo, responda atendente.";
+    private String buildOrderCreatedMessage(CustomerOrder order, WhatsappIntegration integration) {
+        return buildOrderTimelineMessage(order, integration);
     }
 
-    private String buildOrderSummary(CustomerOrder order) {
-        String items = order.getItems().stream()
-                .limit(4)
-                .map(item -> item.getQuantity() + "x " + item.getProductName())
-                .reduce((left, right) -> left + "\n" + right)
-                .orElse("Itens registrados no pedido.");
-        long remaining = Math.max(0, order.getItems().size() - 4);
-        String suffix = remaining > 0 ? "\n+" + remaining + " item(ns)" : "";
-        return items + suffix + "\nTotal: " + formatMoney(order.getTotal());
-    }
-
-    private String buildOrderStatusChangedMessage(CustomerOrder order) {
-        return orderReference(order) + "\n" +
-                "Atualizacao: " + orderStatusLabel(order.getStatus()) + "\n" +
-                orderStatusDetail(order);
+    private String buildOrderStatusChangedMessage(CustomerOrder order, WhatsappIntegration integration) {
+        return buildOrderTimelineMessage(order, integration);
     }
 
     private String buildOrderStatusMessage(CustomerOrder order) {
@@ -1661,6 +1649,73 @@ public class WasenderApiService {
                 "Entrega: " + fulfillmentLabel(order.getFulfillment()) + "\n" +
                 "Total: " + formatMoney(order.getTotal()) + "\n" +
                 "Se precisar alterar algo, escreva atendente.";
+    }
+
+    private String buildOrderTimelineMessage(CustomerOrder order, WhatsappIntegration integration) {
+        String number = publicOrderNumber(order);
+        String customer = firstCustomerName(order.getCustomerName());
+        StringBuilder message = new StringBuilder();
+        message.append(customer)
+                .append(", o pedido N\u00ba ")
+                .append(number)
+                .append(" ")
+                .append(orderStatusHeadline(order.getStatus()))
+                .append(".\n\n");
+        message.append("Pedido *n\u00ba ").append(number).append("*\n\n");
+        message.append(buildOrderItemsMessage(order)).append("\n\n");
+        message.append(paymentIcon(order.getPayment())).append(" *").append(defaultText(order.getPayment(), "Pagamento")).append("*\n\n");
+        message.append(buildOrderFulfillmentMessage(order, integration)).append("\n");
+        message.append("Total: *").append(formatMoney(order.getTotal())).append("* \n\n");
+        message.append("Obrigado pela prefer\u00eancia, se precisar de algo \u00e9 s\u00f3 chamar! \uD83D\uDE09");
+        return message.toString();
+    }
+
+    private String buildOrderItemsMessage(CustomerOrder order) {
+        StringBuilder items = new StringBuilder("*Itens:*");
+        if (order.getItems().isEmpty()) {
+            return items.append("\n\u27a1 ```1x Item do pedido```").toString();
+        }
+        for (var item : order.getItems()) {
+            OrderItemLine line = orderItemLine(item.getProductName());
+            items.append("\n\u27a1 ```")
+                    .append(item.getQuantity())
+                    .append("x ")
+                    .append(line.name())
+                    .append("```");
+            for (OrderItemDetail detail : line.details()) {
+                if (hasText(detail.label())) {
+                    items.append("\n      _").append(detail.label()).append("_");
+                }
+                for (String option : detail.options()) {
+                    items.append("\n          ```")
+                            .append(withQuantityPrefix(option))
+                            .append("```");
+                }
+            }
+        }
+        return items.toString();
+    }
+
+    private String buildOrderFulfillmentMessage(CustomerOrder order, WhatsappIntegration integration) {
+        String fulfillment = Optional.ofNullable(order.getFulfillment()).orElse("");
+        String estimate = orderEstimate(order, integration);
+        if ("delivery".equals(fulfillment)) {
+            String address = noteValue(order.getNote(), "Endereco");
+            if (!hasText(address)) {
+                address = "Endereco registrado no pedido";
+            }
+            return "\uD83D\uDEF5 *Delivery* (taxa de: *" + formatMoney(order.getDeliveryFee()) + "*)\n" +
+                    "\uD83C\uDFE0 " + address + "\n" +
+                    "(Estimativa: *" + estimate + "*)\n";
+        }
+        if ("dinein".equals(fulfillment)) {
+            return "\uD83C\uDF7D *Consumo no local*\n" +
+                    "\uD83C\uDFE0 " + storeAddress(order.getStore().getId()) + "\n" +
+                    "(Estimativa: *" + estimate + "*)\n";
+        }
+        return "\uD83C\uDFEC *Retirada no balc\u00e3o*\n" +
+                "\uD83C\uDFE0 " + storeAddress(order.getStore().getId()) + "\n" +
+                "(Estimativa: *" + estimate + "*)\n";
     }
 
     private String orderStatusDetail(CustomerOrder order) {
@@ -1816,7 +1871,34 @@ public class WasenderApiService {
     }
 
     private static String orderReference(CustomerOrder order) {
-        return "Pedido #" + order.getId().toString().substring(0, 8);
+        return "Pedido n\u00ba " + publicOrderNumber(order);
+    }
+
+    private static String publicOrderNumber(CustomerOrder order) {
+        String localReference = localOrderReference(order == null ? "" : order.getNote());
+        if (hasText(localReference)) {
+            String digits = localReference.replaceAll("\\D", "");
+            if (hasText(digits)) {
+                return digits;
+            }
+        }
+        if (order != null && order.getOrderNumber() != null && order.getOrderNumber() > 0) {
+            return String.valueOf(order.getOrderNumber());
+        }
+        if (order == null || order.getId() == null) {
+            return "0000";
+        }
+        return String.valueOf(1000 + Math.floorMod(order.getId().hashCode(), 9000));
+    }
+
+    private static String localOrderReference(String note) {
+        for (String segment : Optional.ofNullable(note).orElse("").split("\\s*\\|\\s*")) {
+            String normalized = normalizeText(segment);
+            if (normalized.startsWith("pedido local")) {
+                return segment.replaceFirst("(?i)^\\s*pedido local\\s*#?\\s*", "").trim();
+            }
+        }
+        return "";
     }
 
     private static boolean referencesOrder(CustomerOrder order, String text) {
@@ -1824,27 +1906,133 @@ public class WasenderApiService {
             return false;
         }
         String compactOrderId = order.getId().toString().replace("-", "").toLowerCase();
+        String publicNumber = publicOrderNumber(order);
         String compactText = normalizeText(text).replaceAll("\\s+", "");
         return hasText(compactText)
-                && (compactText.contains(compactOrderId) || compactText.contains(compactOrderId.substring(0, 8)));
+                && (compactText.contains(compactOrderId) || compactText.contains(compactOrderId.substring(0, 8)) || compactText.contains(publicNumber));
     }
 
     private static String orderStatusLabel(String status) {
         return switch (Optional.ofNullable(status).orElse("")) {
-            case "analysis" -> "em analise";
-            case "production" -> "em preparo";
+            case "analysis" -> "em an\u00e1lise";
+            case "production" -> "em produ\u00e7\u00e3o";
             case "ready" -> "pronto";
             case "completed" -> "finalizado";
-            case "cancelled" -> "cancelado";
+            case "cancelled", "canceled" -> "cancelado";
             default -> hasText(status) ? status : "recebido";
         };
+    }
+
+    private static String orderStatusHeadline(String status) {
+        return switch (Optional.ofNullable(status).orElse("")) {
+            case "analysis" -> "foi recebido e est\u00e1 em an\u00e1lise";
+            case "production" -> "est\u00e1 em produ\u00e7\u00e3o";
+            case "ready" -> "est\u00e1 pronto";
+            case "completed" -> "foi finalizado";
+            case "cancelled", "canceled" -> "foi cancelado";
+            default -> "foi atualizado";
+        };
+    }
+
+    private String orderEstimate(CustomerOrder order, WhatsappIntegration integration) {
+        JsonNode training = botTraining(integration);
+        String configured = firstText(training.path("averagePrepTime"), training.path("tempoMedioPreparo"));
+        if (hasText(configured)) {
+            return configured;
+        }
+        return "delivery".equals(Optional.ofNullable(order.getFulfillment()).orElse(""))
+                ? "entre 39~49 minutos"
+                : "entre 20~30 minutos";
+    }
+
+    private static String paymentIcon(String payment) {
+        String normalized = normalizeText(payment);
+        if (normalized.contains("pix")) {
+            return "\uD83D\uDCF1";
+        }
+        if (normalized.contains("dinheiro")) {
+            return "\uD83D\uDCB5";
+        }
+        return "\uD83D\uDCB3";
+    }
+
+    private static String firstCustomerName(String value) {
+        String name = Optional.ofNullable(value).orElse("").trim();
+        if (!hasText(name)) {
+            return "Cliente";
+        }
+        return name.split("\\s+")[0];
+    }
+
+    private static OrderItemLine orderItemLine(String productName) {
+        List<String> parts = List.of(Optional.ofNullable(productName).orElse("Item do pedido").split("\\s+-\\s+")).stream()
+                .map(String::trim)
+                .filter(WasenderApiService::hasText)
+                .toList();
+        String name = parts.isEmpty() ? "Item do pedido" : parts.get(0);
+        List<OrderItemDetail> details = parts.stream()
+                .skip(1)
+                .map(WasenderApiService::orderItemDetail)
+                .filter(detail -> !detail.options().isEmpty())
+                .toList();
+        return new OrderItemLine(name, details);
+    }
+
+    private static OrderItemDetail orderItemDetail(String text) {
+        String label = "";
+        String optionsText = text;
+        int separator = text.indexOf(':');
+        if (separator > 0) {
+            label = text.substring(0, separator).trim();
+            optionsText = text.substring(separator + 1).trim();
+        }
+        List<String> options = List.of(optionsText.split("\\s*,\\s*")).stream()
+                .map(String::trim)
+                .filter(WasenderApiService::hasText)
+                .toList();
+        return new OrderItemDetail(label, options);
+    }
+
+    private static String withQuantityPrefix(String value) {
+        String text = Optional.ofNullable(value).orElse("").trim();
+        return text.matches("(?i)^\\d+\\s*x\\s+.*") ? text : "1x " + text;
+    }
+
+    private static String noteValue(String note, String label) {
+        String normalizedTarget = normalizeText(label);
+        List<String> segments = List.of(Optional.ofNullable(note).orElse("").split("\\s*\\|\\s*"));
+        for (int index = 0; index < segments.size(); index += 1) {
+            String segment = segments.get(index).trim();
+            int separator = segment.indexOf(':');
+            String segmentLabel = separator > 0 ? normalizeText(segment.substring(0, separator)) : "";
+            if (!segmentLabel.equals(normalizedTarget)) {
+                continue;
+            }
+            List<String> values = new ArrayList<>();
+            String firstValue = segment.substring(separator + 1).trim();
+            if (hasText(firstValue)) {
+                values.add(firstValue);
+            }
+            while (index + 1 < segments.size() && !hasNoteLabel(segments.get(index + 1))) {
+                index += 1;
+                values.add(segments.get(index).trim());
+            }
+            return String.join(" | ", values).trim();
+        }
+        return "";
+    }
+
+    private static boolean hasNoteLabel(String segment) {
+        String value = Optional.ofNullable(segment).orElse("");
+        int separator = value.indexOf(':');
+        return separator > 0 && hasText(value.substring(0, separator));
     }
 
     private static String fulfillmentLabel(String fulfillment) {
         return switch (Optional.ofNullable(fulfillment).orElse("")) {
             case "delivery" -> "delivery";
             case "dinein" -> "consumo no local";
-            default -> "retirada no balcao";
+            default -> "retirada no balc\u00e3o";
         };
     }
 
@@ -1873,6 +2061,12 @@ public class WasenderApiService {
     }
 
     private record BotIntentMatch(String intent, int score, String response, boolean humanEscalation) {
+    }
+
+    private record OrderItemLine(String name, List<OrderItemDetail> details) {
+    }
+
+    private record OrderItemDetail(String label, List<String> options) {
     }
 
     private String requireSessionApiKey(WhatsappIntegration integration) {

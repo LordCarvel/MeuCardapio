@@ -12,11 +12,14 @@ import org.springframework.data.repository.query.Param;
 import com.meucardapio.dev.vinis.meuCardapio.domain.CustomerOrder;
 
 public interface CustomerOrderRepository extends JpaRepository<CustomerOrder, UUID> {
-    @Query("select distinct o from CustomerOrder o left join fetch o.items where o.store.id = :storeId order by o.createdAt desc")
+    @Query("select distinct o from CustomerOrder o join fetch o.store left join fetch o.items where o.store.id = :storeId order by o.createdAt desc")
     List<CustomerOrder> findByStoreIdOrderByCreatedAtDesc(@Param("storeId") UUID storeId);
 
-    @Query("select o from CustomerOrder o left join fetch o.items where o.id = :orderId")
+    @Query("select o from CustomerOrder o join fetch o.store left join fetch o.items where o.id = :orderId")
     Optional<CustomerOrder> findByIdWithItems(@Param("orderId") UUID orderId);
+
+    @Query("select coalesce(max(o.orderNumber), 8300) from CustomerOrder o where o.store.id = :storeId")
+    int findLastOrderNumberByStoreId(@Param("storeId") UUID storeId);
 
     long countByStoreId(UUID storeId);
     long countByStoreIdAndStatusNot(UUID storeId, String status);
