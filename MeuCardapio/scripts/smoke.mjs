@@ -271,18 +271,19 @@ async function main() {
         })()
       `)
       await cdp.send('Page.reload')
-      await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="start-demo"]')`, 'app recarregado', 15000)
+      await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="access-key-input"]')`, 'app recarregado', 15000)
     }
 
-    const startDemoIfNeeded = async () => {
-      const needsDemo = await evaluate(`Boolean(document.querySelector('[data-testid="start-demo"]'))`)
+    const openAccessStoreIfNeeded = async () => {
+      const needsAccessStore = await evaluate(`Boolean(document.querySelector('[data-testid="access-key-input"]'))`)
 
-      if (!needsDemo) {
+      if (!needsAccessStore) {
         return
       }
 
-      await click('[data-testid="start-demo"]')
-      await waitFor(`document.querySelector('.app-frame')`, 'demo iniciado', 15000)
+      await setValue('[data-testid="access-key-input"]', 'demo')
+      await click('[data-testid="access-key-submit"]')
+      await waitFor(`document.querySelector('.app-frame')`, 'loja por chave aberta', 15000)
     }
 
     const loginIfNeeded = async () => {
@@ -299,11 +300,11 @@ async function main() {
     }
 
     const enterApp = async () => {
-      await startDemoIfNeeded()
+      await openAccessStoreIfNeeded()
       await loginIfNeeded()
     }
 
-    await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="start-demo"]')`, 'app carregado', 10000)
+    await waitFor(`document.querySelector('.app-frame, [data-testid="store-login-form"], [data-testid="access-key-input"]')`, 'app carregado', 10000)
     await enterApp()
     await clearLocalData()
     await enterApp()
@@ -344,8 +345,8 @@ async function main() {
 
     await click('[data-testid="open-printer"]')
     await waitFor(`document.body.innerText.includes('Impressora')`, 'modal impressora')
-    await clickByText('teste', '.modal .btn')
-    await waitFor(`${toastHas('Pedido teste')} || ${toastHas('enviado para impressao')} || ${toastHas('adicionado a fila')}`, 'teste impressora')
+    await clickByText('conferencia', '.modal .btn')
+    await waitFor(`${toastHas('Comanda de conferencia')} || ${toastHas('enviado para impressao')} || ${toastHas('adicionado a fila')}`, 'conferencia impressora')
     await clickByText('Remover', '.modal .btn')
     await waitFor(toastHas('Item removido da fila de impressao.'), 'fila impressora')
     await click('button[form="printer-form"]')
@@ -479,9 +480,9 @@ async function main() {
 
     await click('[data-testid="open-chat"]')
     await waitFor(`document.body.innerText.includes('Chat do atendimento')`, 'modal chat')
-    await setValue('[data-testid="chat-input"]', 'Teste de atendimento')
+    await setValue('[data-testid="chat-input"]', 'Mensagem de atendimento')
     await click('.inline-form .btn--primary')
-    await waitFor(`document.body.innerText.includes('Teste de atendimento')`, 'chat enviou mensagem')
+    await waitFor(`document.body.innerText.includes('Mensagem de atendimento')`, 'chat enviou mensagem')
     await closeModal()
 
     await click('[data-testid="open-suggestion"]')

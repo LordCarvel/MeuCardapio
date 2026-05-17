@@ -7,6 +7,10 @@ const HEALTH_CACHE_MS = 5 * 60 * 1000
 let healthCache = null
 let healthRequest = null
 
+export function buildApiUrl(path) {
+  return `${API_BASE_URL}${path}`
+}
+
 function buildOrderListPath(storeId, options = {}) {
   const params = new URLSearchParams()
 
@@ -40,7 +44,7 @@ export async function request(path, options = {}) {
   let response
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(buildApiUrl(path), {
       ...fetchOptions,
       headers: { 'Content-Type': 'application/json', ...(fetchOptions.headers || {}) },
       signal: controller.signal,
@@ -224,11 +228,13 @@ export async function createBackendOrder(storeId, order) {
 }
 
 export async function getBackendOrders(storeId, options = {}) {
-  return request(buildOrderListPath(storeId, options))
+  const { timeoutMs, ...queryOptions } = options
+  return request(buildOrderListPath(storeId, queryOptions), { timeoutMs })
 }
 
-export async function getBackendOrder(storeId, orderId) {
-  return request(`/stores/${storeId}/orders/${orderId}`)
+export async function getBackendOrder(storeId, orderId, options = {}) {
+  const { timeoutMs } = options
+  return request(`/stores/${storeId}/orders/${orderId}`, { timeoutMs })
 }
 
 export async function updateBackendOrder(storeId, orderId, order) {
@@ -268,7 +274,7 @@ export async function createBackendTestLog(storeId) {
     storeId,
     level: 'INFO',
     area: 'frontend',
-    message: 'Teste manual enviado pelo painel React',
+    message: 'Log manual enviado pelo painel',
   })
 }
 
@@ -444,4 +450,12 @@ export async function markWhatsappConversationRead(storeId, remoteJid) {
   return request(`/stores/${storeId}/whatsapp/read?remoteJid=${encodeURIComponent(remoteJid)}`, {
     method: 'POST',
   })
+}
+
+export function openBackendOrderEvents(storeId) {
+  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined' || !storeId) {
+    return null
+  }
+
+  return new window.EventSource(buildApiUrl(`/stores/${storeId}/orders/events`))
 }

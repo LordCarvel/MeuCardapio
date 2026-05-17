@@ -50,7 +50,6 @@ const blankSignupForm = {
 }
 
 export function StoreAccess({
-  demoAvailable = false,
   initialAccessKey = '',
   users = [],
   onCreateAccount,
@@ -146,29 +145,6 @@ export function StoreAccess({
 
     if (result?.ok === false) {
       setError(result.message || 'Chave invalida.')
-      return
-    }
-
-    setError('')
-  }
-
-  async function startDemo() {
-    let result
-
-    try {
-      setStatus('submitting')
-      result = await onUseDemo?.({
-        source: 'demoButton',
-        accessKey: 'demo',
-      })
-    } catch (err) {
-      result = { ok: false, message: err instanceof Error ? err.message : 'Nao foi possivel abrir o demo.' }
-    } finally {
-      setStatus('idle')
-    }
-
-    if (result?.ok === false) {
-      setError(result.message || 'Nao foi possivel abrir o demo.')
       return
     }
 
@@ -533,22 +509,8 @@ export function StoreAccess({
             </form>
           )}
 
-          <div className={styles.demoBox}>
-            <div>
-              <strong>Quer so explorar o produto?</strong>
-              <span>
-                {demoAvailable
-                  ? 'Abre novamente o ambiente demonstrativo salvo neste navegador.'
-                  : 'Cria uma loja padrao local para navegar pelas funcionalidades.'}
-              </span>
-            </div>
-            <button className={styles.demoButton} data-testid="start-demo" type="button" onClick={startDemo}>
-              Testar demo
-            </button>
-          </div>
-
           <p className={styles.hint}>
-            Nesta versao local, voce pode usar a chave <strong>demo</strong> ou clicar em <strong>Testar demo</strong>.
+            Use sua chave de acesso ou entre com o usuario da loja.
           </p>
         </section>
 

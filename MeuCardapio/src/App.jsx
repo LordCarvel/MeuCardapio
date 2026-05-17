@@ -12,6 +12,7 @@ import {
   createBackendOrder,
   controlWhatsappBot,
   deleteBackendOrder,
+  getBackendOrder,
   getBackendOrders,
   getBackendStore,
   loadBackendWorkspace,
@@ -25,6 +26,7 @@ import {
   getWhatsappStatus,
   loginBackendUser,
   markWhatsappConversationRead,
+  openBackendOrderEvents,
   requestPasswordResetCode,
   requestSignupCode,
   resetBackendPassword,
@@ -148,8 +150,10 @@ function buildQrImageUrl(value = '') {
 }
 
 const NOMINATIM_MIN_INTERVAL_MS = 1100
-const PILOT_BACKEND_REFRESH_MS = 15 * 1000
-const PILOT_BACKEND_HIDDEN_REFRESH_MS = 60 * 1000
+const PILOT_BACKEND_REFRESH_MS = 5 * 1000
+const PILOT_BACKEND_HIDDEN_REFRESH_MS = 30 * 1000
+const PILOT_ORDER_REQUEST_TIMEOUT_MS = 10 * 1000
+const PILOT_EVENT_REFRESH_DEBOUNCE_MS = 250
 const WHATSAPP_CONVERSATIONS_REFRESH_MS = 60 * 1000
 const WHATSAPP_MESSAGES_REFRESH_MS = 20 * 1000
 const DEFAULT_MAP_COORDINATES = { lat: -26.7693, lng: -48.6452 }
@@ -226,7 +230,7 @@ const tutorialSteps = [
   {
     nav: 'orders',
     title: 'Visao geral da operacao',
-    body: 'Este painel concentra sua operacao diaria. No topo ficam o status do piloto, notificacoes e o usuario logado. A lateral troca entre pedidos, atendimento, PDV, cardapio, cozinha, entregas, financeiro e relatorios. Comece sempre conferindo se a loja esta aberta e se o piloto esta online.',
+    body: 'Este painel concentra sua operacao diaria. No topo ficam o status da API, notificacoes e o usuario logado. A lateral troca entre pedidos, atendimento, PDV, cardapio, cozinha, entregas, financeiro e relatorios. Comece sempre conferindo se a loja esta aberta e se a sincronizacao esta online.',
   },
   {
     nav: 'orders',
@@ -251,7 +255,7 @@ const tutorialSteps = [
   {
     nav: 'menu',
     title: 'Cardapio',
-    body: 'Cadastre categorias, produtos, precos, estoque, horarios de disponibilidade, sabores e complementos. Conta nova nao recebe produtos ficticios; a demo continua com exemplos para estudo. Antes de vender, esta e uma das primeiras areas que voce deve preencher.',
+    body: 'Cadastre categorias, produtos, precos, estoque, horarios de disponibilidade, sabores e complementos. Antes de vender, esta e uma das primeiras areas que voce deve preencher.',
   },
   {
     nav: 'kds',
@@ -291,7 +295,7 @@ const tutorialSteps = [
   {
     nav: 'reports',
     title: 'Configuracoes e seguranca',
-    body: 'Use os botoes do topo e da lateral para abrir configuracoes da loja, piloto, impressora, automacoes e senha. Se trocar de dispositivo, este tutorial aparece de novo para a mesma conta, porque ele e controlado por navegador.',
+    body: 'Use os botoes do topo e da lateral para abrir configuracoes da loja, sincronizacao, impressora, automacoes e senha. Se trocar de dispositivo, este tutorial aparece de novo para a mesma conta, porque ele e controlado por navegador.',
   },
 ]
 
@@ -606,7 +610,7 @@ const initialPilotSync = {
   storeName: '',
   lastCheckedAt: '',
   lastSyncedAt: '',
-  message: 'Modo piloto ainda nao conectado.',
+  message: 'Sincronizacao ainda nao conectada.',
 }
 
 const initialStoreProfile = createEmptyStoreProfile()
@@ -2493,7 +2497,7 @@ function createDefaultAppData() {
     blockedOrders: initialBlockedOrders,
     settings: initialSettings,
     chatMessages: [
-      { id: 1, author: 'Sistema', text: 'Canal de atendimento simulado ativo.' },
+      { id: 1, author: 'Sistema', text: 'Canal de atendimento ativo.' },
     ],
     categories: initialCategories,
     products: initialProducts.map((product) => normalizeProduct(product, initialCategories[0]?.name || 'Pizzas')),
@@ -2549,7 +2553,7 @@ function createBlankAppData() {
     deliveryZones: [],
     storeProfile: normalizeStoreProfile(createEmptyStoreProfile()),
     printerConfig: normalizePrinterConfig({ ...initialPrinterConfig, queue: [] }),
-    pilotSync: normalizePilotSync({ enabled: false, status: 'idle', message: 'Modo piloto ainda nao conectado.' }),
+    pilotSync: normalizePilotSync({ enabled: false, status: 'idle', message: 'Sincronizacao ainda nao conectada.' }),
     storeUsers: [],
     currentStoreUser: null,
     orderDrafts: [],
@@ -2667,20 +2671,20 @@ function createDemoStoreRecord(index = 0) {
   return createStoreRecord({
     demo: true,
     profile: {
-      tradeName: 'Loja Demo MeuCardapio',
-      legalName: 'Loja Demo MeuCardapio LTDA',
-      owner: 'Conta Demo',
-      manager: 'Gerente Demo',
+      tradeName: 'Loja Modelo MeuCardapio',
+      legalName: 'Loja Modelo MeuCardapio LTDA',
+      owner: 'Conta Modelo',
+      manager: 'Gerente Modelo',
       phone: '(11) 99999-0000',
       whatsapp: '(11) 99999-0000',
-      email: 'contato@demo.meucardapio.local',
-      supportEmail: 'suporte@demo.meucardapio.local',
+      email: 'contato@lojamodelo.local',
+      supportEmail: 'suporte@lojamodelo.local',
       taxId: '12.345.678/0001-90',
       stateRegistration: '123456789',
       category: 'Restaurante',
-      description: 'Ambiente demonstrativo do MeuCardapio para explorar pedidos, atendimento, delivery e PDV.',
+      description: 'Loja inicial do MeuCardapio para operar pedidos, atendimento, delivery e PDV.',
       cep: '88385-000',
-      street: 'Avenida Demo',
+      street: 'Avenida Principal',
       number: '123',
       district: 'Centro',
       cityName: 'Penha',
@@ -2696,16 +2700,16 @@ function createDemoStoreRecord(index = 0) {
         pickup: true,
         dineIn: true,
       },
-      website: 'https://meucardapio.app/demo',
-      instagram: '@meucardapio.demo',
-      note: 'Loja local criada automaticamente para demonstracao do produto.',
+      website: 'https://meucardapio.app',
+      instagram: '@lojamodelo',
+      note: 'Loja local criada automaticamente para primeiro acesso.',
       lat: String(DEFAULT_MAP_COORDINATES.lat),
       lng: String(DEFAULT_MAP_COORDINATES.lng),
-      mapLabel: 'Loja demo centralizada no mapa',
+      mapLabel: 'Loja centralizada no mapa',
       verifiedAt: nowDateTime(),
     },
     owner: {
-      name: 'Conta Demo',
+      name: 'Conta Modelo',
       email: 'demo@meucardapio.local',
       password: 'demo123',
     },
@@ -3863,18 +3867,18 @@ function getPilotStatusMeta(sync = {}) {
   const normalized = normalizePilotSync(sync)
 
   if (!normalized.enabled) {
-    return { tone: 'muted', label: 'Piloto off', description: 'Sincronizacao desligada' }
+    return { tone: 'muted', label: 'API off', description: 'Sincronizacao desligada' }
   }
 
   const byStatus = {
     checking: { tone: 'warning', label: 'Checando API', description: normalized.message },
     syncing: { tone: 'warning', label: 'Sincronizando', description: normalized.message },
-    online: { tone: 'success', label: 'Piloto online', description: normalized.message },
+    online: { tone: 'success', label: 'API online', description: normalized.message },
     offline: { tone: 'danger', label: 'API offline', description: normalized.message },
-    error: { tone: 'danger', label: 'Erro no piloto', description: normalized.message },
+    error: { tone: 'danger', label: 'Erro na API', description: normalized.message },
   }
 
-  return byStatus[normalized.status] || { tone: 'neutral', label: 'Piloto pronto', description: normalized.message }
+  return byStatus[normalized.status] || { tone: 'neutral', label: 'API pronta', description: normalized.message }
 }
 
 function getOrderSyncMeta(order = {}) {
@@ -4173,18 +4177,26 @@ function mergeBackendOrderIntoLocal(localOrder, backendOrder) {
   const status = hasLocalPendingChange
     ? localOrder.status
     : getMostAdvancedOrderStatus(localOrder.status, mapped.status || localOrder.status)
-
-  return normalizeOrderRecord({
-    ...localOrder,
+  const syncedAt = hasLocalPendingChange
+    ? localOrder.syncedAt
+    : localOrder.backendUpdatedAt === mapped.backendUpdatedAt && localOrder.syncStatus === 'synced'
+    ? localOrder.syncedAt
+    : nowDateTime()
+  const nextOrder = normalizeOrderRecord({
+    ...(hasLocalPendingChange ? localOrder : mapped),
+    id: localOrder.id,
     backendId: mapped.backendId,
+    backendOrderNumber: mapped.backendOrderNumber || localOrder.backendOrderNumber || '',
     sourceOrderId: mapped.sourceOrderId || localOrder.sourceOrderId || '',
-    backendCreatedAt: mapped.backendCreatedAt,
-    backendUpdatedAt: mapped.backendUpdatedAt,
+    backendCreatedAt: mapped.backendCreatedAt || localOrder.backendCreatedAt || '',
+    backendUpdatedAt: mapped.backendUpdatedAt || localOrder.backendUpdatedAt || '',
     status,
     syncStatus: hasLocalPendingChange ? localOrder.syncStatus : 'synced',
     syncMessage: hasLocalPendingChange ? localOrder.syncMessage : 'Sincronizado com API',
-    syncedAt: hasLocalPendingChange ? localOrder.syncedAt : nowDateTime(),
+    syncedAt,
   })
+
+  return JSON.stringify(nextOrder) === JSON.stringify(localOrder) ? localOrder : nextOrder
 }
 
 function mergeBackendOrders(localOrders = [], backendOrders = []) {
@@ -4201,6 +4213,7 @@ function mergeBackendOrders(localOrders = [], backendOrders = []) {
 
   const usedBackendIds = new Set()
   const usedLocalReferences = new Set()
+  let changed = false
   const mergedLocalOrders = localOrders.map((localOrder) => {
     const backendOrder = (localOrder.backendId && backendById.get(localOrder.backendId))
       || backendByLocalReference.get(String(localOrder.id))
@@ -4214,7 +4227,11 @@ function mergeBackendOrders(localOrders = [], backendOrders = []) {
     if (localReference) {
       usedLocalReferences.add(localReference)
     }
-    return mergeBackendOrderIntoLocal(localOrder, backendOrder)
+    const mergedOrder = mergeBackendOrderIntoLocal(localOrder, backendOrder)
+    if (mergedOrder !== localOrder) {
+      changed = true
+    }
+    return mergedOrder
   })
   const addedLocalReferences = new Set(usedLocalReferences)
   const addedBackendOrders = backendOrders
@@ -4237,7 +4254,11 @@ function mergeBackendOrders(localOrders = [], backendOrders = []) {
     })
     .map(backendOrderToFrontOrder)
 
-  return [...mergedLocalOrders, ...addedBackendOrders]
+  if (addedBackendOrders.length > 0) {
+    changed = true
+  }
+
+  return changed ? [...mergedLocalOrders, ...addedBackendOrders] : localOrders
 }
 
 function Icon({ name, size = 20, className = '' }) {
@@ -4940,7 +4961,7 @@ function Sidebar({
         <Icon name="bolt" size={22} />
         <span>
           <strong>Conta e dados</strong>
-          <small>Cadastro, backup e ambiente demo</small>
+          <small>Cadastro, backup e dados da loja</small>
         </span>
       </button>
     </aside>
@@ -5624,7 +5645,7 @@ function MenuPreviewPanel({ storeProfile, categories, products, coupons, qrCodes
         <header className="menu-preview-card__header">
           <div>
             <span>Checkout e fidelizacao</span>
-            <strong>O que ainda faltava no visual ja aparece aqui</strong>
+              <strong>Checkout, pagamento e fidelizacao no mesmo fluxo</strong>
           </div>
           <Button variant="primary" onClick={() => onOpenModal('newCoupon')}>Cupom</Button>
         </header>
@@ -5767,7 +5788,7 @@ function DeliveryRadar({ orders, couriers, onOpenModal }) {
       <header className="module-card__header">
         <div>
           <h2>Radar de entrega</h2>
-          <p>Rota, ETA, origem e entregador em uma visualizacao mais apresentavel.</p>
+          <p>Rota, ETA, origem e entregador em uma leitura operacional.</p>
         </div>
         <Button onClick={() => onOpenModal('deliveryMap')}>Mapa expandido</Button>
       </header>
@@ -5835,7 +5856,7 @@ function CashDeskPanel({ orders, finance, cashOpen, cashOpenedAt, onOpenModal })
       <header className="module-card__header">
         <div>
           <h2>Frente de caixa</h2>
-          <p>Abertura, recebimentos por forma de pagamento e fechamento visual.</p>
+          <p>Abertura, recebimentos por forma de pagamento e fechamento de turno.</p>
         </div>
         <Button variant="primary" onClick={() => onOpenModal('cash')}>{cashOpen ? 'Fechar caixa' : 'Abrir caixa'}</Button>
       </header>
@@ -6737,7 +6758,7 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
         <header className="module-card__header">
           <div>
             <h2>Relatorios</h2>
-            <p>Leitura local dos dados simulados.</p>
+            <p>Indicadores da operacao atual.</p>
           </div>
           <Button data-testid="export-reports" variant="primary" onClick={() => onOpenModal('exportReports')}>Exportar</Button>
         </header>
@@ -6751,10 +6772,10 @@ function ReportsSection({ orders, products, tables, finance, coupons, recoveries
       <article className="module-card">
         <header className="module-card__header">
           <div>
-            <h2>Teste controlado</h2>
+            <h2>Sincronizacao</h2>
             <p>Status do backend, backup e fila de sincronizacao.</p>
           </div>
-          <Button variant="primary" onClick={() => onOpenModal('pilot')}>Abrir piloto</Button>
+          <Button variant="primary" onClick={() => onOpenModal('pilot')}>Abrir conexao</Button>
         </header>
         <div className="pilot-mini">
           <div>
@@ -7408,9 +7429,9 @@ function WhatsappSetupPanel({ storeId }) {
       await saveWhatsappConfig(storeId, { ...whatsappForm, webhookUrl })
       const result = await testWhatsappBot(storeId, botTestText.trim())
       setBotTestResult(result)
-      setWhatsappStatus({ type: 'success', message: `Teste detectou ${result.intent} com ${result.confidence}% de confianca.` })
+      setWhatsappStatus({ type: 'success', message: `Robo detectou ${result.intent} com ${result.confidence}% de confianca.` })
     } catch (err) {
-      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao testar o robo.' })
+      setWhatsappStatus({ type: 'danger', message: err instanceof Error ? err.message : 'Falha ao validar o robo.' })
     }
   }
 
@@ -7449,8 +7470,8 @@ function WhatsappSetupPanel({ storeId }) {
         />
       </div>
       <div className="whatsapp-bot-test">
-        <input value={botTestText} onChange={(event) => setBotTestText(event.target.value)} placeholder="Teste uma mensagem do cliente" />
-        <Button onClick={runBotTest}>Testar robo</Button>
+        <input value={botTestText} onChange={(event) => setBotTestText(event.target.value)} placeholder="Digite uma mensagem do cliente" />
+        <Button onClick={runBotTest}>Validar robo</Button>
         {botTestResult ? (
           <div className="whatsapp-bot-test__result">
             <strong>{botTestResult.intent} - {botTestResult.confidence}%</strong>
@@ -7745,7 +7766,7 @@ function FiscalSection({ invoices, onOpenModal, onUpdateInvoice }) {
       <header className="module-card__header">
         <div>
           <h2>Fiscal e NFC-e</h2>
-          <p>Emissao, reimpressao e cancelamento simulados.</p>
+          <p>Emissao, reimpressao e cancelamento de NFC-e.</p>
         </div>
         <Button variant="primary" onClick={() => onOpenModal('issueInvoice')}>Emitir NFC-e</Button>
       </header>
@@ -7860,6 +7881,10 @@ function App() {
   const nominatimLastRequestRef = useRef(0)
   const refreshPilotFromBackendRef = useRef(null)
   const refreshPilotOrdersFromBackendRef = useRef(null)
+  const refreshPilotOrderFromBackendEventRef = useRef(null)
+  const pilotOrdersRefreshInFlightRef = useRef(false)
+  const pilotOrdersQueuedRefreshRef = useRef(false)
+  const pilotOrdersLastStatusUpdateAtRef = useRef(0)
   const deletedBackendOrderIdsRef = useRef(new Set())
   const orderSyncInFlightRef = useRef(new Set())
   const orderDesiredStatusRef = useRef(new Map())
@@ -8297,20 +8322,34 @@ function App() {
       return []
     }
 
+    if (pilotOrdersRefreshInFlightRef.current) {
+      pilotOrdersQueuedRefreshRef.current = true
+      return []
+    }
+
+    pilotOrdersRefreshInFlightRef.current = true
+
     try {
-      const backendOrders = await getBackendOrders(pilotSync.storeId, { scope: 'board' })
+      const backendOrders = await getBackendOrders(pilotSync.storeId, {
+        scope: 'board',
+        timeoutMs: PILOT_ORDER_REQUEST_TIMEOUT_MS,
+      })
       const visibleBackendOrders = Array.isArray(backendOrders)
         ? backendOrders.filter((order) => !deletedBackendOrderIdsRef.current.has(order.id))
         : []
 
       setOrders((current) => mergeBackendOrders(current, visibleBackendOrders))
-      updatePilotSync({
-        enabled: pilotSync.enabled,
-        status: 'online',
-        lastCheckedAt: nowDateTime(),
-        lastSyncedAt: nowDateTime(),
-        message: `${visibleBackendOrders.length} pedido(s) lido(s) da API.`,
-      })
+      const shouldUpdatePilotStatus = !silent || pilotSync.status !== 'online' || Date.now() - pilotOrdersLastStatusUpdateAtRef.current > 30 * 1000
+      if (shouldUpdatePilotStatus) {
+        pilotOrdersLastStatusUpdateAtRef.current = Date.now()
+        updatePilotSync({
+          enabled: pilotSync.enabled,
+          status: 'online',
+          lastCheckedAt: nowDateTime(),
+          lastSyncedAt: nowDateTime(),
+          message: `${visibleBackendOrders.length} pedido(s) lido(s) da API.`,
+        })
+      }
 
       if (!silent) {
         notify(`${visibleBackendOrders.length} pedido(s) atualizado(s) da API.`)
@@ -8325,10 +8364,61 @@ function App() {
         message: err instanceof Error ? err.message : 'Nao foi possivel atualizar pedidos da API.',
       })
       return []
+    } finally {
+      pilotOrdersRefreshInFlightRef.current = false
+      if (pilotOrdersQueuedRefreshRef.current) {
+        pilotOrdersQueuedRefreshRef.current = false
+        window.setTimeout(() => {
+          void refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+        }, 0)
+      }
     }
   }
 
   refreshPilotOrdersFromBackendRef.current = refreshPilotOrdersFromBackend
+
+  async function refreshPilotOrderFromBackendEvent(payload = {}) {
+    const orderId = payload.orderId
+    const action = payload.action || 'updated'
+
+    if (!pilotSync.storeId || !orderId) {
+      return refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+    }
+
+    if (action === 'deleted') {
+      deletedBackendOrderIdsRef.current.add(orderId)
+      setOrders((current) => current.filter((order) => order.backendId !== orderId))
+      updatePilotSync({
+        status: 'online',
+        lastCheckedAt: nowDateTime(),
+        lastSyncedAt: nowDateTime(),
+        message: 'Pedido removido em outro dispositivo.',
+      })
+      return []
+    }
+
+    try {
+      const backendOrder = await getBackendOrder(pilotSync.storeId, orderId, {
+        timeoutMs: PILOT_ORDER_REQUEST_TIMEOUT_MS,
+      })
+      if (!backendOrder || deletedBackendOrderIdsRef.current.has(orderId)) {
+        return []
+      }
+
+      setOrders((current) => mergeBackendOrders(current, [backendOrder]))
+      updatePilotSync({
+        status: 'online',
+        lastCheckedAt: nowDateTime(),
+        lastSyncedAt: nowDateTime(),
+        message: `Pedido #${backendOrder.orderNumber || orderId} atualizado em tempo real.`,
+      })
+      return [backendOrder]
+    } catch {
+      return refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+    }
+  }
+
+  refreshPilotOrderFromBackendEventRef.current = refreshPilotOrderFromBackendEvent
 
   useEffect(() => {
     if (customerStoreId || !hasValidStoreSession || !isStoreReady || !pilotSync.enabled || !pilotSync.storeId) {
@@ -8337,21 +8427,84 @@ function App() {
 
     let cancelled = false
     let timeoutId = 0
+    let eventRefreshTimeoutId = 0
+    const queuedEventPayloads = new Map()
+    const eventSource = openBackendOrderEvents(pilotSync.storeId)
+
+    function schedulePolling(delay = document.hidden ? PILOT_BACKEND_HIDDEN_REFRESH_MS : PILOT_BACKEND_REFRESH_MS) {
+      window.clearTimeout(timeoutId)
+      timeoutId = window.setTimeout(run, delay)
+    }
+
     async function run() {
       if (!cancelled) {
         await refreshPilotOrdersFromBackendRef.current?.({ silent: true })
       }
 
       if (!cancelled) {
-        timeoutId = window.setTimeout(run, document.hidden ? PILOT_BACKEND_HIDDEN_REFRESH_MS : PILOT_BACKEND_REFRESH_MS)
+        schedulePolling(document.hidden ? PILOT_BACKEND_HIDDEN_REFRESH_MS : PILOT_BACKEND_REFRESH_MS)
       }
     }
+
+    function flushQueuedEvents() {
+      const payloads = [...queuedEventPayloads.values()]
+      queuedEventPayloads.clear()
+      if (payloads.length === 0 || payloads.some((payload) => !payload.orderId) || payloads.length > 4) {
+        void refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+        return
+      }
+
+      payloads.forEach((payload) => {
+        void refreshPilotOrderFromBackendEventRef.current?.(payload)
+      })
+    }
+
+    function queueEventRefresh(event) {
+      if (cancelled) {
+        return
+      }
+
+      let payload = {}
+      try {
+        payload = event?.data ? JSON.parse(event.data) : {}
+      } catch {
+        payload = {}
+      }
+
+      queuedEventPayloads.set(payload.orderId || '__full', payload)
+      window.clearTimeout(eventRefreshTimeoutId)
+      eventRefreshTimeoutId = window.setTimeout(flushQueuedEvents, PILOT_EVENT_REFRESH_DEBOUNCE_MS)
+    }
+
+    if (eventSource) {
+      eventSource.addEventListener('order', queueEventRefresh)
+    }
+
+    function refreshWhenVisible() {
+      if (cancelled || document.hidden) {
+        return
+      }
+
+      window.clearTimeout(timeoutId)
+      void refreshPilotOrdersFromBackendRef.current?.({ silent: true })
+      schedulePolling(PILOT_BACKEND_REFRESH_MS)
+    }
+
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    window.addEventListener('focus', refreshWhenVisible)
 
     void run()
 
     return () => {
       cancelled = true
       window.clearTimeout(timeoutId)
+      window.clearTimeout(eventRefreshTimeoutId)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.removeEventListener('focus', refreshWhenVisible)
+      if (eventSource) {
+        eventSource.removeEventListener('order', queueEventRefresh)
+        eventSource.close()
+      }
     }
   }, [customerStoreId, hasValidStoreSession, isStoreReady, pilotSync.enabled, pilotSync.storeId])
 
@@ -8825,9 +8978,9 @@ function App() {
       ...current,
       enabled: false,
       status: 'idle',
-      message: 'Modo piloto desligado. Os proximos pedidos ficarao locais.',
+      message: 'Sincronizacao desligada. Os proximos pedidos ficarao locais.',
     }))
-    notify('Modo piloto desligado.')
+    notify('Sincronizacao desligada.')
   }
 
   async function syncSingleOrderToBackend(order, { storeId = '', silent = false } = {}) {
@@ -8837,7 +8990,7 @@ function App() {
     if (!pilotSync.enabled && !storeId) {
       markOrderSyncState(localOrderId, {
         syncStatus: 'pending',
-        syncMessage: 'Modo piloto desligado.',
+        syncMessage: 'Sincronizacao desligada.',
       })
       return false
     }
@@ -9039,17 +9192,17 @@ function App() {
       await createBackendLog({
         storeId: targetStoreId,
         level: 'INFO',
-        area: 'pilot',
-        message: `Teste controlado pelo front em ${nowDateTime()}`,
+        area: 'sync',
+        message: `Verificacao do painel em ${nowDateTime()}`,
       })
       updatePilotSync({
         status: 'online',
         lastCheckedAt: nowDateTime(),
-        message: 'Log de teste gravado na API.',
+        message: 'Log gravado na API.',
       })
-      notify('Log de teste gravado no backend.')
+      notify('Log gravado no backend.')
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Falha ao gravar log de teste.'
+      const message = err instanceof Error ? err.message : 'Falha ao gravar log.'
       updatePilotSync({ status: 'error', message })
       notify(`Nao foi possivel gravar log: ${message}`, 'warning')
     }
@@ -9065,7 +9218,7 @@ function App() {
         lastCheckedAt: nowDateTime(),
         message: `API respondeu ${health.status || 'OK'}.`,
       })
-      notify('API respondeu ao teste de saude.')
+      notify('API respondeu a checagem de saude.')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'API nao respondeu.'
       updatePilotSync({ status: 'offline', lastCheckedAt: nowDateTime(), message })
@@ -9428,10 +9581,10 @@ function App() {
       }
 
       setActiveStoreId(store.id)
-      applySnapshot(store.snapshot, 'Ambiente demo carregado.')
+      applySnapshot(store.snapshot, 'Loja modelo carregada.')
       setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, store.id))
-      setToast('Demo iniciado.')
-      notify('Ambiente demo carregado.')
+      setToast('Loja modelo iniciada.')
+      notify('Loja modelo carregada.')
       return { ok: true }
     }
 
@@ -9448,10 +9601,10 @@ function App() {
     const nextStores = [...resolvedStores, result.store]
     setStores(nextStores)
     setActiveStoreId(result.store.id)
-    applySnapshot(result.store.snapshot, 'Ambiente demo carregado.')
+    applySnapshot(result.store.snapshot, 'Loja modelo carregada.')
     setCurrentStoreUser(buildStoreSession(result.user, nowDateTime, result.store.id))
-    setToast('Demo iniciado.')
-    notify('Loja demo criada localmente.')
+    setToast('Loja modelo iniciada.')
+    notify('Loja modelo criada localmente.')
     return { ok: true }
   }
 
@@ -9898,9 +10051,9 @@ function App() {
     const previewConfig = printerFormToConfig(printerForm, printerConfig)
     const testOrder = createPrinterTestOrder()
     const printDocument = {
-      label: `Pedido teste #${testOrder.id}`,
-      type: 'Teste',
-      title: `Pedido teste #${testOrder.id}`,
+      label: `Comanda de conferencia #${testOrder.id}`,
+      type: 'Conferencia',
+      title: `Comanda de conferencia #${testOrder.id}`,
       bodyHtml: buildOrderPrintBody(testOrder, storeProfile, previewConfig, 'order'),
     }
 
@@ -10886,7 +11039,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     } else if (!editedSourceOrder) {
       markOrderSyncState(createdOrder.id, {
         syncStatus: 'pending',
-        syncMessage: 'Aguardando modo piloto.',
+        syncMessage: 'Aguardando sincronizacao.',
       })
     }
     if (!editedSourceOrder && settings.autoPrint && normalizedCreatedOrder.status === 'production') {
@@ -11034,7 +11187,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     } else {
       markOrderSyncState(restoredOrder.id, {
         syncStatus: 'pending',
-        syncMessage: 'Aguardando modo piloto.',
+        syncMessage: 'Aguardando sincronizacao.',
       })
     }
     notify(`Pedido #${id} recuperado.`)
@@ -11365,7 +11518,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     } else {
       markOrderSyncState(createdOrder.id, {
         syncStatus: 'pending',
-        syncMessage: 'Aguardando modo piloto.',
+        syncMessage: 'Aguardando sincronizacao.',
       })
     }
     if (settings.autoPrint) {
@@ -11424,7 +11577,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     } else {
       markOrderSyncState(createdOrder.id, {
         syncStatus: 'pending',
-        syncMessage: 'Aguardando modo piloto.',
+        syncMessage: 'Aguardando sincronizacao.',
       })
     }
 
@@ -11969,7 +12122,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     } else {
       markOrderSyncState(createdOrder.id, {
         syncStatus: 'pending',
-        syncMessage: 'Aguardando modo piloto.',
+        syncMessage: 'Aguardando sincronizacao.',
       })
     }
     if (settings.autoPrint) {
@@ -14066,7 +14219,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <div className="modal-summary">
             <span>Fila fiscal</span>
             <strong>{orders.length} pedido(s)</strong>
-            <p>A emissao e simulada e fica apenas no front.</p>
+            <p>Revise os pedidos pendentes antes de emitir a proxima NFC-e.</p>
           </div>
         </Modal>
       )
@@ -14112,7 +14265,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     if (modal.type === 'printQr') {
       return (
-        <Modal title={`Imprimir QR - ${payload.table}`} subtitle="Previa visual do QR de mesa." onClose={closeModal}>
+        <Modal title={`Imprimir QR - ${payload.table}`} subtitle="Previa do QR de mesa." onClose={closeModal}>
           <div className="qr-preview">
             <span>{payload.table}</span>
             <b>QR</b>
@@ -14292,7 +14445,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               <article className="list-row" key={step.id}>
                 <span>
                   <strong>{step.title}</strong>
-                  <small>{step.done ? 'Pronto para demonstracao' : 'Ainda precisa de setup visual'}</small>
+          <small>{step.done ? 'Pronto para operar' : 'Ainda precisa de configuracao'}</small>
                 </span>
                 <StatusBadge tone={step.done ? 'success' : 'warning'}>{step.done ? 'OK' : 'Pendente'}</StatusBadge>
               </article>
@@ -14322,7 +14475,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       return (
         <Modal
           title="Caixa da loja"
-          subtitle="Simula abertura e fechamento do caixa."
+          subtitle="Abertura, conferencia e fechamento do caixa."
           onClose={closeModal}
           footer={
             <>
@@ -14425,7 +14578,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     if (modal.type === 'blocked') {
       return (
-        <Modal title="Pedidos bloqueados" subtitle="Fila simulada de pedidos com pendencia." onClose={closeModal}>
+        <Modal title="Pedidos bloqueados" subtitle="Fila de pedidos com pendencia." onClose={closeModal}>
           <div className="stack-list">
             {blockedOrders.length > 0 ? (
               blockedOrders.map((order) => (
@@ -14483,7 +14636,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <div className="modal-summary">
             <span>Mesa</span>
             <strong>{payload.name}</strong>
-            <p>{payload.status === 'free' ? 'Livre' : 'Possui movimento simulado.'}</p>
+            <p>{payload.status === 'free' ? 'Livre' : 'Possui movimento aberto.'}</p>
           </div>
         </Modal>
       )
@@ -14865,8 +15018,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
       return (
         <Modal
-          title="Modo piloto controlado"
-          subtitle="Backend, backup, logs e fila de pedidos para teste real acompanhado."
+          title="Sincronizacao da API"
+          subtitle="Backend, backup, logs e fila de pedidos."
           onClose={closeModal}
           footer={
             <>
@@ -14893,7 +15046,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                   <small>{pilotSync.storeId || 'Sem storeId carregado'}</small>
                 </div>
                 <div>
-                  <span>Ultimo teste</span>
+                  <span>Ultima checagem</span>
                   <strong>{pilotSync.lastCheckedAt || '-'}</strong>
                   <small>{pilotSync.message}</small>
                 </div>
@@ -14910,9 +15063,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
               </div>
 
               <div className="pilot-actions">
-                <Button variant="primary" onClick={connectPilotSync}>Ligar piloto</Button>
+                <Button variant="primary" onClick={connectPilotSync}>Conectar API</Button>
                 <Button onClick={quickHealthCheck}>Checar API</Button>
-                <Button onClick={sendPilotLog}>Log teste</Button>
+                <Button onClick={sendPilotLog}>Gravar log</Button>
                 <Button variant="danger" onClick={disablePilotSync}>Desligar</Button>
               </div>
 
@@ -14941,8 +15094,8 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <section className="pilot-panel">
               <header className="pilot-panel__header">
                 <div>
-                  <strong>Checklist do teste</strong>
-                  <small>Use antes de abrir pedidos reais.</small>
+                  <strong>Checklist operacional</strong>
+                  <small>Use antes de abrir a loja.</small>
                 </div>
               </header>
               <div className="stack-list">
@@ -15255,7 +15408,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const financialBreakdown = getOrderFinancialBreakdown(normalizedOrder.subtotal, normalizedOrder)
 
       return (
-        <Modal title={`Nota fiscal #${payload.id}`} subtitle="Pre-visualizacao fake da NF." onClose={closeModal}>
+        <Modal title={`Nota fiscal #${payload.id}`} subtitle="Pre-visualizacao da NF." onClose={closeModal}>
           <div className="invoice-preview">
             <strong>{storeProfile.name || 'MeuCardapio'}</strong>
             <span>Cliente: {normalizedOrder.customer}</span>
@@ -15284,7 +15437,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     if (modal.type === 'chat') {
       return (
-        <Modal title="Chat do atendimento" subtitle="Mensagens simuladas no front." onClose={closeModal}>
+        <Modal title="Chat do atendimento" subtitle="Mensagens internas do atendimento." onClose={closeModal}>
           <div className="chat-box" data-testid="chat-box">
             {chatMessages.map((message) => (
               <p key={message.id}>
@@ -15312,7 +15465,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     if (modal.type === 'suggestion') {
       return (
-        <Modal title="Enviar sugestao" subtitle="Registro local para validar o fluxo." onClose={closeModal}>
+        <Modal title="Enviar sugestao" subtitle="Registro interno de melhoria." onClose={closeModal}>
           <form className="form-grid" id="suggestion-form" onSubmit={saveSuggestion}>
             <Field label="Sugestao">
               <textarea data-testid="suggestion-input" value={suggestion} onChange={(event) => setSuggestion(event.target.value)} placeholder="Descreva uma melhoria para a operacao" />
@@ -15325,7 +15478,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     if (modal.type === 'notifications') {
       return (
-        <Modal title="Notificacoes" subtitle="Eventos recentes do prototipo." onClose={closeModal}>
+        <Modal title="Notificacoes" subtitle="Eventos recentes da operacao." onClose={closeModal}>
           <div className="stack-list">
             {eventLog.map((entry) => (
               <article className="list-row" key={entry.id}>
@@ -15558,13 +15711,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           <div className="stack-list">
             <article className="list-row">
               <span>
-                <strong>Ambiente demo</strong>
-                <small>Reabre a loja demonstrativa local com um clique.</small>
-              </span>
-              <Button onClick={openDemoStore}>Testar demo</Button>
-            </article>
-            <article className="list-row">
-              <span>
                 <strong>Loja atual</strong>
                 <small>{storeProfile.name || 'Sem cadastro'} - {storeProfile.city || 'Cidade nao definida'}</small>
               </span>
@@ -15601,7 +15747,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
             <article className="list-row">
               <span>
                 <strong>Resetar base local</strong>
-                <small>Volta ao estado inicial de demonstracao.</small>
+                <small>Volta ao estado inicial da loja.</small>
               </span>
               <Button variant="danger" onClick={resetFrontData}>Resetar</Button>
             </article>
@@ -15685,9 +15831,9 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
       const previewDarkness = getPrinterDarknessOption(previewPrinter.darknessLevel)
       const previewOrder = createPrinterTestOrder()
       const previewDocument = {
-        label: `Pedido teste #${previewOrder.id}`,
-        type: 'Teste',
-        title: `Pedido teste #${previewOrder.id}`,
+        label: `Comanda de conferencia #${previewOrder.id}`,
+        type: 'Conferencia',
+        title: `Comanda de conferencia #${previewOrder.id}`,
         bodyHtml: buildOrderPrintBody(previewOrder, storeProfile, previewPrinter, 'order'),
       }
 
@@ -15696,7 +15842,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
           title="Configuracao de comandas"
           subtitle="Layout da bobina, impressora, conteudo do ticket e pre-visualizacao."
           onClose={closeModal}
-          footer={<><Button onClick={runPrinterTest}>Imprimir teste</Button><Button onClick={clearPrintQueue}>Limpar fila</Button><Button variant="primary" form="printer-form" type="submit">Salvar configuracao</Button></>}
+          footer={<><Button onClick={runPrinterTest}>Imprimir conferencia</Button><Button onClick={clearPrintQueue}>Limpar fila</Button><Button variant="primary" form="printer-form" type="submit">Salvar configuracao</Button></>}
         >
           <div className="printer-config-layout">
             <section className="printer-panel printer-panel--settings">
@@ -15815,7 +15961,7 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
                   <strong>Previa da comanda</strong>
                   <small>Atualiza enquanto voce configura.</small>
                 </div>
-                <Button variant="primary" onClick={runPrinterTest}>Imprimir teste</Button>
+                <Button variant="primary" onClick={runPrinterTest}>Imprimir conferencia</Button>
               </header>
               <div className="printer-preview-shell">
                 <div
@@ -15916,33 +16062,33 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
 
     const genericTitles = {
       automations: ['Automacoes', 'Configure aceite automatico, alertas e impressao.'],
-      printer: ['Impressora', 'Teste de conexao e fila local de pedidos.'],
-      store: ['Dados da loja', 'Perfil comercial usado neste prototipo.'],
-      register: ['Conta e loja', 'Backup, demo e configuracoes locais desta conta.'],
-      password: ['Atualizar seguranca', 'Formulario visual sem alteracao real de senha.'],
-      reports: ['Relatorios', 'Resumo local dos pedidos em memoria.'],
+      printer: ['Impressora', 'Conexao e fila local de pedidos.'],
+      store: ['Dados da loja', 'Perfil comercial da operacao.'],
+      register: ['Conta e loja', 'Backup e configuracoes locais desta conta.'],
+      password: ['Atualizar seguranca', 'Senha local, dois fatores e tempo de sessao.'],
+      reports: ['Relatorios', 'Resumo dos pedidos em memoria.'],
     }
 
     if (modal.type === 'section' || modal.type === 'shortcut') {
       return (
-        <Modal title={payload.label} subtitle="Area demonstrativa. Sem integracao externa." onClose={closeModal}>
+        <Modal title={payload.label} subtitle="Area operacional do painel." onClose={closeModal}>
           <div className="modal-summary">
             <span>Modulo</span>
             <strong>{payload.label}</strong>
-            <p>Este botao ja possui fluxo visual e pode receber backend depois.</p>
+            <p>Acesse as rotinas disponiveis desta area pela navegacao principal.</p>
           </div>
         </Modal>
       )
     }
 
-    const [title, subtitle] = genericTitles[modal.type] || ['Acao', 'Fluxo demonstrativo.']
+    const [title, subtitle] = genericTitles[modal.type] || ['Acao', 'Rotina do painel.']
 
     return (
       <Modal title={title} subtitle={subtitle} onClose={closeModal}>
         <div className="modal-summary">
           <span>Status</span>
-          <strong>Disponivel no front</strong>
-          <p>Botao testavel, modal funcional e pronto para conectar ao backend real.</p>
+          <strong>Disponivel</strong>
+          <p>Use as acoes da tela para concluir esta rotina.</p>
         </div>
       </Modal>
     )
@@ -15961,7 +16107,6 @@ function mergeReverseGeocodeAddress(currentAddress, reverseResult) {
     return (
       <StoreAccess
         key={activeStoreId || 'access'}
-        demoAvailable={resolvedStores.some((store) => store.snapshot.storeUsers.some((user) => user.email === 'demo@meucardapio.local'))}
         initialAccessKey={storeAccessKeyFromPath}
         onCreateAccount={createOnlineStoreAccount}
         onLogin={loginStoreUser}

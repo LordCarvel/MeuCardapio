@@ -4394,32 +4394,6 @@
   font-size: 28px;
 }
 
-.fake-map {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  place-items: center;
-  min-height: 240px;
-  border: 1px solid #dce0d7;
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, rgba(36, 138, 114, 0.12) 1px, transparent 1px),
-    linear-gradient(rgba(36, 138, 114, 0.12) 1px, transparent 1px),
-    #fbfcf7;
-  background-size: 36px 36px;
-}
-
-.fake-map span {
-  display: grid;
-  place-items: center;
-  width: 78px;
-  height: 78px;
-  border-radius: 50%;
-  background: #16343b;
-  color: #ffffff;
-  font-weight: 900;
-}
-
 .board {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7990,10 +7964,6 @@
   .kds-ticket {
     min-height: 150px;
     padding: 9px;
-  }
-
-  .fake-map {
-    min-height: 180px;
   }
 
   .menu-manager {

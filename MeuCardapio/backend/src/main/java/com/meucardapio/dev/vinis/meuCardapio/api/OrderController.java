@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.OrderDtos.OrderRequest;
 import com.meucardapio.dev.vinis.meuCardapio.api.dto.OrderDtos.OrderResponse;
@@ -35,6 +37,7 @@ import com.meucardapio.dev.vinis.meuCardapio.domain.Store;
 import com.meucardapio.dev.vinis.meuCardapio.repository.CustomerOrderRepository;
 import com.meucardapio.dev.vinis.meuCardapio.repository.StoreRepository;
 import com.meucardapio.dev.vinis.meuCardapio.service.AppLogService;
+import com.meucardapio.dev.vinis.meuCardapio.service.OrderEventService;
 import com.meucardapio.dev.vinis.meuCardapio.service.OrderNotificationService;
 
 import jakarta.validation.Valid;
@@ -51,13 +54,15 @@ public class OrderController {
     private final CustomerOrderRepository orders;
     private final AppLogService logService;
     private final OrderNotificationService orderNotifications;
+    private final OrderEventService orderEvents;
     private final Object orderNumberLock = new Object();
 
-    public OrderController(StoreRepository stores, CustomerOrderRepository orders, AppLogService logService, OrderNotificationService orderNotifications) {
+    public OrderController(StoreRepository stores, CustomerOrderRepository orders, AppLogService logService, OrderNotificationService orderNotifications, OrderEventService orderEvents) {
         this.stores = stores;
         this.orders = orders;
         this.logService = logService;
         this.orderNotifications = orderNotifications;
+        this.orderEvents = orderEvents;
     }
 
     @GetMapping
@@ -72,6 +77,12 @@ public class OrderController {
             return orders.findBoardByStoreIdSince(storeId, startDate.atStartOfDay()).stream().map(OrderResponse::from).toList();
         }
         return orders.findByStoreIdOrderByCreatedAtDesc(storeId).stream().map(OrderResponse::from).toList();
+    }
+
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter events(@PathVariable UUID storeId) {
+        stores.findById(storeId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Loja nao encontrada"));
+        return orderEvents.subscribe(storeId);
     }
 
     @GetMapping("/{orderId}")
@@ -108,6 +119,7 @@ public class OrderController {
         order.replaceItems(items, request.deliveryFee() == null ? BigDecimal.ZERO : request.deliveryFee());
         CustomerOrder saved = saveWithNextOrderNumber(storeId, order);
         logService.record(storeId, "INFO", "orders", "Pedido criado para " + saved.getCustomerName());
+        orderEvents.publishAfterCommit(storeId, "created", saved);
         orderNotifications.notifyOrderCreated(storeId, saved.getId());
         return OrderResponse.from(saved);
     }
@@ -137,6 +149,7 @@ public class OrderController {
         order.replaceItems(items, request.deliveryFee() == null ? BigDecimal.ZERO : request.deliveryFee());
         CustomerOrder saved = orders.save(order);
         logService.record(storeId, "INFO", "orders", "Pedido atualizado para " + saved.getCustomerName());
+        orderEvents.publishAfterCommit(storeId, statusChange.changed() ? "status" : "updated", saved);
         if (statusChange.changed()) {
             orderNotifications.notifyOrderStatusChanged(storeId, saved.getId(), saved.getStatus());
         }
@@ -151,6 +164,7 @@ public class OrderController {
         CustomerOrder saved = orders.save(order);
         if (statusChange.changed()) {
             logService.record(storeId, "INFO", "orders", "Status do pedido atualizado para " + saved.getStatus());
+            orderEvents.publishAfterCommit(storeId, "status", saved);
             orderNotifications.notifyOrderStatusChanged(storeId, saved.getId(), saved.getStatus());
         } else {
             logService.record(storeId, "INFO", "orders", "Status repetido ou antigo ignorado; pedido permanece em " + saved.getStatus());
@@ -165,6 +179,7 @@ public class OrderController {
         CustomerOrder order = findOrderForStore(storeId, orderId);
         orders.delete(order);
         logService.record(storeId, "WARN", "orders", "Pedido removido: " + orderId);
+        orderEvents.publishAfterCommit(storeId, "deleted", order);
     }
 
     private CustomerOrder findOrderForStore(UUID storeId, UUID orderId) {
@@ -285,7 +300,7 @@ public class OrderController {
         if (matcher.find()) {
             return truncate(matcher.group(1), 80);
         }
-        return "";
+        return null;
     }
 
     private String buildOrderNote(OrderRequest request) {
